@@ -61,7 +61,7 @@ export const EmptyState: React.FC<EmptyStateProps> = ({ onSelectPrompt }) => {
           Banca Dati & <span className="italic text-[#38bdf8]">Assistente Giuridico</span>
         </h1>
         <p className="text-sm md:text-base text-[#94a3b8] max-w-xl mx-auto leading-relaxed">
-          Consulta l'intero archivio normativo sammarinese: <span className="text-[#f8fafc] font-medium">2.444 Leggi ufficiali integrali</span>, riforme costituzionali e decreti con risposte motivate e ancorate agli articoli di legge.
+          Consulta il patrimonio normativo sammarinese: leggi ordinarie, decreti delegati, riforme istituzionali e atti ufficiali con risposte motivate e citazioni dirette alle fonti vigenti.
         </p>
       </div>
 

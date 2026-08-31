@@ -26,6 +26,12 @@ PREFISSI = {
     "decreto- legge": "DL",
     "decreto reggenziale": "DR",
     "decreto consiliare": "DC",
+    "decreto consigliare": "DC",
+    "decreto conisliare": "DC",
+    "decreto delagato": "DD",
+    "decreto delega5to": "DD",
+    "decreto - legga": "DL",
+    "legge orginaria": "L",
     "regolamento": "R",
     "notifica": "N",
     "statuto": "S",
@@ -37,19 +43,25 @@ PREFISSI = {
 LABELS = {
     "legge": "Legge",
     "legge ordinaria": "Legge",
+    "legge orginaria": "Legge",
     "legge costituzionale": "LeggeCostituzionale",
     "legge qualificata": "LeggeQualificata",
     "legge di revisione costituzionale": "LeggeRevisioneCostituzionale",
     "legge revisione costituzionale": "LeggeRevisioneCostituzionale",
     "decreto": "Decreto",
     "decreto delegato": "DecretoDelegato",
+    "decreto delagato": "DecretoDelegato",
+    "decreto delega5to": "DecretoDelegato",
     "decreto legge": "DecretoLegge",
     "decreto-legge": "DecretoLegge",
     "decreto - legge": "DecretoLegge",
     "decreto -legge": "DecretoLegge",
     "decreto- legge": "DecretoLegge",
+    "decreto - legga": "DecretoLegge",
     "decreto reggenziale": "DecretoReggenziale",
     "decreto consiliare": "DecretoConsiliare",
+    "decreto consigliare": "DecretoConsiliare",
+    "decreto conisliare": "DecretoConsiliare",
     "regolamento": "Regolamento",
     "notifica": "Notifica",
     "statuto": "Statuto",
@@ -74,12 +86,18 @@ def norma_id(tipo, numero, anno):
     chiave = re.sub(r"\s+", " ", chiave)
     chiave = re.sub(r"\s*-\s*", "-", chiave)
     prefisso = PREFISSI.get(chiave) or PREFISSI.get(chiave.replace("-", " "))
-    if prefisso is None and "decreto" in chiave and "legge" in chiave:
+    if prefisso is None and "decreto" in chiave and ("legge" in chiave or "legga" in chiave):
         prefisso = "DL"
-    elif prefisso is None and "decreto" in chiave and "delegato" in chiave:
+    elif prefisso is None and "decreto" in chiave and ("consiliare" in chiave or "consigliare" in chiave or "conisliare" in chiave):
+        prefisso = "DC"
+    elif prefisso is None and "decreto" in chiave and ("delegato" in chiave or "delagato" in chiave or "delega" in chiave):
         prefisso = "DD"
     elif prefisso is None and "decreto" in chiave and "reggenziale" in chiave:
         prefisso = "DR"
+    elif prefisso is None and ("legge" in chiave or "ordinaria" in chiave):
+        prefisso = "L"
+    elif prefisso is None and ("decreto" in chiave or "decreti" in chiave):
+        prefisso = "D"
     elif prefisso is None:
         if tipo not in tipi_ignoti:
             tipi_ignoti.add(tipo)
@@ -99,12 +117,18 @@ def norma_label(tipo):
     chiave = re.sub(r"\s+", " ", chiave)
     chiave = re.sub(r"\s*-\s*", "-", chiave)
     lbl = LABELS.get(chiave) or LABELS.get(chiave.replace("-", " "))
-    if not lbl and "decreto" in chiave and "legge" in chiave:
+    if not lbl and "decreto" in chiave and ("legge" in chiave or "legga" in chiave):
         lbl = "DecretoLegge"
-    elif not lbl and "decreto" in chiave and "delegato" in chiave:
+    elif not lbl and "decreto" in chiave and ("consiliare" in chiave or "consigliare" in chiave or "conisliare" in chiave):
+        lbl = "DecretoConsiliare"
+    elif not lbl and "decreto" in chiave and ("delegato" in chiave or "delagato" in chiave or "delega" in chiave):
         lbl = "DecretoDelegato"
     elif not lbl and "decreto" in chiave and "reggenziale" in chiave:
         lbl = "DecretoReggenziale"
+    elif not lbl and ("decreto" in chiave or "decreti" in chiave):
+        lbl = "Decreto"
+    elif not lbl and ("legge" in chiave or "ordinaria" in chiave):
+        lbl = "Legge"
     if not lbl:
         pulito = re.sub(r"[^a-zA-Z0-9]", "", (tipo or "").title())
         lbl = pulito if pulito else None

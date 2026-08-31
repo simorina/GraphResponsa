@@ -39,7 +39,7 @@ MESI = {
 }
 
 RE_PARTIZIONE = re.compile(r"^(TITOLO|CAPO|SEZIONE)\s+([IVXLC]+)\s*$", re.I)
-RE_ARTICOLO = re.compile(r"^Art\.\s*(\d+)\s*(bis|ter|quater|quinquies)?\s*$", re.I)
+RE_ARTICOLO = re.compile(r"^(?:Art\.|Articolo)\s*(\d+|[Uu]nico)\.?\s*(bis|ter|quater|quinquies|sexies|septies|octies|nonies|decies)?\s*[-:.]?\s*$", re.I)
 RE_COMMA = re.compile(r"^(\d+)\.\s*$")
 RE_COMMA_INLINE = re.compile(r"^(\d+)\.\s+(\S.*)$")
 
@@ -257,7 +257,7 @@ def parse(id_norma, meta):
             i += 1
             continue
 
-        # --- Rubrica dell'articolo: fra parentesi, puo' proseguire su piu' righe ---
+        # --- Rubrica dell'articolo: fra parentesi o breve titolo su riga singola ---
         if attesa_rubrica:
             if riga.startswith("(") or rubrica_buffer:
                 rubrica_buffer.append(riga)
@@ -266,6 +266,11 @@ def parse(id_norma, meta):
                     articolo_corrente["rubrica"] = testo.strip("()").strip()
                     attesa_rubrica = False
                     rubrica_buffer = []
+                i += 1
+                continue
+            elif not m_art and not m_part and not RE_COMMA.match(riga) and not RE_COMMA_INLINE.match(riga) and len(riga) <= 80 and (riga.endswith(".") or riga.endswith(":")):
+                articolo_corrente["rubrica"] = riga.rstrip(".:").strip()
+                attesa_rubrica = False
                 i += 1
                 continue
             attesa_rubrica = False   # articolo senza rubrica: non deve bloccare

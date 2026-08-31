@@ -1,5 +1,5 @@
 import React from 'react';
-import { Plus, MessageSquare, PanelLeft, Landmark, FileText, CheckCircle2, ChevronRight } from 'lucide-react';
+import { Plus, MessageSquare, PanelLeft, Landmark, FileText, CheckCircle2, ChevronRight, Shield, BookOpen } from 'lucide-react';
 import { GraphStats } from '../types';
 
 interface SidebarProps {
@@ -7,7 +7,7 @@ interface SidebarProps {
   onToggle: () => void;
   onNewChat: () => void;
   currentTitle: string;
-  stats: GraphStats | null;
+  stats?: GraphStats | null;
 }
 
 export const Sidebar: React.FC<SidebarProps> = ({
@@ -15,7 +15,6 @@ export const Sidebar: React.FC<SidebarProps> = ({
   onToggle,
   onNewChat,
   currentTitle,
-  stats,
 }) => {
   return (
     <aside
@@ -73,53 +72,38 @@ export const Sidebar: React.FC<SidebarProps> = ({
             </div>
             <div className="flex items-center justify-between">
               <span className="text-[#64748b]">Copertura:</span>
-              <span className="text-[#38bdf8] font-medium text-[11px]">Leggi & Riforme</span>
+              <span className="text-[#38bdf8] font-medium text-[11px]">Patrimonio Normativo</span>
             </div>
             <div className="flex items-center justify-between">
               <span className="text-[#64748b]">Stato Dati:</span>
               <span className="text-emerald-400 font-medium text-[11px] flex items-center gap-1">
-                <CheckCircle2 className="w-3 h-3" /> Aggiornato
+                <CheckCircle2 className="w-3 h-3" /> Ufficiale & Vigente
               </span>
             </div>
           </div>
         </div>
       </div>
 
-      {/* Footer / Patrimonio normativo indicizzato */}
+      {/* Footer / Garanzia e Tutela Istituzionale */}
       <div className="p-3 border-t border-[#131c30] bg-[#05080f]">
         <div className="text-[10px] text-[#64748b] mb-2 flex items-center justify-between uppercase tracking-wider font-semibold">
-          <span className="flex items-center gap-1">
-            <FileText className="w-3 h-3 text-[#0072ce]" /> ARCHIVIO NORMATIVO
+          <span className="flex items-center gap-1.5 text-[#38bdf8]">
+            <Shield className="w-3.5 h-3.5 text-[#0072ce]" /> CERTIFICAZIONE FONTI
           </span>
           <span className="flex h-2 w-2 relative">
             <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
             <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
           </span>
         </div>
-        {stats ? (
-          <div className="grid grid-cols-2 gap-1.5 text-[11px]">
-            <div className="bg-[#0b1326] p-2 rounded-lg border border-[#16243d]">
-              <div className="text-[#64748b] text-[10px]">LEGGI COMPLETE</div>
-              <div className="text-[#f8fafc] font-semibold text-xs mt-0.5">
-                {stats.conTesto?.toLocaleString() || '2.444'}
-              </div>
-            </div>
-            <div className="bg-[#0b1326] p-2 rounded-lg border border-[#16243d]">
-              <div className="text-[#64748b] text-[10px]">COMMI ATTIVI</div>
-              <div className="text-[#38bdf8] font-semibold text-xs mt-0.5">
-                {stats.commi?.toLocaleString() || '53.393'}
-              </div>
-            </div>
-            <div className="bg-[#0b1326] p-2 rounded-lg border border-[#16243d] col-span-2 flex items-center justify-between">
-              <span className="text-[#64748b] text-[10px]">ARTICOLI INDICIZZATI</span>
-              <span className="text-[#f8fafc] font-semibold text-xs">
-                {stats.articoli?.toLocaleString() || '25.803'}
-              </span>
-            </div>
+        <div className="p-2.5 bg-[#0b1326] rounded-xl border border-[#16243d] text-[11px] space-y-1.5">
+          <div className="text-[#f8fafc] font-medium flex items-center gap-1.5">
+            <BookOpen className="w-3.5 h-3.5 text-[#38bdf8]" />
+            Archivio Normativo Integrale
           </div>
-        ) : (
-          <div className="text-xs text-[#475569] animate-pulse">Caricamento archivio...</div>
-        )}
+          <div className="text-[#94a3b8] text-[10px] leading-relaxed">
+            Risposte ancorate ai testi ufficiali promulgati dai Capitani Reggenti.
+          </div>
+        </div>
       </div>
     </aside>
   );

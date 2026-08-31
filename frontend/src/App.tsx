@@ -59,9 +59,9 @@ export function App() {
               <span className="font-serif text-lg font-normal tracking-wide text-white">
                 Graph<span className="italic text-[#38bdf8]">Responsa</span>
               </span>
-              <span className="hidden sm:inline-flex items-center gap-1 px-2.5 py-0.5 text-[10px] font-mono uppercase bg-[#0c162b] text-[#38bdf8] rounded-full border border-[#1b2f54]">
+              <span className="hidden sm:inline-flex items-center gap-1 px-2.5 py-0.5 text-[10px] font-medium tracking-wide uppercase bg-[#0c162b] text-[#38bdf8] rounded-full border border-[#1b2f54]">
                 <span className="w-1.5 h-1.5 rounded-full bg-[#0072ce]"></span>
-                San Marino Legal AI
+                Repubblica di San Marino
               </span>
             </div>
           </div>

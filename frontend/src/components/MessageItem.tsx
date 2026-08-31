@@ -78,7 +78,7 @@ export const MessageItem: React.FC<MessageItemProps> = ({
           <div className="pt-2 border-t border-[#16233b] space-y-2">
             <div className="text-[11px] font-semibold text-[#64748b] uppercase tracking-wider flex items-center gap-1.5">
               <Bookmark className="w-3 h-3 text-[#38bdf8]" />
-              <span>Disposizioni e articoli citati ({message.fonti.length})</span>
+              <span>Disposizioni e articoli citati</span>
             </div>
             <div className="flex flex-wrap gap-2">
               {message.fonti.slice(0, 10).map((f, fIdx) => (
@@ -95,7 +95,7 @@ export const MessageItem: React.FC<MessageItemProps> = ({
               ))}
               {message.fonti.length > 10 && (
                 <span className="text-xs text-[#64748b] self-center">
-                  +{message.fonti.length - 10} altre
+                  altri riferimenti
                 </span>
               )}
             </div>

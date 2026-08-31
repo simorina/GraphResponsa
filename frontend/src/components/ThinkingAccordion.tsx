@@ -63,7 +63,7 @@ export const ThinkingAccordion: React.FC<ThinkingAccordionProps> = ({
         <div className="flex items-center gap-2">
           <Sparkles className="w-3.5 h-3.5 text-[#38bdf8]" />
           <span className="font-medium text-[#cbd5e1] text-[12px]">
-            Fonti e consultazione atti ({callCount} passaggi)
+            Consultazione e verifica delle fonti normative
           </span>
           {isStreaming && (
             <span className="flex h-1.5 w-1.5 relative">
@@ -92,7 +92,7 @@ export const ThinkingAccordion: React.FC<ThinkingAccordionProps> = ({
               <div key={idx} className="flex items-center gap-1.5 text-emerald-400 text-[11px] pl-5">
                 <CheckCircle2 className="w-3 h-3 shrink-0" />
                 <span className="text-[#64748b]">
-                  {th.count ? `${th.count} riferimenti normativi verificati` : 'Verifica completata'}
+                  Verifica delle disposizioni completata
                 </span>
               </div>
             );
