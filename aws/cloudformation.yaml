@@ -1,0 +1,192 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'GraphResponsa - Infrastruttura AWS per Knowledge Graph RAG e Interfaccia Legale'
+
+Parameters:
+  InstanceType:
+    Type: String
+    Default: t3.large
+    AllowedValues:
+      - t3.medium
+      - t3.large
+      - t3.xlarge
+      - t4g.medium
+      - t4g.large
+      - m5.large
+    Description: 'Tipo di istanza EC2 (consigliato t3.large per 8GB RAM)'
+
+  VolumeSize:
+    Type: Number
+    Default: 50
+    MinValue: 30
+    MaxValue: 500
+    Description: 'Dimensione del disco SSD EBS (gp3) in GB per Neo4j e archivio PDF'
+
+  KeyName:
+    Type: AWS::EC2::KeyPair::KeyName
+    Description: 'Chiave SSH opzionale per accesso diretto (oppure usa AWS SSM Session Manager)'
+    Default: ''
+
+  DomainName:
+    Type: String
+    Default: 'localhost'
+    Description: 'Nome a dominio (es. responso.tudominio.sm) per SSL Let’s Encrypt automatico'
+
+Conditions:
+  HasKeyName: !Not [!Equals [!Ref KeyName, '']]
+
+Resources:
+  # ========================================================
+  # Ruolo IAM & Permessi (Accesso S3 per Backup + SSM Session)
+  # ========================================================
+  EC2InstanceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub '${AWS::StackName}-EC2InstanceRole'
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ec2.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore
+      Policies:
+        - PolicyName: S3BackupPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - s3:PutObject
+                  - s3:GetObject
+                  - s3:ListBucket
+                Resource: !Sub 'arn:aws:s3:::${AWS::StackName}-backups/*'
+
+  EC2InstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      Roles:
+        - !Ref EC2InstanceRole
+
+  # ========================================================
+  # Bucket S3 per i Backup Automatici di Neo4j
+  # ========================================================
+  BackupBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub '${AWS::StackName}-backups-${AWS::AccountId}'
+      VersioningConfiguration:
+        Status: Enabled
+      LifecycleConfiguration:
+        Rules:
+          - Id: ExpireOldBackups
+            Status: Enabled
+            ExpirationInDays: 90
+
+  # ========================================================
+  # Security Group (Porte Web 80/443 + SSH protetto)
+  # ========================================================
+  InstanceSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: 'Regole Firewall per GraphResponsa (HTTP, HTTPS, SSH)'
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: 0.0.0.0/0
+          Description: 'Accesso HTTP (per redirect Let’s Encrypt)'
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          CidrIp: 0.0.0.0/0
+          Description: 'Accesso HTTPS Sicuro per Utenti & Agente'
+        - IpProtocol: tcp
+          FromPort: 22
+          ToPort: 22
+          CidrIp: 0.0.0.0/0
+          Description: 'SSH Amministrazione'
+
+  # ========================================================
+  # Istanza Amazon EC2 (Ubuntu 22.04 LTS con EBS gp3)
+  # ========================================================
+  EC2Instance:
+    Type: AWS::EC2::Instance
+    Properties:
+      InstanceType: !Ref InstanceType
+      KeyName: !If [HasKeyName, !Ref KeyName, !Ref 'AWS::NoValue']
+      IamInstanceProfile: !Ref EC2InstanceProfile
+      SecurityGroupIds:
+        - !Ref InstanceSecurityGroup
+      # Ubuntu 22.04 LTS AMI (us-east-1 standard, personalizzabile per regione)
+      ImageId: ami-0c7217cdde317cfec
+      BlockDeviceMappings:
+        - DeviceName: /dev/sda1
+          Ebs:
+            VolumeSize: !Ref VolumeSize
+            VolumeType: gp3
+            Iops: 3000
+            Throughput: 125
+            DeleteOnTermination: false
+      Tags:
+        - Key: Name
+          Value: !Sub '${AWS::StackName}-Server'
+        - Key: Project
+          Value: 'GraphResponsa'
+      UserData:
+        Fn::Base64: !Sub |
+          #!/bin/bash
+          set -e
+          exec > >(tee /var/log/user-data.log|logger -t user-data -s 2>/dev/console) 2>&1
+
+          echo "=== Inizializzazione Server GraphResponsa ==="
+          apt-get update && apt-get upgrade -y
+          apt-get install -y ca-certificates curl gnupg lsb-release git unzip awscli
+
+          # Installa Docker Engine
+          mkdir -p /etc/apt/keyrings
+          curl -fsSL https://download.docker.com/linux/ubuntu/gpg | gpg --dearmor -o /etc/apt/keyrings/docker.gpg
+          echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu $(lsb_release -cs) stable" | tee /etc/apt/sources.list.d/docker.list > /dev/null
+          apt-get update
+          apt-get install -y docker-ce docker-ce-cli containerd.io docker-compose-plugin docker-compose
+
+          systemctl enable docker
+          systemctl start docker
+          usermod -aG docker ubuntu
+
+          # Configura Swap Memory (4GB) per prevenire Out-Of-Memory
+          fallocate -l 4G /swapfile
+          chmod 600 /swapfile
+          mkswap /swapfile
+          swapon /swapfile
+          echo '/swapfile none swap sw 0 0' >> /etc/fstab
+
+          echo "Server configurato e pronto per il deployment di GraphResponsa!"
+
+  # ========================================================
+  # Indirizzo IP Elastico Statico (EIP)
+  # ========================================================
+  ElasticIP:
+    Type: AWS::EC2::EIP
+    Properties:
+      Domain: vpc
+
+  IPAssociation:
+    Type: AWS::EC2::EIPAssociation
+    Properties:
+      InstanceId: !Ref EC2Instance
+      EIP: !Ref ElasticIP
+
+Outputs:
+  PublicIP:
+    Description: 'Indirizzo IP Pubblico Statico per puntare il DNS'
+    Value: !Ref ElasticIP
+
+  ApplicationURL:
+    Description: 'URL dell’applicazione'
+    Value: !Sub 'https://${DomainName}'
+
+  BackupS3Bucket:
+    Description: 'Bucket S3 per i salvataggi automatici del Knowledge Graph'
+    Value: !Ref BackupBucket

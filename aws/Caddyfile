@@ -1,0 +1,35 @@
+{
+    # Email per i certificati automatici Let's Encrypt (opzionale se valorizzata)
+    # email tuo-admin@dominio.it
+}
+
+{$DOMAIN:localhost} {
+    # Reverse proxy verso l'applicazione FastAPI + React
+    reverse_proxy app:8000 {
+        # Supporto per Server-Sent Events (SSE) e streaming LLM
+        flush_interval -1
+        
+        # Header proxy standard
+        header_up Host {host}
+        header_up X-Real-IP {remote_host}
+        header_up X-Forwarded-For {remote_host}
+        header_up X-Forwarded-Proto {scheme}
+    }
+
+    # Compressione gzip e zstd per asset statici
+    encode zstd gzip
+
+    # Header di sicurezza moderni
+    header {
+        Strict-Transport-Security "max-age=31536000; includeSubDomains; preload"
+        X-Content-Type-Options "nosniff"
+        X-Frame-Options "DENY"
+        Referrer-Policy "strict-origin-when-cross-origin"
+    }
+
+    # Log di accesso formattati in JSON
+    log {
+        output stdout
+        format json
+    }
+}
