@@ -1,0 +1,36 @@
+@import "tailwindcss";
+
+/* San Marino Colors & Custom Scrollbar */
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: #1e2942; border-radius: 9999px; }
+::-webkit-scrollbar-thumb:hover { background: #2b3959; }
+
+/* Markdown Styles inside Assistant Message - San Marino Legal Palette */
+.prose-legal { color: #f1f5f9; line-height: 1.75; font-size: 15.5px; }
+.prose-legal h1, .prose-legal h2, .prose-legal h3 { color: #ffffff; font-weight: 600; margin-top: 1.5em; margin-bottom: 0.5em; }
+.prose-legal h1 { font-size: 1.5rem; color: #5c9ad2; }
+.prose-legal h2 { font-size: 1.25rem; border-bottom: 1px solid #1e2942; padding-bottom: 0.3rem; color: #f8fafc; }
+.prose-legal h3 { font-size: 1.1rem; color: #e2e8f0; }
+.prose-legal p { margin-bottom: 1rem; }
+.prose-legal ul, .prose-legal ol { margin-left: 1.5rem; margin-bottom: 1rem; }
+.prose-legal ul { list-style-type: disc; }
+.prose-legal ol { list-style-type: decimal; }
+.prose-legal li { margin-bottom: 0.35rem; }
+.prose-legal strong { color: #ffffff; font-weight: 600; }
+.prose-legal blockquote { 
+  border-left: 3px solid #0072ce; 
+  padding-left: 1rem; 
+  color: #e2e8f0; 
+  font-style: italic; 
+  margin: 1rem 0; 
+  background: rgba(0, 114, 206, 0.07); 
+  padding-top: 0.5rem; 
+  padding-bottom: 0.5rem; 
+  border-radius: 0 8px 8px 0; 
+}
+.prose-legal table { width: 100%; border-collapse: collapse; margin: 1.25rem 0; font-size: 14px; }
+.prose-legal th, .prose-legal td { border: 1px solid #1e2942; padding: 8px 12px; text-align: left; }
+.prose-legal th { background: #11192e; color: #5c9ad2; font-weight: 600; }
+.prose-legal code { font-family: 'JetBrains Mono', monospace; font-size: 13px; background: #0c1427; padding: 2px 6px; border-radius: 4px; color: #38bdf8; border: 1px solid #1e2942; }
+.prose-legal pre { background: #080d1a; padding: 14px; border-radius: 10px; overflow-x: auto; border: 1px solid #1e2942; margin: 1rem 0; }

@@ -1,0 +1,711 @@
+<!DOCTYPE html>
+<html lang="it" class="dark">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>GraphResponsa — Assistente Normativa San Marino</title>
+  
+  <!-- Google Fonts -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700&family=Newsreader:ital,opsz,wght@0,6..72,400;0,6..72,500;1,6..72,400&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  
+  <!-- Tailwind CSS CDN -->
+  <script src="https://cdn.tailwindcss.com"></script>
+
+  <!-- React 18 & Babel & Marked -->
+  <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/marked/12.0.2/marked.min.js"></script>
+  
+  <!-- Lucide Icons -->
+  <script src="https://unpkg.com/lucide@latest"></script>
+
+  <style>
+    /* Custom Scrollbar */
+    ::-webkit-scrollbar { width: 6px; height: 6px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb { background: #1e2942; border-radius: 9999px; }
+    ::-webkit-scrollbar-thumb:hover { background: #2b3959; }
+    
+    /* Markdown Styles inside Assistant Message - San Marino Legal Palette */
+    .prose-legal { color: #f1f5f9; line-height: 1.75; font-size: 15.5px; }
+    .prose-legal h1, .prose-legal h2, .prose-legal h3 { color: #ffffff; font-weight: 600; margin-top: 1.5em; margin-bottom: 0.5em; }
+    .prose-legal h1 { font-size: 1.5rem; color: #5c9ad2; }
+    .prose-legal h2 { font-size: 1.25rem; border-bottom: 1px solid #1e2942; padding-bottom: 0.3rem; color: #f8fafc; }
+    .prose-legal h3 { font-size: 1.1rem; color: #e2e8f0; }
+    .prose-legal p { margin-bottom: 1rem; }
+    .prose-legal ul, .prose-legal ol { margin-left: 1.5rem; margin-bottom: 1rem; }
+    .prose-legal ul { list-style-type: disc; }
+    .prose-legal ol { list-style-type: decimal; }
+    .prose-legal li { margin-bottom: 0.35rem; }
+    .prose-legal strong { color: #ffffff; font-weight: 600; }
+    .prose-legal blockquote { 
+      border-left: 3px solid #0072ce; 
+      padding-left: 1rem; 
+      color: #e2e8f0; 
+      font-style: italic; 
+      margin: 1rem 0; 
+      background: rgba(0, 114, 206, 0.07); 
+      padding-top: 0.5rem; 
+      padding-bottom: 0.5rem; 
+      border-radius: 0 8px 8px 0; 
+    }
+    .prose-legal table { width: 100%; border-collapse: collapse; margin: 1.25rem 0; font-size: 14px; }
+    .prose-legal th, .prose-legal td { border: 1px solid #1e2942; padding: 8px 12px; text-align: left; }
+    .prose-legal th { background: #11192e; color: #5c9ad2; font-weight: 600; }
+    .prose-legal code { font-family: 'JetBrains Mono', monospace; font-size: 13px; background: #0c1427; padding: 2px 6px; border-radius: 4px; color: #38bdf8; border: 1px solid #1e2942; }
+    .prose-legal pre { background: #080d1a; padding: 14px; border-radius: 10px; overflow-x: auto; border: 1px solid #1e2942; margin: 1rem 0; }
+  </style>
+</head>
+<body class="bg-[#060a14] text-[#f1f5f9] font-sans antialiased h-screen overflow-hidden flex flex-col select-none">
+  <div id="root" class="h-full flex flex-col"></div>
+
+  <script type="text/babel">
+    const { useState, useEffect, useRef } = React;
+
+    const SUGGESTIONS = [
+      {
+        icon: "briefcase",
+        category: "Diritto del Lavoro",
+        title: "Smart Working & Requisiti",
+        desc: "Quali tutele e obblighi prevede la Legge 202/2020 per il lavoro agile a San Marino?",
+        prompt: "Quali tutele, dotazioni tecnologiche e regole di recesso prevede la Legge 202/2020 per il lavoro agile a San Marino?"
+      },
+      {
+        icon: "landmark",
+        category: "Diritto Costituzionale",
+        title: "Capitani Reggenti",
+        desc: "Quali sono i requisiti e le incompatibilità nella Legge Costituzionale 185/2005?",
+        prompt: "Quali sono i requisiti di eleggibilità e le incompatibilità con la carica di Capitano Reggente previsti dalla Legge Costituzionale 185/2005 e Qualificata 186/2005?"
+      },
+      {
+        icon: "sparkles",
+        category: "Impresa & Economia",
+        title: "Giovani Imprenditori",
+        desc: "Quali agevolazioni fiscali e prestiti d'onore prevede la Legge 178/2015?",
+        prompt: "Quali agevolazioni, incentivi fiscali (IGR 4%) e prestiti d'onore prevede la Legge 178/2015 a sostegno dei giovani imprenditori a San Marino?"
+      },
+      {
+        icon: "history",
+        category: "Evoluzione Storica",
+        title: "Elettorato Femminile",
+        desc: "Con quale legge storica le donne hanno ottenuto il diritto di voto?",
+        prompt: "In quale anno e con quale legge storica le donne a San Marino hanno ottenuto per la prima volta l'estensione del diritto di voto?"
+      }
+    ];
+
+    function formatToolStep(name, args) {
+      args = args || {};
+      switch (name) {
+        case "cerca_testo":
+          return { icon: "search", title: "Ricerca archivio", detail: args.query ? `"${args.query}"` : "Ricerca concetti normativi" };
+        case "leggi_articolo":
+          return { icon: "book-open", title: "Consultazione articolo", detail: args.norma_id ? `${args.norma_id} • Art. ${args.numero || "1"}` : "Lettura articolo" };
+        case "struttura_norma":
+          return { icon: "layers", title: "Analisi struttura atto", detail: args.norma_id ? `Indice ${args.norma_id}` : "Verifica articoli e rubriche" };
+        case "trova_norma":
+          return { icon: "search", title: "Individuazione norma", detail: args.titolo || (args.numero && args.anno ? `Atto n.${args.numero}/${args.anno}` : "Risoluzione estremi") };
+        case "citazioni_da":
+        case "chi_cita":
+          return { icon: "link-2", title: "Verifica rinvii normativi", detail: args.norma_id ? `Collegamenti ${args.norma_id}` : "Rinvii e vigenza" };
+        default:
+          return { icon: "sparkles", title: "Consultazione banca dati", detail: "Elaborazione riferimenti" };
+      }
+    }
+
+    function App() {
+      const [messages, setMessages] = useState([]);
+      const [input, setInput] = useState("");
+      const [loading, setLoading] = useState(false);
+      const [conversazione, setConversazione] = useState(() => localStorage.getItem("gr_conv_id") || "");
+      const [activeSessionTitle, setActiveSessionTitle] = useState("Nuova consultazione");
+      const [sidebarOpen, setSidebarOpen] = useState(true);
+      const [stats, setStats] = useState(null);
+      const [selectedSource, setSelectedSource] = useState(null);
+      const [copiedIndex, setCopiedIndex] = useState(null);
+      const [likedStates, setLikedStates] = useState({});
+
+      const messagesEndRef = useRef(null);
+      const textareaRef = useRef(null);
+      const abortControllerRef = useRef(null);
+
+      useEffect(() => {
+        fetch("/stato")
+          .then(r => r.json())
+          .then(data => {
+            if (data.ok) setStats(data);
+          })
+          .catch(() => {});
+      }, []);
+
+      useEffect(() => {
+        messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+      }, [messages, loading]);
+
+      useEffect(() => {
+        if (window.lucide) {
+          window.lucide.createIcons();
+        }
+      });
+
+      useEffect(() => {
+        if (textareaRef.current) {
+          textareaRef.current.style.height = 'auto';
+          textareaRef.current.style.height = `${Math.min(textareaRef.current.scrollHeight, 200)}px`;
+        }
+      }, [input]);
+
+      const handleNewChat = () => {
+        if (loading && abortControllerRef.current) {
+          abortControllerRef.current.abort();
+        }
+        setMessages([]);
+        setInput("");
+        setLoading(false);
+        setConversazione("");
+        localStorage.removeItem("gr_conv_id");
+        setActiveSessionTitle("Nuova consultazione");
+      };
+
+      const sendMessage = async (textToSend) => {
+        const query = (textToSend || input).trim();
+        if (!query || loading) return;
+
+        setInput("");
+        
+        const userMsg = { role: "user", content: query, timestamp: new Date() };
+        const newMessages = [...messages, userMsg];
+        setMessages(newMessages);
+
+        if (messages.length === 0) {
+          const title = query.length > 35 ? query.substring(0, 35) + "..." : query;
+          setActiveSessionTitle(title);
+        }
+
+        const assistantMsgIndex = newMessages.length;
+        const assistantMsg = {
+          role: "assistant",
+          content: "",
+          thoughts: [],
+          fonti: [],
+          fine: null,
+          error: null,
+          isStreaming: true
+        };
+        setMessages([...newMessages, assistantMsg]);
+        setLoading(true);
+
+        abortControllerRef.current = new AbortController();
+
+        try {
+          const response = await fetch("/chat", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              domanda: query,
+              conversazione: conversazione || null
+            }),
+            signal: abortControllerRef.current.signal
+          });
+
+          if (!response.ok) {
+            throw new Error(`HTTP error! status: ${response.status}`);
+          }
+
+          const reader = response.body.getReader();
+          const decoder = new TextDecoder("utf-8");
+          let buffer = "";
+
+          while (true) {
+            const { value, done } = await reader.read();
+            if (done) break;
+
+            buffer += decoder.decode(value, { stream: true });
+            const lines = buffer.split("\n\n");
+            buffer = lines.pop() || "";
+
+            for (const line of lines) {
+              const trimmed = line.trim();
+              if (!trimmed.startsWith("data:")) continue;
+
+              const jsonStr = trimmed.replace(/^data:\s*/, "");
+              if (!jsonStr) continue;
+
+              try {
+                const event = JSON.parse(jsonStr);
+                
+                setMessages(prev => {
+                  const updated = [...prev];
+                  const current = { ...updated[assistantMsgIndex] };
+
+                  if (event.tipo === "testo") {
+                    current.content = (current.content || "") + event.testo;
+                  } else if (event.tipo === "strumento") {
+                    current.thoughts = [...(current.thoughts || []), {
+                      type: "call",
+                      name: event.nome,
+                      args: event.argomenti,
+                      time: new Date()
+                    }];
+                  } else if (event.tipo === "risultato") {
+                    current.thoughts = [...(current.thoughts || []), {
+                      type: "result",
+                      name: event.nome,
+                      count: event.quante,
+                      error: event.errore
+                    }];
+                  } else if (event.tipo === "fonti") {
+                    current.fonti = event.fonti || [];
+                  } else if (event.tipo === "fine") {
+                    current.fine = event;
+                    current.isStreaming = false;
+                    if (event.conversazione) {
+                      setConversazione(event.conversazione);
+                      localStorage.setItem("gr_conv_id", event.conversazione);
+                    }
+                  } else if (event.tipo === "errore") {
+                    current.error = event.messaggio;
+                    current.isStreaming = false;
+                  }
+
+                  updated[assistantMsgIndex] = current;
+                  return updated;
+                });
+              } catch (e) {
+                console.error("JSON parse error:", e);
+              }
+            }
+          }
+        } catch (err) {
+          if (err.name !== "AbortError") {
+            setMessages(prev => {
+              const updated = [...prev];
+              if (updated[assistantMsgIndex]) {
+                updated[assistantMsgIndex].error = err.message || "Errore di connessione";
+                updated[assistantMsgIndex].isStreaming = false;
+              }
+              return updated;
+            });
+          }
+        } finally {
+          setLoading(false);
+          setMessages(prev => {
+            const updated = [...prev];
+            if (updated[assistantMsgIndex]) {
+              updated[assistantMsgIndex].isStreaming = false;
+            }
+            return updated;
+          });
+        }
+      };
+
+      const copyToClipboard = (text, index) => {
+        navigator.clipboard.writeText(text);
+        setCopiedIndex(index);
+        setTimeout(() => setCopiedIndex(null), 2000);
+      };
+
+      return (
+        <div className="flex h-full w-full bg-[#060a14] text-[#f1f5f9]">
+          
+          {/* SIDEBAR (Client Facing) */}
+          <aside className={`fixed md:static inset-y-0 left-0 z-40 flex flex-col bg-[#070b14] border-r border-[#152035] transition-all duration-300 ease-in-out select-none ${sidebarOpen ? 'w-64 translate-x-0' : '-translate-x-full md:translate-x-0 md:w-0 overflow-hidden'}`}>
+            <div className="p-3 flex items-center justify-between gap-2 border-b border-[#131c30]">
+              <button 
+                onClick={handleNewChat}
+                className="flex items-center gap-2 flex-1 px-3 py-2 text-sm font-medium bg-[#0f172a] hover:bg-[#16233d] text-[#f8fafc] rounded-xl border border-[#1e2f4f] transition-all active:scale-[0.98] shadow-sm"
+              >
+                <i data-lucide="plus" class="w-4 h-4 text-[#38bdf8]"></i>
+                <span>Nuova consultazione</span>
+              </button>
+
+              <button 
+                onClick={() => setSidebarOpen(false)}
+                className="p-2 text-[#64748b] hover:text-[#f8fafc] hover:bg-[#0f172a] rounded-xl transition-colors md:hidden"
+              >
+                <i data-lucide="panel-left" class="w-4 h-4"></i>
+              </button>
+            </div>
+
+            <div className="flex-1 overflow-y-auto px-3 py-3 space-y-4">
+              <div>
+                <div className="px-2 mb-1.5 text-[11px] font-semibold text-[#64748b] uppercase tracking-wider">
+                  Consultazioni Recenti
+                </div>
+                <div className="group flex items-center justify-between px-3 py-2 text-sm text-[#f1f5f9] bg-[#0d162a] hover:bg-[#121e38] rounded-xl border border-[#192b4d] transition-colors cursor-pointer">
+                  <div className="flex items-center gap-2.5 min-w-0">
+                    <i data-lucide="message-square" class="w-4 h-4 text-[#38bdf8] shrink-0"></i>
+                    <span className="truncate font-normal text-xs">{activeSessionTitle}</span>
+                  </div>
+                </div>
+              </div>
+
+              <div>
+                <div className="px-2 mb-1.5 text-[11px] font-semibold text-[#64748b] uppercase tracking-wider">
+                  Fonte Ufficiale
+                </div>
+                <div className="p-3 bg-[#0a1122] rounded-xl border border-[#16243d] space-y-2 text-xs text-[#94a3b8]">
+                  <div className="flex items-center justify-between">
+                    <span className="text-[#64748b] flex items-center gap-1">
+                      <i data-lucide="landmark" class="w-3.5 h-3.5 text-[#38bdf8]"></i> Ente:
+                    </span>
+                    <span className="text-[#f8fafc] font-medium text-[11px]">Consiglio G. e G.</span>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span className="text-[#64748b]">Copertura:</span>
+                    <span className="text-[#38bdf8] font-medium text-[11px]">Leggi & Riforme</span>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span className="text-[#64748b]">Stato Dati:</span>
+                    <span className="text-emerald-400 font-medium text-[11px] flex items-center gap-1">
+                      <i data-lucide="check-circle-2" class="w-3 h-3"></i> Aggiornato
+                    </span>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div className="p-3 border-t border-[#131c30] bg-[#05080f]">
+              <div className="text-[10px] text-[#64748b] mb-2 flex items-center justify-between uppercase tracking-wider font-semibold">
+                <span className="flex items-center gap-1">
+                  <i data-lucide="file-text" class="w-3 h-3 text-[#0072ce]"></i> ARCHIVIO NORMATIVO
+                </span>
+                <span className="flex h-2 w-2 relative">
+                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                  <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
+                </span>
+              </div>
+              {stats ? (
+                <div className="grid grid-cols-2 gap-1.5 text-[11px]">
+                  <div className="bg-[#0b1326] p-2 rounded-lg border border-[#16243d]">
+                    <div className="text-[#64748b] text-[10px]">LEGGI COMPLETE</div>
+                    <div className="text-[#f8fafc] font-semibold text-xs mt-0.5">{stats.conTesto?.toLocaleString() || '2.444'}</div>
+                  </div>
+                  <div className="bg-[#0b1326] p-2 rounded-lg border border-[#16243d]">
+                    <div className="text-[#64748b] text-[10px]">COMMI ATTIVI</div>
+                    <div className="text-[#38bdf8] font-semibold text-xs mt-0.5">{stats.commi?.toLocaleString() || '53.393'}</div>
+                  </div>
+                  <div className="bg-[#0b1326] p-2 rounded-lg border border-[#16243d] col-span-2 flex items-center justify-between">
+                    <span className="text-[#64748b] text-[10px]">ARTICOLI INDICIZZATI</span>
+                    <span className="text-[#f8fafc] font-semibold text-xs">{stats.articoli?.toLocaleString() || '25.803'}</span>
+                  </div>
+                </div>
+              ) : (
+                <div className="text-xs text-[#475569] animate-pulse">Caricamento archivio...</div>
+              )}
+            </div>
+          </aside>
+
+          {/* MAIN CHAT */}
+          <main className="flex-1 flex flex-col h-full overflow-hidden relative bg-[#080e1c]">
+            <header className="h-14 border-b border-[#142038] px-4 flex items-center justify-between bg-[#080e1c]/80 backdrop-blur-md z-10 shrink-0">
+              <div className="flex items-center gap-3">
+                <button 
+                  onClick={() => setSidebarOpen(!sidebarOpen)}
+                  className="p-1.5 text-[#64748b] hover:text-[#f8fafc] hover:bg-[#111c33] rounded-lg transition-colors"
+                >
+                  <i data-lucide="panel-left" class="w-5 h-5"></i>
+                </button>
+                <div className="flex items-center gap-2.5">
+                  <span className="font-serif text-lg font-normal tracking-wide text-white">
+                    Graph<span className="italic text-[#38bdf8]">Responsa</span>
+                  </span>
+                  <span className="hidden sm:inline-flex items-center gap-1 px-2.5 py-0.5 text-[10px] font-mono uppercase bg-[#0c162b] text-[#38bdf8] rounded-full border border-[#1b2f54]">
+                    <span className="w-1.5 h-1.5 rounded-full bg-[#0072ce]"></span>
+                    San Marino Legal AI
+                  </span>
+                </div>
+              </div>
+            </header>
+
+            {/* MESSAGE LIST - Centered Reading Column */}
+            <div className="flex-1 overflow-y-auto px-4 md:px-6 py-6 space-y-6">
+              <div className="max-w-2xl mx-auto space-y-6 pb-32">
+                
+                {messages.length === 0 && (
+                  <div className="pt-8 md:pt-14 text-center space-y-6">
+                    <div className="relative inline-flex items-center justify-center">
+                      <div className="absolute inset-0 rounded-3xl bg-[#0072ce]/20 blur-xl"></div>
+                      <div className="relative inline-flex items-center justify-center w-16 h-16 rounded-2xl bg-gradient-to-b from-[#112040] to-[#0a1226] border border-[#1e3a6a] shadow-xl text-[#38bdf8]">
+                        <i data-lucide="scale" class="w-8 h-8"></i>
+                      </div>
+                    </div>
+                    
+                    <div className="space-y-3">
+                      <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-[#0072ce]/15 border border-[#0072ce]/30 text-xs font-medium text-[#38bdf8]">
+                        <i data-lucide="shield" class="w-3.5 h-3.5 text-[#d4a359]"></i>
+                        REPUBBLICA DI SAN MARINO
+                      </div>
+                      <h1 className="font-serif text-3xl md:text-5xl text-white font-normal tracking-tight">
+                        Banca Dati & <span className="italic text-[#38bdf8]">Assistente Giuridico</span>
+                      </h1>
+                      <p className="text-sm md:text-base text-[#94a3b8] max-w-xl mx-auto leading-relaxed">
+                        Consulta l'intero archivio normativo sammarinese: <span className="text-[#f8fafc] font-medium">2.444 Leggi ufficiali integrali</span>, riforme costituzionali e decreti con risposte motivate e ancorate agli articoli di legge.
+                      </p>
+                    </div>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5 pt-6 text-left">
+                      {SUGGESTIONS.map((s, idx) => (
+                        <button
+                          key={idx}
+                          onClick={() => sendMessage(s.prompt)}
+                          className="group p-4 bg-[#0d162a]/70 hover:bg-[#121e38] border border-[#192b4d] hover:border-[#0072ce] rounded-2xl transition-all duration-200 text-left flex flex-col justify-between space-y-2.5 shadow-sm hover:shadow-lg hover:shadow-[#0072ce]/10"
+                        >
+                          <div className="flex items-center justify-between">
+                            <span className="text-[11px] font-mono text-[#38bdf8] uppercase tracking-wider font-medium">{s.category}</span>
+                            <i data-lucide="arrow-up-right" class="w-4 h-4 text-[#475569] group-hover:text-[#38bdf8] transition-colors"></i>
+                          </div>
+                          <div className="font-medium text-sm text-[#f1f5f9] group-hover:text-white">{s.title}</div>
+                          <div className="text-xs text-[#94a3b8] line-clamp-2 leading-relaxed">{s.desc}</div>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {messages.map((msg, index) => (
+                  <div key={index} className="space-y-4">
+                    {msg.role === "user" ? (
+                      <div className="flex justify-end py-1">
+                        <div className="max-w-[80%] bg-[#0e1f3d] text-[#f8fafc] px-4 py-2.5 rounded-3xl rounded-tr-md shadow-sm border border-[#1d3560] text-[15px] leading-relaxed">
+                          {msg.content}
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="flex items-start gap-4 py-2 group">
+                        <div className="w-8 h-8 rounded-xl bg-gradient-to-b from-[#112244] to-[#0a1426] border border-[#1e3a6a] flex items-center justify-center text-[#38bdf8] shrink-0 mt-0.5 shadow-sm">
+                          <i data-lucide="sparkles" class="w-4 h-4"></i>
+                        </div>
+
+                        <div className="flex-1 space-y-3.5 min-w-0">
+                          {msg.thoughts && msg.thoughts.length > 0 && (
+                            <details className="group border border-[#1a2b47] bg-[#0b1426]/70 rounded-2xl overflow-hidden text-xs transition-all">
+                              <summary className="cursor-pointer px-3.5 py-2 flex items-center justify-between text-[#94a3b8] hover:text-[#f1f5f9] select-none transition-colors">
+                                <div className="flex items-center gap-2">
+                                  <i data-lucide="sparkles" class="w-3.5 h-3.5 text-[#38bdf8]"></i>
+                                  <span className="font-medium text-[#cbd5e1] text-[12px]">
+                                    Fonti e consultazione atti ({msg.thoughts.filter(t => t.type === 'call').length} passaggi)
+                                  </span>
+                                  {msg.isStreaming && (
+                                    <span className="flex h-1.5 w-1.5 relative">
+                                      <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-sky-400 opacity-75"></span>
+                                      <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-sky-500"></span>
+                                    </span>
+                                  )}
+                                </div>
+                                <i data-lucide="chevron-down" class="w-3.5 h-3.5 transition-transform group-open:rotate-180 text-[#64748b]"></i>
+                              </summary>
+                              
+                              <div className="px-3.5 py-2.5 border-t border-[#16233b] space-y-2 text-[12px] bg-[#070e1c]">
+                                {msg.thoughts.map((th, thIdx) => {
+                                  if (th.type === "call") {
+                                    const formatted = formatToolStep(th.name, th.args);
+                                    return (
+                                      <div key={thIdx} className="flex items-center gap-2 text-[#cbd5e1]">
+                                        <i data-lucide={formatted.icon} class="w-3.5 h-3.5 text-[#38bdf8] shrink-0"></i>
+                                        <span className="text-[#f1f5f9] font-medium">{formatted.title}</span>
+                                        <span className="text-[#64748b] text-[11px] truncate">({formatted.detail})</span>
+                                      </div>
+                                    );
+                                  } else {
+                                    return (
+                                      <div key={thIdx} className="flex items-center gap-1.5 text-emerald-400 text-[11px] pl-5">
+                                        <i data-lucide="check-circle-2" class="w-3 h-3 shrink-0"></i>
+                                        <span className="text-[#64748b]">
+                                          {th.count ? `${th.count} riferimenti normativi verificati` : "Verifica completata"}
+                                        </span>
+                                      </div>
+                                    );
+                                  }
+                                })}
+                              </div>
+                            </details>
+                          )}
+
+                          {msg.content ? (
+                            <div 
+                              className="prose-legal"
+                              dangerouslySetInnerHTML={{ __html: marked.parse(msg.content) }}
+                            />
+                          ) : msg.isStreaming ? (
+                            <div className="flex items-center gap-2 text-sm text-[#94a3b8] italic py-1">
+                              <span className="inline-block w-2 h-2 rounded-full bg-[#38bdf8] animate-ping"></span>
+                              Elaborazione della risposta sulla base della normativa vigente...
+                            </div>
+                          ) : null}
+
+                          {msg.error && (
+                            <div className="p-3.5 bg-red-950/40 border border-red-800/60 rounded-2xl text-red-200 text-xs flex items-start gap-2.5 shadow-sm">
+                              <i data-lucide="alert-circle" class="w-4 h-4 shrink-0 mt-0.5 text-red-400"></i>
+                              <div>{msg.error}</div>
+                            </div>
+                          )}
+
+                          {msg.fonti && msg.fonti.length > 0 && (
+                            <div className="pt-2 border-t border-[#16233b] space-y-2">
+                              <div className="text-[11px] font-semibold text-[#64748b] uppercase tracking-wider flex items-center gap-1.5">
+                                <i data-lucide="bookmark" class="w-3.5 h-3.5 text-[#38bdf8]"></i>
+                                <span>Disposizioni e articoli citati ({msg.fonti.length})</span>
+                              </div>
+                              <div className="flex flex-wrap gap-2">
+                                {msg.fonti.slice(0, 10).map((f, fIdx) => (
+                                  <button
+                                    key={fIdx}
+                                    onClick={() => setSelectedSource(f)}
+                                    className="px-2.5 py-1 text-xs bg-[#0b1426] hover:bg-[#12203d] border border-[#1b2f52] hover:border-[#0072ce] text-[#38bdf8] rounded-xl transition-all flex items-center gap-1.5 shadow-sm hover:shadow-md"
+                                  >
+                                    <span className="font-mono font-medium">{f.norma}</span>
+                                    <span className="text-[#94a3b8]">Art. {f.articolo} c.{f.comma}</span>
+                                  </button>
+                                ))}
+                                {msg.fonti.length > 10 && (
+                                  <span className="text-xs text-[#64748b] self-center">+{msg.fonti.length - 10} altre</span>
+                                )}
+                              </div>
+                            </div>
+                          )}
+
+                          {!msg.isStreaming && msg.content && (
+                            <div className="pt-1 flex items-center justify-end text-xs text-[#64748b] select-none">
+                              <div className="flex items-center gap-1 opacity-80 group-hover:opacity-100 transition-opacity">
+                                <button
+                                  onClick={() => copyToClipboard(msg.content, index)}
+                                  className="p-1.5 hover:bg-[#11192e] text-[#94a3b8] hover:text-[#f8fafc] rounded-lg transition-colors flex items-center gap-1 text-[11px]"
+                                  title="Copia testo"
+                                >
+                                  <i data-lucide={copiedIndex === index ? "check" : "copy"} class="w-3.5 h-3.5"></i>
+                                  {copiedIndex === index && <span className="text-emerald-400">Copiato</span>}
+                                </button>
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                ))}
+                
+                <div ref={messagesEndRef} />
+              </div>
+            </div>
+
+            {/* INPUT BAR */}
+            <div className="absolute bottom-0 inset-x-0 bg-gradient-to-t from-[#060a14] via-[#060a14]/95 to-transparent pt-6 pb-4 px-4">
+              <div className="max-w-2xl mx-auto">
+                <form 
+                  onSubmit={(e) => { e.preventDefault(); sendMessage(); }}
+                  className="relative flex flex-col bg-[#0e172a] border border-[#1e2f50] focus-within:border-[#0072ce] focus-within:ring-1 focus-within:ring-[#0072ce]/50 rounded-3xl shadow-xl transition-all duration-200 overflow-hidden"
+                >
+                  <textarea
+                    ref={textareaRef}
+                    value={input}
+                    onChange={(e) => setInput(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" && !e.shiftKey) {
+                        e.preventDefault();
+                        sendMessage();
+                      }
+                    }}
+                    placeholder="Poni un quesito giuridico sulla normativa sammarinese..."
+                    rows={1}
+                    disabled={loading}
+                    className="w-full resize-none bg-transparent pt-3.5 pb-2 px-4 text-[#f8fafc] placeholder-[#64748b] text-[15px] focus:outline-none max-h-48 overflow-y-auto"
+                    style={{ minHeight: '44px' }}
+                  />
+
+                  <div className="flex items-center justify-between px-3 pb-2.5 pt-1 select-none">
+                    <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-[#131f38] border border-[#1e3256] text-[11px] font-medium text-[#38bdf8]">
+                      <i data-lucide="book-open" class="w-3 h-3 text-[#0072ce]"></i>
+                      <span>Archivio Ufficiale (2.444 leggi)</span>
+                    </div>
+
+                    <div>
+                      {loading ? (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            if (abortControllerRef.current) abortControllerRef.current.abort();
+                            setLoading(false);
+                          }}
+                          className="w-8 h-8 rounded-full bg-[#1e293b] hover:bg-[#334155] text-white flex items-center justify-center transition-colors shadow-sm"
+                        >
+                          <i data-lucide="square" class="w-3 h-3 fill-current text-[#38bdf8]"></i>
+                        </button>
+                      ) : (
+                        <button
+                          type="submit"
+                          disabled={!input.trim()}
+                          className="w-8 h-8 rounded-full bg-[#0072ce] hover:bg-[#0284c7] disabled:bg-[#1a263d] text-white disabled:text-[#475569] flex items-center justify-center transition-all disabled:cursor-not-allowed shadow-md disabled:shadow-none active:scale-95"
+                        >
+                          <i data-lucide="arrow-up" class="w-4 h-4 stroke-[2.5]"></i>
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                </form>
+
+                <div className="text-center mt-2.5 text-[11px] text-[#64748b]">
+                  GraphResponsa è un sistema di supporto all'analisi legale. Si raccomanda di verificare i testi ufficiali pubblicati sul Bollettino Ufficiale.
+                </div>
+              </div>
+            </div>
+
+            {/* SOURCE MODAL */}
+            {selectedSource && (
+              <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
+                <div className="bg-[#0b1326] border border-[#1e345b] rounded-2xl max-w-2xl w-full max-h-[80vh] flex flex-col shadow-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-150">
+                  
+                  <div className="p-4 border-b border-[#16233d] flex items-center justify-between bg-[#080e1c]">
+                    <div className="flex items-center gap-2">
+                      <i data-lucide="file-text" class="w-4 h-4 text-[#38bdf8]"></i>
+                      <span className="font-mono text-sm font-semibold text-white">{selectedSource.norma}</span>
+                      <span className="text-xs text-[#94a3b8]">• Art. {selectedSource.articolo}, Comma {selectedSource.comma}</span>
+                    </div>
+                    <button 
+                      onClick={() => setSelectedSource(null)}
+                      className="p-1 hover:bg-[#131e36] text-[#94a3b8] hover:text-white rounded-lg transition-colors"
+                    >
+                      <i data-lucide="x" class="w-4 h-4"></i>
+                    </button>
+                  </div>
+
+                  <div className="p-6 overflow-y-auto space-y-4">
+                    {selectedSource.titoloNorma && (
+                      <div className="text-xs font-semibold uppercase tracking-wider text-[#38bdf8]">
+                        {selectedSource.titoloNorma}
+                      </div>
+                    )}
+                    {selectedSource.rubrica && (
+                      <div className="text-sm font-medium text-white pb-2 border-b border-[#16233d]">
+                        Rubrica: {selectedSource.rubrica}
+                      </div>
+                    )}
+                    <div className="font-serif text-base text-[#f1f5f9] leading-relaxed whitespace-pre-wrap bg-[#060a14] p-4 rounded-xl border border-[#15233d]">
+                      {selectedSource.testo}
+                    </div>
+                  </div>
+
+                  <div className="p-3.5 border-t border-[#16233d] bg-[#080e1c] flex justify-end">
+                    <button
+                      onClick={() => setSelectedSource(null)}
+                      className="px-4 py-1.5 bg-[#142038] hover:bg-[#1d2d4d] border border-[#223354] text-sm text-[#f1f5f9] rounded-xl transition-colors font-medium"
+                    >
+                      Chiudi
+                    </button>
+                  </div>
+
+                </div>
+              </div>
+            )}
+
+          </main>
+        </div>
+      );
+    }
+
+    ReactDOM.createRoot(document.getElementById("root")).render(<App />);
+  </script>
+</body>
+</html>

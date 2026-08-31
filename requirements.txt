@@ -1,0 +1,12 @@
+langchain>=1.0
+langchain-neo4j
+langchain-anthropic
+langchain-voyageai
+neo4j
+python-dotenv
+fastapi
+uvicorn
+requests
+beautifulsoup4
+lxml
+PyMuPDF

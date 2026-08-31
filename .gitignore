@@ -1,0 +1,11 @@
+.env
+Neo4j-*.txt
+data/raw/
+data/parsed/
+__pycache__/
+*.pyc
+.venv/
+out/
+frontend/node_modules/
+frontend/dist
+docs/superpowers/*
