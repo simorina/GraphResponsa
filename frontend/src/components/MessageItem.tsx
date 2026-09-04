@@ -1,144 +1,151 @@
 import React, { useState } from 'react';
-import { Sparkles, Bookmark, Copy, Check, AlertCircle, ThumbsUp, ThumbsDown } from 'lucide-react';
+import { Copy, Check, AlertTriangle } from 'lucide-react';
 import { marked } from 'marked';
-import { Message, Fonte } from '../types';
-import { ThinkingAccordion } from './ThinkingAccordion';
+import type { Message, Fonte } from '../types';
+import { ThinkingTrail } from './ThinkingTrail';
+import { Sigillo } from './Sigillo';
+import { Riscontro } from './Riscontro';
 
 interface MessageItemProps {
   message: Message;
-  index: number;
+  indice: number;
+  domandaPrecedente: string;
+  conversazione: string | null;
   onSelectSource: (source: Fonte) => void;
 }
 
+/** Segnaposto nella forma di un paragrafo, non un cerchietto che gira. */
+const Attesa: React.FC = () => (
+  <div className="space-y-2.5 py-1" aria-label="Composizione della risposta in corso">
+    <div className="skeleton h-[11px] w-[92%]" />
+    <div className="skeleton h-[11px] w-[78%]" />
+    <div className="skeleton h-[11px] w-[85%]" />
+    <div className="skeleton h-[11px] w-[41%]" />
+  </div>
+);
+
 export const MessageItem: React.FC<MessageItemProps> = ({
   message,
-  index,
+  indice,
+  domandaPrecedente,
+  conversazione,
   onSelectSource,
 }) => {
-  const [copied, setCopied] = useState(false);
-  const [liked, setLiked] = useState<'up' | 'down' | null>(null);
+  const [copiato, setCopiato] = useState(false);
 
-  const handleCopy = () => {
-    navigator.clipboard.writeText(message.content);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
+  const copia = async () => {
+    try {
+      await navigator.clipboard.writeText(message.content);
+      setCopiato(true);
+      setTimeout(() => setCopiato(false), 1800);
+    } catch {
+      /* clipboard negata: nessun riscontro, nessun crash */
+    }
   };
 
   if (message.role === 'user') {
     return (
-      <div className="flex justify-end py-1">
-        <div className="max-w-[80%] bg-[#0e1f3d] text-[#f8fafc] px-4 py-2.5 rounded-3xl rounded-tr-md shadow-sm border border-[#1d3560] text-[15px] leading-relaxed">
+      <div className="flex justify-end py-3">
+        <div className="max-w-[85%] select-text rounded-3xl rounded-br-lg bg-raise px-4 py-2.5 text-[15px] leading-relaxed text-ink">
           {message.content}
         </div>
       </div>
     );
   }
 
+  const fonti = message.fonti ?? [];
+
   return (
-    <div className="flex items-start gap-4 py-2 group">
-      {/* Institutional Assistant Avatar */}
-      <div className="w-8 h-8 rounded-xl bg-gradient-to-b from-[#112244] to-[#0a1426] border border-[#1e3a6a] flex items-center justify-center text-[#38bdf8] shrink-0 mt-0.5 shadow-sm">
-        <Sparkles className="w-4 h-4" />
+    <div className="group/msg flex items-start gap-3.5 py-3 md:gap-4">
+      <div className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-lg border border-dorato-2/45 bg-gradient-to-b from-canvas to-alloro-3/55">
+        <Sigillo className="h-[15px] w-[15px]" />
       </div>
 
-      <div className="flex-1 space-y-3.5 min-w-0">
-        {/* Reasoning / Consultation Accordion */}
+      <div className="min-w-0 flex-1">
         {message.thoughts && message.thoughts.length > 0 && (
-          <ThinkingAccordion
-            thoughts={message.thoughts}
-            isStreaming={message.isStreaming}
-          />
+          <ThinkingTrail thoughts={message.thoughts} isStreaming={message.isStreaming} />
         )}
 
-        {/* Markdown Content */}
         {message.content ? (
           <div
-            className="prose-legal"
-            dangerouslySetInnerHTML={{
-              __html: marked.parse(message.content) as string,
-            }}
+            className="prose-legal select-text"
+            dangerouslySetInnerHTML={{ __html: marked.parse(message.content) as string }}
           />
         ) : message.isStreaming ? (
-          <div className="flex items-center gap-2 text-sm text-[#94a3b8] italic py-1">
-            <span className="inline-block w-2 h-2 rounded-full bg-[#38bdf8] animate-ping"></span>
-            Elaborazione della risposta sulla base della normativa vigente...
-          </div>
+          <Attesa />
         ) : null}
 
-        {/* Error Notification */}
+        {message.isStreaming && message.content && (
+          <span className="caret ml-0.5 inline-block h-[15px] w-[7px] translate-y-[2px] bg-dorato-2 align-baseline" />
+        )}
+
         {message.error && (
-          <div className="p-3.5 bg-red-950/40 border border-red-800/60 rounded-2xl text-red-200 text-xs flex items-start gap-2.5 shadow-sm">
-            <AlertCircle className="w-4 h-4 shrink-0 mt-0.5 text-red-400" />
-            <div>{message.error}</div>
+          <div className="mt-4 flex items-start gap-2.5 rounded-xl border border-[#e8cec7] bg-rosso-2 px-3.5 py-3">
+            <AlertTriangle className="mt-px h-3.5 w-3.5 shrink-0 text-rosso" strokeWidth={1.5} />
+            <div className="min-w-0">
+              <div className="mb-0.5 text-[12px] font-medium text-rosso">
+                Consultazione interrotta
+              </div>
+              <p className="break-words font-mono text-[11.5px] leading-relaxed text-ink-2">
+                {message.error}
+              </p>
+            </div>
           </div>
         )}
 
-        {/* Citation Pills / Fonti Ufficiali */}
-        {message.fonti && message.fonti.length > 0 && (
-          <div className="pt-2 border-t border-[#16233b] space-y-2">
-            <div className="text-[11px] font-semibold text-[#64748b] uppercase tracking-wider flex items-center gap-1.5">
-              <Bookmark className="w-3 h-3 text-[#38bdf8]" />
-              <span>Disposizioni e articoli citati</span>
+        {fonti.length > 0 && (
+          <div className="mt-5 border-t border-line pt-3.5">
+            <div className="mb-2.5 text-[12.5px] font-medium text-ink-2">
+              Disposizioni citate <span className="font-mono text-ink-3">{fonti.length}</span>
             </div>
-            <div className="flex flex-wrap gap-2">
-              {message.fonti.slice(0, 10).map((f, fIdx) => (
+            <div className="flex flex-wrap gap-1.5">
+              {fonti.map((f, i) => (
                 <button
-                  key={fIdx}
+                  key={`${f.norma}-${f.articolo}-${f.comma}-${i}`}
                   onClick={() => onSelectSource(f)}
-                  className="px-2.5 py-1 text-xs bg-[#0b1426] hover:bg-[#12203d] border border-[#1b2f52] hover:border-[#0072ce] text-[#38bdf8] rounded-xl transition-all flex items-center gap-1.5 shadow-sm hover:shadow-md"
+                  title={f.titoloNorma || undefined}
+                  className="slide-in flex items-baseline gap-1.5 rounded-lg border border-line bg-canvas px-2.5 py-1 font-mono text-[11px] transition-all duration-200 ease-[cubic-bezier(0.16,1,0.3,1)] hover:-translate-y-px hover:border-dorato-2 hover:bg-alloro-3/40 active:translate-y-0"
+                  style={{ ['--i' as string]: Math.min(i, 12) }}
                 >
-                  <span className="font-mono font-medium">{f.norma}</span>
-                  <span className="text-[#94a3b8]">
-                    Art. {f.articolo} c.{f.comma}
+                  <span className="text-ink-2">{f.norma}</span>
+                  <span className="text-alloro">
+                    {f.articolo}
+                    <span className="text-ink-3">.</span>
+                    {f.comma}
                   </span>
                 </button>
               ))}
-              {message.fonti.length > 10 && (
-                <span className="text-xs text-[#64748b] self-center">
-                  altri riferimenti
-                </span>
-              )}
             </div>
           </div>
         )}
 
-        {/* Action Toolbar without developer token/cost stats */}
         {!message.isStreaming && message.content && (
-          <div className="pt-1 flex items-center justify-end text-xs text-[#64748b] select-none">
-            <div className="flex items-center gap-1 opacity-80 group-hover:opacity-100 transition-opacity">
-              <button
-                onClick={handleCopy}
-                className="p-1.5 hover:bg-[#11192e] text-[#94a3b8] hover:text-[#f8fafc] rounded-lg transition-colors flex items-center gap-1 text-[11px]"
-                title="Copia testo"
-              >
-                {copied ? (
-                  <>
-                    <Check className="w-3.5 h-3.5 text-emerald-400" />
-                    <span className="text-emerald-400">Copiato</span>
-                  </>
-                ) : (
-                  <>
-                    <Copy className="w-3.5 h-3.5" />
-                    <span>Copia</span>
-                  </>
-                )}
-              </button>
+          <div className="mt-3 flex flex-col items-start gap-1">
+            <div className="flex items-center gap-1">
+            <button
+              onClick={copia}
+              className="flex items-center gap-1.5 rounded-lg px-2 py-1 text-[11.5px] text-ink-3 opacity-0 transition-all duration-200 hover:bg-canvas hover:text-ink-2 focus-visible:opacity-100 group-hover/msg:opacity-100 active:translate-y-px"
+            >
+              {copiato ? (
+                <>
+                  <Check className="h-3.5 w-3.5 text-alloro" strokeWidth={1.8} />
+                  <span className="text-alloro">Copiato</span>
+                </>
+              ) : (
+                <>
+                  <Copy className="h-3.5 w-3.5" strokeWidth={1.5} />
+                  Copia
+                </>
+              )}
+            </button>
 
-              <button
-                onClick={() => setLiked(liked === 'up' ? null : 'up')}
-                className={`p-1.5 hover:bg-[#11192e] rounded-lg transition-colors ${liked === 'up' ? 'text-[#38bdf8]' : 'text-[#94a3b8] hover:text-[#f8fafc]'}`}
-                title="Risposta utile"
-              >
-                <ThumbsUp className="w-3.5 h-3.5" />
-              </button>
-
-              <button
-                onClick={() => setLiked(liked === 'down' ? null : 'down')}
-                className={`p-1.5 hover:bg-[#11192e] rounded-lg transition-colors ${liked === 'down' ? 'text-red-400' : 'text-[#94a3b8] hover:text-[#f8fafc]'}`}
-                title="Risposta non utile"
-              >
-                <ThumbsDown className="w-3.5 h-3.5" />
-              </button>
+            <Riscontro
+              conversazione={conversazione}
+              indiceMessaggio={indice}
+              domanda={domandaPrecedente}
+              risposta={message.content}
+              fonti={fonti}
+            />
             </div>
           </div>
         )}

@@ -84,6 +84,114 @@ def unisci(buffer):
     return re.sub(r"\s+", " ", testo).strip()
 
 
+# Molti decreti anteriori agli anni '90 non scrivono mai "Art. N": numerano per
+# livelli ("1.1", "1.2" sotto un CAPO) oppure stendono il dispositivo di
+# seguito. Senza articoli il testo finisce tutto nel preambolo, e la ricerca
+# non lo vede: cerca_testo interroga i nodi :Comma.
+RE_ART_DECIMALE = re.compile(r"^(\d{1,3})\.(\d{1,3})\.?\s+(\S.*)$")
+RE_FINE_PREAMBOLO = re.compile(
+    r"^\s*(decretiamo|decreta|decretano|promulghiamo|ordiniamo|"
+    r"si\s+decreta|abbiamo\s+decretato)\b", re.I)
+
+# Un comma dedotto oltre questa soglia si spezza: un blocco unico di decine di
+# migliaia di caratteri rende inutile sia l'embedding sia la citazione.
+TAGLIO_COMMA = 1400
+
+
+def _spezza_in_commi(testo):
+    """Divide un corpo non strutturato in blocchi, chiudendo a fine frase."""
+    if len(testo) <= TAGLIO_COMMA:
+        return [testo] if testo else []
+    frasi = re.split(r"(?<=[.;:])\s+", testo)
+    blocchi, corrente = [], ""
+    for f in frasi:
+        if corrente and len(corrente) + len(f) + 1 > TAGLIO_COMMA:
+            blocchi.append(corrente.strip())
+            corrente = f
+        else:
+            corrente = f"{corrente} {f}".strip()
+    if corrente.strip():
+        blocchi.append(corrente.strip())
+    return blocchi
+
+
+def struttura_dedotta(id_norma, righe):
+    """
+    Ricava una struttura da un atto che il parsing normale non ha agganciato.
+
+    Restituisce (articoli, righe_di_preambolo). Viene invocata SOLO quando non
+    e' stato riconosciuto nemmeno un articolo, cosi' non puo' alterare i
+    documenti che gia' si strutturano bene.
+
+    Gli articoli prodotti portano `strutturaDedotta: True`: l'inferenza resta
+    dichiarata, invece di confondersi con la numerazione reale dell'atto.
+    """
+    inizio = 0
+    for i, r in enumerate(righe[:80]):
+        if RE_FINE_PREAMBOLO.match(r):
+            inizio = i + 1
+            break
+    preambolo = righe[:inizio]
+    corpo = [r for r in righe[inizio:] if r.strip()]
+    if not corpo:
+        return [], righe
+
+    def nuovo_articolo(numero, ordine):
+        return {
+            "id": f"{id_norma}/art-{numero}",
+            "numero": numero,
+            "rubrica": None,
+            "partizioneId": None,
+            "ordine": ordine,
+            "commi": [],
+            "strutturaDedotta": True,
+        }
+
+    def nuovo_comma(art, numero, testo):
+        return {
+            "id": f"{art['id']}/c-{numero}",
+            "numero": str(numero),
+            "testo": testo,
+            "numerazioneAnomala": False,
+            "commaImplicito": True,
+        }
+
+    # --- Numerazione decimale: "1.1", "1.2", "2.1" ---
+    agganci = [RE_ART_DECIMALE.match(r) for r in corpo]
+    if sum(1 for m in agganci if m) >= 3:
+        articoli, per_numero, buffer, comma = [], {}, [], None
+        for riga, m in zip(corpo, agganci):
+            if m:
+                if comma is not None:
+                    comma["testo"] = unisci(buffer)
+                art_n, comma_n, testa = m.group(1), m.group(2), m.group(3)
+                art = per_numero.get(art_n)
+                if art is None:
+                    art = nuovo_articolo(art_n, len(articoli))
+                    per_numero[art_n] = art
+                    articoli.append(art)
+                comma = nuovo_comma(art, comma_n, "")
+                art["commi"].append(comma)
+                buffer = [testa]
+            elif comma is not None:
+                buffer.append(riga)
+            else:
+                preambolo.append(riga)
+        if comma is not None:
+            comma["testo"] = unisci(buffer)
+        return [a for a in articoli if any(c["testo"] for c in a["commi"])], preambolo
+
+    # --- Nessuna struttura: un articolo unico, spezzato in blocchi leggibili ---
+    corpo_unito = unisci(corpo)
+    blocchi = _spezza_in_commi(corpo_unito)
+    if not blocchi:
+        return [], righe
+
+    art = nuovo_articolo("unico", 0)
+    art["commi"] = [nuovo_comma(art, i, b) for i, b in enumerate(blocchi, 1)]
+    return [art], preambolo
+
+
 def estrai_citazioni(testo, id_norma_corrente):
     """
     Trova i riferimenti ad altre norme nel testo.
@@ -296,6 +404,12 @@ def parse(id_norma, meta):
         i += 1
 
     chiudi_comma()
+
+    # Se non e' stato riconosciuto nemmeno un articolo, l'atto non e' vuoto:
+    # e' scritto con una struttura che il riconoscitore non prevede. Meglio
+    # dedurla e dichiararla che lasciare il testo fuori dalla ricerca.
+    if not articoli:
+        articoli, preambolo = struttura_dedotta(id_norma, righe)
 
     # Citazioni: per comma, con l'indicazione del comma di origine.
     for art in articoli:

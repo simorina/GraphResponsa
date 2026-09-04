@@ -1,5 +1,6 @@
 import React, { useRef, useEffect } from 'react';
-import { ArrowUp, Square, BookOpen } from 'lucide-react';
+import { ArrowUp, Square } from 'lucide-react';
+import type { StatsState } from '../types';
 
 interface InputBarProps {
   input: string;
@@ -7,6 +8,18 @@ interface InputBarProps {
   onSubmit: () => void;
   onStop: () => void;
   loading: boolean;
+  stats: StatsState;
+}
+
+const nf = new Intl.NumberFormat('it-IT');
+
+function copertura(stats: StatsState): string {
+  if (stats.fase === 'pronto') {
+    const { conTesto, articoli } = stats.dati;
+    return `${nf.format(conTesto)} norme · ${nf.format(articoli)} articoli`;
+  }
+  if (stats.fase === 'errore') return 'copertura non verificabile';
+  return 'lettura archivio…';
 }
 
 export const InputBar: React.FC<InputBarProps> = ({
@@ -15,80 +28,92 @@ export const InputBar: React.FC<InputBarProps> = ({
   onSubmit,
   onStop,
   loading,
+  stats,
 }) => {
-  const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const areaRef = useRef<HTMLTextAreaElement>(null);
 
   useEffect(() => {
-    if (textareaRef.current) {
-      textareaRef.current.style.height = 'auto';
-      textareaRef.current.style.height = `${Math.min(textareaRef.current.scrollHeight, 200)}px`;
-    }
+    const el = areaRef.current;
+    if (!el) return;
+    el.style.height = 'auto';
+    el.style.height = `${Math.min(el.scrollHeight, 200)}px`;
   }, [input]);
 
-  const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+  const onKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
-      onSubmit();
+      if (!loading) onSubmit();
     }
   };
 
+  const pronto = input.trim().length > 0 && !loading;
+
   return (
-    <div className="absolute bottom-0 inset-x-0 bg-gradient-to-t from-[#060a14] via-[#060a14]/95 to-transparent pt-6 pb-4 px-4">
-      <div className="max-w-2xl mx-auto">
+    <div className="pointer-events-none absolute inset-x-0 bottom-0 z-10 bg-gradient-to-t from-canvas via-canvas/95 to-transparent px-4 pb-4 pt-12 md:px-6">
+      <div className="pointer-events-auto mx-auto max-w-3xl">
         <form
           onSubmit={(e) => {
             e.preventDefault();
-            onSubmit();
+            if (!loading) onSubmit();
           }}
-          className="relative flex flex-col bg-[#0e172a] border border-[#1e2f50] focus-within:border-[#0072ce] focus-within:ring-1 focus-within:ring-[#0072ce]/50 rounded-3xl shadow-xl transition-all duration-200 overflow-hidden"
+          className="rounded-[26px] border border-line-2 bg-canvas shadow-[0_10px_30px_-14px_rgba(16,33,45,0.20)] transition-colors duration-200 focus-within:border-azzurro-2"
         >
-          {/* Main Textarea */}
           <textarea
-            ref={textareaRef}
+            ref={areaRef}
             value={input}
             onChange={(e) => onChange(e.target.value)}
-            onKeyDown={handleKeyDown}
-            placeholder="Poni un quesito giuridico sulla normativa sammarinese..."
+            onKeyDown={onKeyDown}
             rows={1}
-            disabled={loading}
-            className="w-full resize-none bg-transparent pt-3.5 pb-2 px-4 text-[#f8fafc] placeholder-[#64748b] text-[15px] focus:outline-none max-h-48 overflow-y-auto"
-            style={{ minHeight: '44px' }}
+            placeholder="Poni un quesito sulla normativa sammarinese…"
+            className="max-h-52 w-full resize-none bg-transparent px-5 pb-1.5 pt-4 text-[15px] leading-relaxed text-ink placeholder-ink-3 focus:outline-none"
+            style={{ minHeight: '48px' }}
           />
 
-          {/* Bottom Toolbar */}
-          <div className="flex items-center justify-between px-3 pb-2.5 pt-1 select-none">
-            <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-[#131f38] border border-[#1e3256] text-[11px] font-medium text-[#38bdf8]">
-              <BookOpen className="w-3 h-3 text-[#0072ce]" />
-              <span>Archivio Ufficiale (2.444 leggi)</span>
+          <div className="flex items-center justify-between gap-3 px-3 pb-2.5 pt-1">
+            <div className="flex min-w-0 items-center gap-2 pl-1.5">
+              <span
+                className={`h-[5px] w-[5px] shrink-0 rounded-full ${
+                  stats.fase === 'pronto'
+                    ? 'bg-alloro'
+                    : stats.fase === 'errore'
+                      ? 'bg-rosso'
+                      : 'pulse-dot bg-ink-3'
+                }`}
+              />
+              <span className="truncate font-mono text-[10.5px] tracking-[0.05em] text-ink-3">
+                {copertura(stats)}
+              </span>
             </div>
 
-            <div>
-              {loading ? (
-                <button
-                  type="button"
-                  onClick={onStop}
-                  className="w-8 h-8 rounded-full bg-[#1e293b] hover:bg-[#334155] text-white flex items-center justify-center transition-colors shadow-sm"
-                  title="Interrompi risposta"
-                >
-                  <Square className="w-3 h-3 fill-current text-[#38bdf8]" />
-                </button>
-              ) : (
-                <button
-                  type="submit"
-                  disabled={!input.trim()}
-                  className="w-8 h-8 rounded-full bg-[#0072ce] hover:bg-[#0284c7] disabled:bg-[#1a263d] text-white disabled:text-[#475569] flex items-center justify-center transition-all disabled:cursor-not-allowed shadow-md disabled:shadow-none active:scale-95"
-                  title="Invia quesito"
-                >
-                  <ArrowUp className="w-4 h-4 stroke-[2.5]" />
-                </button>
-              )}
-            </div>
+            {loading ? (
+              <button
+                type="button"
+                onClick={onStop}
+                title="Interrompi"
+                className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-line-2 bg-raise text-ink-2 transition-colors duration-200 hover:border-azzurro-2 hover:text-ink active:translate-y-px"
+              >
+                <Square className="h-2.5 w-2.5 fill-current" strokeWidth={0} />
+              </button>
+            ) : (
+              <button
+                type="submit"
+                disabled={!pronto}
+                title="Invia il quesito"
+                className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-full transition-all duration-200 ease-[cubic-bezier(0.16,1,0.3,1)] ${
+                  pronto
+                    ? 'bg-azzurro text-white hover:-translate-y-px active:translate-y-0'
+                    : 'cursor-not-allowed bg-raise text-ink-3'
+                }`}
+              >
+                <ArrowUp className="h-4 w-4" strokeWidth={2.2} />
+              </button>
+            )}
           </div>
         </form>
 
-        <div className="text-center mt-2.5 text-[11px] text-[#64748b]">
-          GraphResponsa è un sistema di supporto all'analisi legale. Si raccomanda di verificare i testi ufficiali pubblicati sul Bollettino Ufficiale.
-        </div>
+        <p className="mt-2.5 text-center text-[11px] leading-relaxed text-ink-3">
+          Strumento di supporto all'analisi. Riscontrare i testi sul Bollettino Ufficiale.
+        </p>
       </div>
     </div>
   );

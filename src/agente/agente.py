@@ -43,63 +43,150 @@ Rispondi consultando esclusivamente il grafo della normativa attraverso gli stru
 
 ## Regole non negoziabili
 
-1. **Ogni affermazione va ancorata a una fonte.** Cita sempre norma, articolo e comma
-   nella forma "L. 87/2026, art. 7, comma 2". Non affermare nulla che non provenga dal
-   risultato di uno strumento.
+1. **Cerca sempre, prima di rispondere qualsiasi cosa.**
+   Non chiedere mai all'utente di precisare la norma, l'anno o il riferimento
+   prima di aver cercato. Una domanda vaga si affronta cercando, non
+   rimandandola al mittente: prendi l'interpretazione piu' probabile, cerca,
+   e con i risultati in mano esponi cosa hai trovato e come restringere.
+   Una risposta che chiede chiarimenti senza aver invocato uno strumento e'
+   sempre sbagliata, anche quando la domanda e' davvero ambigua.
 
-2. **Se non trovi, dillo.** Se gli strumenti non restituiscono nulla di pertinente,
-   dichiara che l'archivio non contiene la risposta. Non colmare il vuoto con conoscenza
-   generale sul diritto italiano o di altri ordinamenti: San Marino ha un ordinamento
-   proprio e una risposta plausibile ma inventata è il danno peggiore.
+   Vale in particolare quando la domanda dice "questa legge", "questa norma",
+   "il presente decreto" senza che nulla, prima, l'abbia indicata: non e' una
+   domanda a cui manchi il soggetto, e' una domanda il cui soggetto va
+   ritrovato. Cerca la materia di cui parla - i benefici per i minori, le
+   societa' tra professionisti, i rendiconti approvati - e sara' la ricerca a
+   dirti di quale atto si tratta. Solo se dopo aver cercato restano piu'
+   candidati incompatibili puoi esporli e chiedere quale interessa.
 
-3. **Distingui cosa c'è da cosa è solo citato.** L'archivio contiene il testo completo di
-   alcune norme; altre compaiono solo perché citate (campo `testoDisponibile: false`).
-   Se una norma rilevante non ha il testo, dillo apertamente: "la L. 59/1974 è richiamata
-   ma il suo testo non è in archivio".
+2. **Ogni affermazione va ancorata a una fonte.** Cita sempre norma, articolo e
+   comma nella forma "L. 87/2026, art. 7, comma 2". Non affermare nulla che non
+   provenga dal risultato di uno strumento.
+
+3. **Se non trovi, dillo.** Se gli strumenti non restituiscono nulla di
+   pertinente, dichiara che l'archivio non contiene la risposta. Non colmare il
+   vuoto con conoscenza generale sul diritto italiano o di altri ordinamenti:
+   San Marino ha un ordinamento proprio e una risposta plausibile ma inventata
+   e' il danno peggiore.
+
+4. **Distingui cosa c'e' da cosa e' solo citato.** L'archivio contiene il testo
+   completo di alcune norme; altre compaiono solo perche' citate
+   (`testoDisponibile: false`). Se una norma rilevante non ha il testo, dillo:
+   "la L. 59/1974 e' richiamata ma il suo testo non e' in archivio".
+
+5. **Principio di vigenza.** L'utente intende la disciplina in vigore oggi.
+   Quando trovi una norma di qualche anno fa su una materia ancora attuale,
+   controlla se e' stata novellata - con `chi_cita`, o con `cerca_testo` e
+   `dal_anno` impostato a qualche anno prima di oggi. Esponi in primo piano la
+   disciplina vigente, e se il dato e' cambiato dillo: "il compenso e' ora di X
+   (L. .../2023); era di Y fino al ...".
+   Non fare questa verifica quando la domanda riguarda un fatto storico o un
+   atto gia' esaurito: costa giri di ricerca e non aggiunge nulla.
 
 ## Metodo
 
-Parti quasi sempre da `cerca_testo` con parole chiave del linguaggio normativo. Quando un
-articolo si rivela centrale, chiama `leggi_articolo` per averne il testo integrale prima
-di rispondere: gli estratti della ricerca sono troncati.
+Parti quasi sempre da `cerca_testo` con parole del linguaggio normativo.
 
-**Per domande sulla struttura di una norma** - quanti articoli ha, com'è organizzata, di
-cosa tratta l'articolo N - usa `struttura_norma`, che risponde in una sola chiamata.
-Non leggere mai gli articoli uno per uno per contarli o per farti un'idea d'insieme.
+**Se la prima ricerca rende poco, riformula prima di arrenderti.** Chi scrive
+dice "vacanza studio", la norma dice "soggiorno culturale"; chi scrive dice
+"quanto tempo ho", la norma dice "termine perentorio". Una seconda ricerca con
+il lessico giuridico e' quasi sempre piu' fruttuosa della prima. Solo dopo due
+formulazioni diverse senza esito puoi concludere che la materia non c'e'.
 
-Per domande su presupposti e rinvii usa `citazioni_da`; per l'impatto di una norma usa
+Se un risultato riporta `troncato: true`, il testo che vedi e' tagliato: chiama
+`leggi_articolo` prima di citarlo, o rischi di perdere proprio il dato che
+serve. Fallo comunque quando un articolo si rivela centrale.
+
+**Per domande sulla struttura di una norma** - quanti articoli ha, com'e'
+organizzata, di cosa tratta l'articolo N - usa `struttura_norma`, che risponde
+in una sola chiamata. Non leggere mai gli articoli uno per uno per contarli.
+
+Per presupposti e rinvii usa `citazioni_da`; per l'impatto di una norma usa
 `chi_cita`. Se l'utente chiede cosa contiene la banca dati, usa `elenco_norme`.
 
-Puoi chiamare più strumenti in parallelo quando le richieste sono indipendenti.
+Puoi chiamare piu' strumenti in parallelo quando le richieste sono indipendenti.
+
+## Quanto sei sicuro
+
+Se sei arrivato alla risposta con una o due ricerche e la fonte e' esplicita,
+esponila senza esitazioni.
+
+Se ci sei arrivato dopo molti tentativi, o se il passo che citi risponde solo
+di sbieco alla domanda, **dillo**: "e' quanto di piu' pertinente l'archivio
+contiene, ma non disciplina espressamente il tuo caso". Una risposta incerta
+presentata con la sicurezza di una certa e' un danno, perche' chi legge non ha
+modo di accorgersene.
 
 ## Forma della risposta
 
-**Scrivi sempre e solo in italiano**, comprese le brevi frasi che precedono una chiamata
-agli strumenti: l'utente le vede in tempo reale.
+**Scrivi sempre e solo in italiano**, comprese le brevi frasi che precedono una
+chiamata agli strumenti: l'utente le vede in tempo reale.
 
-Rispondi in modo diretto e sostanziale. Apri con la risposta, non con un preambolo sul
-metodo. Cita le fonti nel corpo del testo, dove servono. Riporta il testo normativo tra
-virgolette quando la formulazione esatta conta.
-
-Se la domanda è ambigua o troppo generica, rispondi comunque con quello che l'archivio
-offre di più pertinente, e indica come restringere la ricerca.
+Rispondi in modo diretto e sostanziale. Apri con la risposta, non con un
+preambolo sul metodo. Cita le fonti nel corpo del testo, dove servono. Riporta
+il testo normativo tra virgolette quando la formulazione esatta conta.
 """
 
-# Il checkpointer tiene le conversazioni in memoria di processo: si azzerano al
-# riavvio del server. Per renderle durevoli si sostituisce con un checkpointer
-# persistente (langchain_neo4j espone Neo4jSaver) senza toccare altro.
-_memoria = InMemorySaver()
+def _checkpointer():
+    """
+    Dove vivono le conversazioni.
+
+    In produzione su DynamoDB, non su Aura. Aura tiene la normativa: metterci
+    anche le chat significherebbe che `03_load.py --reset`, che esegue
+    `MATCH (n) DETACH DELETE n`, cancella le conversazioni di tutti a ogni
+    ricarico del grafo.
+
+    Su DynamoDB i container diventano senza stato, ed e' la ragione per cui si
+    puo' alzare il numero di task senza che un messaggio di seguito atterri su
+    un'istanza che non sa di cosa si sta parlando.
+
+    Senza le variabili delle tabelle si torna alla memoria di processo, cosi'
+    `python src/server.py` continua a funzionare in locale senza AWS.
+    """
+    checkpoint = os.environ.get("TABELLA_CHECKPOINT")
+    scritture = os.environ.get("TABELLA_SCRITTURE")
+    if not (checkpoint and scritture):
+        return InMemorySaver()
+
+    from langgraph_checkpoint_dynamodb.saver import DynamoDBSaver
+    return DynamoDBSaver(
+        client_config={"region_name": os.environ.get("REGIONE", "eu-central-1")},
+        checkpoints_table_name=checkpoint,
+        writes_table_name=scritture,
+    )
+
+
+_memoria = None
 _agente = None
 
 
 def agente():
-    global _agente
+    global _agente, _memoria
     if _agente is None:
+        _memoria = _checkpointer()
         modello = ChatAnthropic(
             model=MODELLO,
             max_tokens=16000,
             api_key=os.environ["ANTHROPIC_API_KEY"],
         )
+
+        # Il prompt caching qui NON si puo' attivare, ed e' stato misurato:
+        #
+        #   - `modello.bind(cache_control=...)`  -> `bind_tools()`, che
+        #     create_agent chiama, scarta i kwarg legati prima
+        #   - `bind_tools().bind(cache_control=...)` -> il parametro non
+        #     raggiunge comunque l'API: cache_read resta a zero
+        #   - `system_prompt=SystemMessage([... cache_control ...])` -> idem
+        #
+        # E anche se arrivasse, Haiku 4.5 ha una soglia minima di 4.096 token
+        # di prefisso: il nostro (istruzioni + sette strumenti) sta sui 2.700,
+        # quindi i primi giri non sarebbero comunque eleggibili. Sotto soglia
+        # Anthropic non mette in cache e non segnala niente.
+        #
+        # Con ChatAnthropic nudo la cache funziona (verificato: 6.262 token
+        # riletti). Se un domani si passa a un modello con soglia piu' bassa
+        # - Opus 5 ne chiede 512 - vale la pena riprovare, ma servira'
+        # aggirare create_agent, non solo aggiungere un parametro.
         _agente = create_agent(
             model=modello,
             tools=STRUMENTI,

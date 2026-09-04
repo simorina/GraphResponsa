@@ -1,108 +1,204 @@
 import React from 'react';
-import { Plus, MessageSquare, PanelLeft, Landmark, FileText, CheckCircle2, ChevronRight, Shield, BookOpen } from 'lucide-react';
-import { GraphStats } from '../types';
+import { SquarePen, PanelLeft, LogOut, ArrowUpRight } from 'lucide-react';
+import type { StatsState } from '../types';
+import type { VoceConversazione, Consumi, Profilo } from '../hooks/useConversazioni';
+import { Sigillo } from './Sigillo';
+import { esci } from '../auth/cognito';
 
 interface SidebarProps {
   isOpen: boolean;
   onToggle: () => void;
   onNewChat: () => void;
-  currentTitle: string;
-  stats?: GraphStats | null;
+  conversazioneAperta: string | null;
+  onApri: (id: string) => void;
+  voci: VoceConversazione[];
+  consumi: Consumi | null;
+  utente: Profilo | null;
+  caricando: boolean;
+  stats: StatsState;
+}
+
+const nf = new Intl.NumberFormat('it-IT');
+
+/** "oggi", "ieri", "12 mar" - una data intera occupa spazio e non aggiunge nulla. */
+function quando(iso: string): string {
+  if (!iso) return '';
+  const d = new Date(iso);
+  const giorni = Math.floor((Date.now() - d.getTime()) / 86_400_000);
+  if (giorni <= 0) return 'oggi';
+  if (giorni === 1) return 'ieri';
+  if (giorni < 7) return `${giorni} giorni fa`;
+  return d.toLocaleDateString('it-IT', { day: 'numeric', month: 'short' });
 }
 
 export const Sidebar: React.FC<SidebarProps> = ({
   isOpen,
   onToggle,
   onNewChat,
-  currentTitle,
+  conversazioneAperta,
+  onApri,
+  voci,
+  consumi,
+  utente,
+  caricando,
+  stats,
 }) => {
+  const d = stats.fase === 'pronto' ? stats.dati : null;
+  const quota = consumi ? consumi.richiesteOggi / consumi.limiteGiorno : 0;
+
   return (
     <aside
-      className={`fixed md:static inset-y-0 left-0 z-40 flex flex-col bg-[#070b14] border-r border-[#152035] transition-all duration-300 ease-in-out select-none ${
+      className={`fixed inset-y-0 left-0 z-40 flex h-[100dvh] flex-col border-r border-line bg-panel transition-[width,transform] duration-300 ease-[cubic-bezier(0.16,1,0.3,1)] md:static ${
         isOpen
-          ? 'w-64 translate-x-0'
-          : '-translate-x-full md:translate-x-0 md:w-0 overflow-hidden border-r-0'
+          ? 'w-[272px] translate-x-0'
+          : 'w-[272px] -translate-x-full md:w-0 md:translate-x-0 md:overflow-hidden md:border-r-0'
       }`}
     >
-      {/* Top action: Nuova consultazione */}
-      <div className="p-3 flex items-center justify-between gap-2 border-b border-[#131c30]">
-        <button
-          onClick={onNewChat}
-          className="flex items-center gap-2 flex-1 px-3 py-2 text-sm font-medium bg-[#0f172a] hover:bg-[#16233d] text-[#f8fafc] rounded-xl border border-[#1e2f4f] transition-all duration-150 active:scale-[0.98] shadow-sm"
-        >
-          <Plus className="w-4 h-4 text-[#38bdf8]" />
-          <span>Nuova consultazione</span>
-        </button>
-
-        <button
-          onClick={onToggle}
-          className="p-2 text-[#64748b] hover:text-[#f8fafc] hover:bg-[#0f172a] rounded-xl transition-colors"
-          title="Chiudi menu"
-        >
-          <PanelLeft className="w-4 h-4" />
-        </button>
-      </div>
-
-      {/* Navigation and chat history */}
-      <div className="flex-1 overflow-y-auto px-3 py-3 space-y-4">
-        <div>
-          <div className="px-2 mb-1.5 text-[11px] font-semibold text-[#64748b] uppercase tracking-wider">
-            Consultazioni Recenti
+      <div className="flex h-full w-[272px] flex-col">
+        <div className="flex h-14 shrink-0 items-center justify-between px-3">
+          <div className="flex items-center gap-2.5 pl-1.5">
+            <Sigillo className="h-[18px] w-[18px]" />
+            <span className="text-[13.5px] font-medium tracking-[-0.015em] text-ink">
+              Graph<span className="text-azzurro">Responsa</span>
+            </span>
           </div>
-          <div className="group flex items-center justify-between px-3 py-2 text-sm text-[#f1f5f9] bg-[#0d162a] hover:bg-[#121e38] rounded-xl border border-[#192b4d] transition-colors cursor-pointer">
-            <div className="flex items-center gap-2.5 min-w-0">
-              <MessageSquare className="w-4 h-4 text-[#38bdf8] shrink-0" />
-              <span className="truncate font-normal text-xs">{currentTitle}</span>
-            </div>
-            <ChevronRight className="w-3.5 h-3.5 text-[#475569] opacity-0 group-hover:opacity-100 transition-opacity" />
-          </div>
+          <button
+            onClick={onToggle}
+            className="rounded-lg p-1.5 text-ink-3 transition-colors duration-200 hover:bg-raise hover:text-ink active:translate-y-px"
+            title="Nascondi il pannello"
+          >
+            <PanelLeft className="h-[17px] w-[17px]" strokeWidth={1.5} />
+          </button>
         </div>
 
-        {/* Informazioni Istituzionali */}
-        <div>
-          <div className="px-2 mb-1.5 text-[11px] font-semibold text-[#64748b] uppercase tracking-wider">
-            Fonte Ufficiale
+        <div className="px-3">
+          <button
+            onClick={onNewChat}
+            className="group flex w-full items-center gap-2.5 rounded-xl border border-line bg-canvas px-3 py-2 text-[13.5px] font-medium text-ink shadow-[0_1px_2px_rgba(16,33,45,0.04)] transition-all duration-200 ease-[cubic-bezier(0.16,1,0.3,1)] hover:border-dorato-2/60 hover:shadow-[0_2px_8px_rgba(16,33,45,0.08)] active:translate-y-px active:shadow-none"
+          >
+            <SquarePen
+              className="h-[15px] w-[15px] text-dorato transition-transform duration-300 ease-[cubic-bezier(0.16,1,0.3,1)] group-hover:-translate-y-px"
+              strokeWidth={1.5}
+            />
+            Nuova consultazione
+          </button>
+        </div>
+
+        {/* Storico vero, dal grafo delle conversazioni su DynamoDB */}
+        <div className="flex-1 overflow-y-auto px-3 py-4">
+          {caricando ? (
+            <div className="space-y-2 px-1">
+              {[82, 64, 71, 58].map((w, i) => (
+                <div key={i} className="skeleton h-[13px]" style={{ width: `${w}%` }} />
+              ))}
+            </div>
+          ) : voci.length === 0 ? (
+            <p className="px-2 text-[12.5px] leading-relaxed text-ink-3">
+              Le consultazioni che apri restano qui, anche dopo aver chiuso il
+              browser.
+            </p>
+          ) : (
+            <ul className="space-y-0.5">
+              {voci.map((v, i) => {
+                const attiva = v.conversazione === conversazioneAperta;
+                return (
+                  <li key={v.conversazione}>
+                    <button
+                      onClick={() => onApri(v.conversazione)}
+                      className={`slide-in group flex w-full flex-col gap-0.5 rounded-xl px-3 py-2 text-left transition-colors duration-200 ${
+                        attiva
+                          ? 'border-l-2 border-alloro-2 bg-alloro-3/45'
+                          : 'border-l-2 border-transparent hover:bg-raise'
+                      }`}
+                      style={{ ['--i' as string]: Math.min(i, 10) }}
+                    >
+                      <span
+                        className={`truncate text-[13px] leading-snug ${
+                          attiva ? 'text-ink' : 'text-ink-2 group-hover:text-ink'
+                        }`}
+                      >
+                        {v.titolo || 'Consultazione'}
+                      </span>
+                      <span className="font-mono text-[10px] text-ink-3">
+                        {quando(v.aggiornata)}
+                      </span>
+                    </button>
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+        </div>
+
+        <div className="shrink-0 border-t border-line px-4 py-3.5">
+          {/* Quota: compare solo quando comincia a contare davvero. Un contatore
+              sempre acceso e' rumore; a due terzi diventa un'informazione. */}
+          {consumi && quota > 0.6 && (
+            <div className="mb-3">
+              <div className="mb-1.5 flex items-baseline justify-between">
+                <span className="text-[11.5px] text-ink-2">Consultazioni oggi</span>
+                <span className="font-mono text-[11.5px] tabular-nums text-ink">
+                  {consumi.richiesteOggi}
+                  <span className="text-ink-3">/{consumi.limiteGiorno}</span>
+                </span>
+              </div>
+              <div className="h-[3px] overflow-hidden rounded-full bg-raise-2">
+                <div
+                  className={`h-full rounded-full transition-[width] duration-500 ease-[cubic-bezier(0.16,1,0.3,1)] ${
+                    quota > 0.9 ? 'bg-rosso' : 'bg-dorato-2'
+                  }`}
+                  style={{ width: `${Math.min(100, quota * 100)}%` }}
+                />
+              </div>
+            </div>
+          )}
+
+          <div className="mb-3 space-y-[3px]">
+            {[
+              ['Norme', d?.conTesto],
+              ['Articoli', d?.articoli],
+              ['Commi', d?.commi],
+            ].map(([voce, val]) => (
+              <div key={voce as string} className="flex items-baseline justify-between gap-3">
+                <span className="text-[11.5px] text-ink-3">{voce}</span>
+                {val == null ? (
+                  <span className="skeleton h-[10px] w-11" />
+                ) : (
+                  <span className="font-mono text-[11.5px] tabular-nums text-ink-2">
+                    {nf.format(val as number)}
+                  </span>
+                )}
+              </div>
+            ))}
           </div>
-          <div className="p-3 bg-[#0a1122] rounded-xl border border-[#16243d] space-y-2 text-xs text-[#94a3b8]">
-            <div className="flex items-center justify-between">
-              <span className="text-[#64748b] flex items-center gap-1.5">
-                <Landmark className="w-3.5 h-3.5 text-[#38bdf8]" /> Ente:
+
+          <a
+            href="https://www.consigliograndeegenerale.sm"
+            target="_blank"
+            rel="noreferrer"
+            className="group inline-flex items-center gap-1 text-[11.5px] text-ink-3 transition-colors duration-200 hover:text-alloro"
+          >
+            Consiglio Grande e Generale
+            <ArrowUpRight
+              className="h-3 w-3 shrink-0 transition-transform duration-300 ease-[cubic-bezier(0.16,1,0.3,1)] group-hover:-translate-y-px group-hover:translate-x-px"
+              strokeWidth={1.5}
+            />
+          </a>
+
+          {utente && (
+            <div className="mt-3.5 flex items-center justify-between gap-2 border-t border-line pt-3">
+              <span className="truncate text-[11.5px] text-ink-2" title={utente.email}>
+                {utente.email}
               </span>
-              <span className="text-[#f8fafc] font-medium text-[11px]">Consiglio G. e G.</span>
+              <button
+                onClick={esci}
+                title="Esci"
+                className="shrink-0 rounded-lg p-1.5 text-ink-3 transition-colors duration-200 hover:bg-raise hover:text-rosso active:translate-y-px"
+              >
+                <LogOut className="h-3.5 w-3.5" strokeWidth={1.5} />
+              </button>
             </div>
-            <div className="flex items-center justify-between">
-              <span className="text-[#64748b]">Copertura:</span>
-              <span className="text-[#38bdf8] font-medium text-[11px]">Patrimonio Normativo</span>
-            </div>
-            <div className="flex items-center justify-between">
-              <span className="text-[#64748b]">Stato Dati:</span>
-              <span className="text-emerald-400 font-medium text-[11px] flex items-center gap-1">
-                <CheckCircle2 className="w-3 h-3" /> Ufficiale & Vigente
-              </span>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      {/* Footer / Garanzia e Tutela Istituzionale */}
-      <div className="p-3 border-t border-[#131c30] bg-[#05080f]">
-        <div className="text-[10px] text-[#64748b] mb-2 flex items-center justify-between uppercase tracking-wider font-semibold">
-          <span className="flex items-center gap-1.5 text-[#38bdf8]">
-            <Shield className="w-3.5 h-3.5 text-[#0072ce]" /> CERTIFICAZIONE FONTI
-          </span>
-          <span className="flex h-2 w-2 relative">
-            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
-            <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
-          </span>
-        </div>
-        <div className="p-2.5 bg-[#0b1326] rounded-xl border border-[#16243d] text-[11px] space-y-1.5">
-          <div className="text-[#f8fafc] font-medium flex items-center gap-1.5">
-            <BookOpen className="w-3.5 h-3.5 text-[#38bdf8]" />
-            Archivio Normativo Integrale
-          </div>
-          <div className="text-[#94a3b8] text-[10px] leading-relaxed">
-            Risposte ancorate ai testi ufficiali promulgati dai Capitani Reggenti.
-          </div>
+          )}
         </div>
       </div>
     </aside>

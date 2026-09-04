@@ -1,0 +1,20 @@
+# Dipendenze del solo servizio web.
+#
+# Fuori restano PyMuPDF, requests, beautifulsoup4 e lxml: servono a scaricare e
+# parsare i PDF dal portale, cioe' alla pipeline, che gira in locale e non ha
+# ragione di stare in un container di produzione. Toglierle alleggerisce
+# l'immagine e riduce la superficie di attacco.
+
+langchain>=1.0
+langchain-neo4j
+langchain-anthropic
+langchain-voyageai
+neo4j
+python-dotenv
+fastapi
+uvicorn[standard]
+
+# Stato applicativo e identita' su AWS
+boto3
+langgraph-checkpoint-dynamodb
+python-jose[cryptography]

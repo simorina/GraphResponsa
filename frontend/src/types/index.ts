@@ -45,3 +45,9 @@ export interface GraphStats {
   totaleNodi: number;
   totaleRelazioni: number;
 }
+
+/** Le tre fasi in cui la UI puo' trovarsi rispetto a /stato. */
+export type StatsState =
+  | { fase: 'attesa' }
+  | { fase: 'pronto'; dati: GraphStats }
+  | { fase: 'errore' };

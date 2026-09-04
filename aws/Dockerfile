@@ -1,47 +1,31 @@
-# Multi-stage Dockerfile per GraphResponsa
-# Stage 1: Build del Frontend React (Vite + TypeScript + Tailwind)
-FROM node:20-alpine AS frontend-builder
-WORKDIR /build
+# Immagine del solo servizio web.
+#
+# Il frontend NON entra qui: viene compilato a parte e caricato su S3, servito
+# da CloudFront. Cosi' aggiornare la UI non richiede di ricostruire e
+# ridistribuire il backend, e l'immagine resta di solo Python.
 
-COPY frontend/package*.json ./
-RUN npm ci
+FROM python:3.12-slim
 
-COPY frontend/ ./
-RUN npm run build
-
-# Stage 2: Runtime Python FastAPI + Claude Agent
-FROM python:3.11-slim
-
-ENV PYTHONUNBUFFERED=1 \
-    PYTHONDONTWRITEBYTECODE=1 \
-    PIP_NO_CACHE_DIR=1 \
-    DEBIAN_FRONTEND=noninteractive
+# Non gira come root: se qualcuno esce dal processo, esce con pochi poteri.
+RUN useradd --create-home --shell /bin/false responsa
 
 WORKDIR /app
 
-# Installa dipendenze di sistema minime per pymupdf e compilazione
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    curl \
-    ca-certificates \
-    && rm -rf /var/lib/apt/lists/*
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PIP_NO_CACHE_DIR=1
 
-# Installa requisiti Python
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+# Le dipendenze prima del codice: cambiano di rado, e cosi' lo strato resta
+# in cache fra una compilazione e l'altra.
+COPY requirements-servizio.txt .
+RUN pip install --no-cache-dir -r requirements-servizio.txt
 
-# Copia il codice sorgente
 COPY src/ ./src/
-COPY data/ ./data/
 
-# Copia il frontend compilato dallo Stage 1 in frontend/dist per FastAPI
-COPY --from=frontend-builder /build/dist ./frontend/dist
+USER responsa
 
-# Espone la porta del server FastAPI
 EXPOSE 8000
 
-# Healthcheck per container orchestrator (ECS/Docker)
-HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
-  CMD curl -f http://localhost:8000/stato || exit 1
-
-# Avvio del server FastAPI in produzione con Uvicorn
-CMD ["python", "-m", "uvicorn", "src.server:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "2"]
+# Un solo worker: l'agente e' legato all'attesa delle API, non alla CPU, e
+# ampliare si fa aggiungendo task su Fargate, non processi nel container.
+CMD ["uvicorn", "src.server:app", "--host", "0.0.0.0", "--port", "8000", "--log-level", "warning"]

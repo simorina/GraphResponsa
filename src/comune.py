@@ -72,6 +72,76 @@ LABELS = {
 
 tipi_ignoti = set()
 
+# Tipo+numero+anno non e' una chiave: l'archivio numera uguale atti distinti
+# (e ogni Errata Corrige eredita gli estremi dell'atto che corregge). Quando
+# due schede collidono, la prima tiene l'id piano e la seconda lo qualifica
+# con il proprio schedaId. Cosi' nessun id gia' assegnato cambia, e le
+# citazioni - che si risolvono per tipo/numero/anno - continuano a puntare
+# all'atto canonico.
+SEPARATORE_COLLISIONE = "~"
+
+
+def id_canonico(id_norma):
+    """
+    'D-66-1983~17012616' -> 'D-66-1983'.
+
+    Serve a chi deve risalire dall'id qualificato a quello che le citazioni
+    nominano.
+    """
+    return (id_norma or "").split(SEPARATORE_COLLISIONE, 1)[0]
+
+
+def id_qualificato(id_norma, scheda_id):
+    """Aggiunge lo schedaId a un id conteso."""
+    return f"{id_canonico(id_norma)}{SEPARATORE_COLLISIONE}{scheda_id}"
+
+
+ANNO_MINIMO = 1600
+ANNO_MASSIMO = 2100
+
+
+def normalizza_estremi(numero, anno, data=None):
+    """
+    Rimette a posto numero e anno quando la scheda del portale li confonde.
+
+    Due guasti osservati sull'archivio reale:
+
+      - **invertiti**: la scheda di DD n.9 del 2007 riporta numero=2007 e
+        anno=9. Senza correzione nasce l'id 'DD-2007-9', che nessuna citazione
+        potra' mai agganciare, e l'ordinamento per anno lo mette nell'anno 9.
+      - **anno assente**: anno=0 oppure vuoto, mentre la data completa c'e'.
+
+    Restituisce (numero, anno) come interi dove possibile, altrimenti li
+    lascia come sono: meglio un dato grezzo che un dato inventato.
+    """
+    def intero(v):
+        try:
+            return int(str(v).strip())
+        except (TypeError, ValueError):
+            return None
+
+    def plausibile(y):
+        return y is not None and ANNO_MINIMO <= y <= ANNO_MASSIMO
+
+    n, a = intero(numero), intero(anno)
+    anno_data = intero(str(data)[:4]) if data else None
+
+    # Invertiti: l'anno e' finito nel numero. Il numero "sembra un anno" o
+    # perche' lo e', o perche' e' vicinissimo alla data della scheda - e'
+    # cosi' che si riconosce il refuso 2208 al posto di 2008.
+    if not plausibile(a) and n is not None:
+        sembra_anno = plausibile(n) or (
+            anno_data is not None and 1000 <= n <= 2999 and abs(n - anno_data) <= 300)
+        if sembra_anno:
+            n, a = a, n
+
+    # Anno ancora inservibile: lo si prende dalla data, il dato piu' solido
+    # che la scheda offre.
+    if not plausibile(a) and anno_data is not None:
+        a = anno_data
+
+    return (n if n is not None else numero, a if a is not None else anno)
+
 
 def norma_id(tipo, numero, anno):
     """

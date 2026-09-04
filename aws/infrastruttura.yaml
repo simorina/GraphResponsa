@@ -1,0 +1,901 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: >
+  GraphResponsa - infrastruttura di produzione.
+  Il grafo resta su Neo4j Aura (gestito, fuori da questo stack). Qui vivono il
+  backend su Fargate, il frontend su S3 dietro CloudFront, l'identita' su
+  Cognito e lo stato applicativo su DynamoDB.
+
+# ===========================================================================
+# Ordine di distribuzione
+#   1. creare lo stack con NumeroTask = 0  (l'immagine non esiste ancora)
+#   2. costruire e spingere l'immagine su ECR
+#   3. aggiornare lo stack con NumeroTask = 1
+# Partire con 1 farebbe fallire la stabilizzazione del servizio e rotolare
+# indietro tutto lo stack per un motivo banale.
+# ===========================================================================
+
+Parameters:
+  NomeProgetto:
+    Type: String
+    Default: graphresponsa
+    Description: Prefisso per i nomi delle risorse (minuscolo, S3 non tollera maiuscole)
+
+  NumeroTask:
+    Type: Number
+    Default: 0
+    MinValue: 0
+    MaxValue: 4
+    Description: 0 alla prima creazione, 1 dopo aver spinto l'immagine su ECR
+
+  TagImmagine:
+    Type: String
+    Default: latest
+    Description: Tag dell'immagine su ECR
+
+  CpuTask:
+    Type: String
+    Default: '512'
+    AllowedValues: ['256', '512', '1024']
+    Description: Unita' di CPU (512 = 0,5 vCPU). Il container aspetta le API, non calcola
+
+  MemoriaTask:
+    Type: String
+    Default: '1024'
+    AllowedValues: ['512', '1024', '2048', '4096']
+    Description: MiB di memoria
+
+  LimiteRichiesteGiorno:
+    Type: Number
+    Default: 100
+    Description: Quante consultazioni puo' fare un utente in un giorno
+
+  LimiteCostoMese:
+    Type: String
+    Default: '20'
+    Description: Tetto di spesa in dollari per utente al mese, verso Anthropic e Voyage
+
+  GiorniConservazioneChat:
+    Type: Number
+    Default: 90
+    Description: Dopo quanti giorni il TTL cancella una conversazione
+
+Resources:
+
+  # =========================================================================
+  # Rete
+  #
+  # Due subnet pubbliche in due zone: l'ALB ne pretende almeno due.
+  # Niente NAT Gateway: costerebbe ~33 $/mese, quanto tutto il resto dello
+  # stack, e l'unica cosa che aggiungerebbe e' togliere l'IP pubblico a un
+  # task gia' irraggiungibile dall'esterno grazie al security group.
+  # =========================================================================
+
+  Vpc:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: 10.42.0.0/16
+      EnableDnsSupport: true
+      EnableDnsHostnames: true
+      Tags:
+        - Key: Name
+          Value: !Sub '${NomeProgetto}-vpc'
+
+  InternetGateway:
+    Type: AWS::EC2::InternetGateway
+
+  CollegamentoGateway:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      VpcId: !Ref Vpc
+      InternetGatewayId: !Ref InternetGateway
+
+  SubnetA:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref Vpc
+      CidrBlock: 10.42.1.0/24
+      AvailabilityZone: !Select [0, !GetAZs '']
+      MapPublicIpOnLaunch: true
+
+  SubnetB:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref Vpc
+      CidrBlock: 10.42.2.0/24
+      AvailabilityZone: !Select [1, !GetAZs '']
+      MapPublicIpOnLaunch: true
+
+  TabellaRotte:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref Vpc
+
+  RottaInternet:
+    Type: AWS::EC2::Route
+    DependsOn: CollegamentoGateway
+    Properties:
+      RouteTableId: !Ref TabellaRotte
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref InternetGateway
+
+  AssociazioneRotteA:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref SubnetA
+      RouteTableId: !Ref TabellaRotte
+
+  AssociazioneRotteB:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref SubnetB
+      RouteTableId: !Ref TabellaRotte
+
+  # =========================================================================
+  # Security group
+  #
+  # L'ALB accetta da chiunque sulla 80, ma il listener rifiuta con 403 tutto
+  # cio' che non porta l'intestazione segreta che aggiunge CloudFront: in
+  # pratica solo la CDN arriva all'applicazione.
+  # Il task accetta solo dall'ALB.
+  # =========================================================================
+
+  SgBilanciatore:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Ingresso HTTP verso il bilanciatore
+      VpcId: !Ref Vpc
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: 0.0.0.0/0
+          Description: Da CloudFront - filtrato per intestazione sul listener
+
+  SgTask:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Il container accetta solo dal bilanciatore
+      VpcId: !Ref Vpc
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 8000
+          ToPort: 8000
+          SourceSecurityGroupId: !Ref SgBilanciatore
+          Description: Solo dal bilanciatore
+
+  # =========================================================================
+  # Registro immagini
+  # =========================================================================
+
+  Registro:
+    Type: AWS::ECR::Repository
+    Properties:
+      RepositoryName: !Ref NomeProgetto
+      ImageScanningConfiguration:
+        ScanOnPush: true
+      LifecyclePolicy:
+        LifecyclePolicyText: |
+          {
+            "rules": [{
+              "rulePriority": 1,
+              "description": "Tiene le ultime 10 immagini",
+              "selection": {
+                "tagStatus": "any",
+                "countType": "imageCountMoreThan",
+                "countNumber": 10
+              },
+              "action": {"type": "expire"}
+            }]
+          }
+
+  # =========================================================================
+  # Stato applicativo su DynamoDB
+  #
+  # Le conversazioni NON stanno su Aura: 03_load.py --reset esegue
+  # MATCH (n) DETACH DELETE n, e cancellerebbe le chat di tutti a ogni
+  # ricarico del grafo. Aura tiene la normativa, DynamoDB le persone.
+  # =========================================================================
+
+  TabellaCheckpoint:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub '${NomeProgetto}-checkpoint'
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: thread_id
+          AttributeType: S
+        - AttributeName: checkpoint_id
+          AttributeType: S
+      KeySchema:
+        - AttributeName: thread_id
+          KeyType: HASH
+        - AttributeName: checkpoint_id
+          KeyType: RANGE
+      # Il TTL resta dichiarato ma per ora e' inerte: la libreria non scrive
+      # l'attributo `scadenza`, quindi niente scade da solo. I checkpoint sono
+      # di pochi KB e a questi volumi la crescita e' trascurabile per anni; se
+      # un domani dara' fastidio, si pota con un lavoro periodico.
+      TimeToLiveSpecification:
+        AttributeName: scadenza
+        Enabled: true
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
+
+  TabellaScritture:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub '${NomeProgetto}-scritture'
+      BillingMode: PAY_PER_REQUEST
+      # Lo schema lo detta la libreria langgraph-checkpoint-dynamodb, non noi:
+      # Write.to_dynamodb_item() scrive esattamente queste due chiavi. Con nomi
+      # diversi il servizio esploderebbe alla prima domanda.
+      AttributeDefinitions:
+        - AttributeName: thread_id_checkpoint_id_checkpoint_ns
+          AttributeType: S
+        - AttributeName: task_id_idx
+          AttributeType: S
+      KeySchema:
+        - AttributeName: thread_id_checkpoint_id_checkpoint_ns
+          KeyType: HASH
+        - AttributeName: task_id_idx
+          KeyType: RANGE
+
+  TabellaUtenti:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub '${NomeProgetto}-utenti'
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: utente
+          AttributeType: S
+      KeySchema:
+        - AttributeName: utente
+          KeyType: HASH
+
+  TabellaConversazioni:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub '${NomeProgetto}-conversazioni'
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: utente
+          AttributeType: S
+        - AttributeName: conversazione
+          AttributeType: S
+        - AttributeName: aggiornata
+          AttributeType: S
+      KeySchema:
+        - AttributeName: utente
+          KeyType: HASH
+        - AttributeName: conversazione
+          KeyType: RANGE
+      LocalSecondaryIndexes:
+        # Per mostrare l'elenco in ordine di ultima attivita' senza ordinare
+        # lato applicazione.
+        - IndexName: per-aggiornamento
+          KeySchema:
+            - AttributeName: utente
+              KeyType: HASH
+            - AttributeName: aggiornata
+              KeyType: RANGE
+          Projection:
+            ProjectionType: ALL
+
+  TabellaRiscontri:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub '${NomeProgetto}-riscontri'
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: conversazione
+          AttributeType: S
+        - AttributeName: messaggio
+          AttributeType: S
+        - AttributeName: giudizio
+          AttributeType: S
+        - AttributeName: creato
+          AttributeType: S
+      KeySchema:
+        - AttributeName: conversazione
+          KeyType: HASH
+        - AttributeName: messaggio
+          KeyType: RANGE
+      GlobalSecondaryIndexes:
+        # L'uso vero della tabella: leggere in ordine di tempo cosa non ha
+        # funzionato, senza scandire tutto.
+        - IndexName: giudizio-creato
+          KeySchema:
+            - AttributeName: giudizio
+              KeyType: HASH
+            - AttributeName: creato
+              KeyType: RANGE
+          Projection:
+            ProjectionType: ALL
+
+  TabellaConsumi:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub '${NomeProgetto}-consumi'
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: utente
+          AttributeType: S
+        - AttributeName: periodo
+          AttributeType: S
+      KeySchema:
+        - AttributeName: utente
+          KeyType: HASH
+        - AttributeName: periodo
+          KeyType: RANGE
+      # I contatori vecchi non servono a nessuno: si cancellano da soli.
+      TimeToLiveSpecification:
+        AttributeName: scadenza
+        Enabled: true
+
+  # =========================================================================
+  # Identita'
+  #
+  # Il servizio non puo' restare aperto: chiamerebbe Anthropic con la chiave
+  # dell'esercente, e chiunque trovi l'URL spenderebbe soldi altrui.
+  # Pool a inviti: niente registrazione libera.
+  # =========================================================================
+
+  PoolUtenti:
+    Type: AWS::Cognito::UserPool
+    Properties:
+      UserPoolName: !Sub '${NomeProgetto}-utenti'
+      AdminCreateUserConfig:
+        AllowAdminCreateUserOnly: true   # solo su invito
+      UsernameAttributes:
+        - email
+      AutoVerifiedAttributes:
+        - email
+      Policies:
+        PasswordPolicy:
+          MinimumLength: 12
+          RequireLowercase: true
+          RequireUppercase: true
+          RequireNumbers: true
+          RequireSymbols: false
+      Schema:
+        - Name: email
+          AttributeDataType: String
+          Required: true
+          Mutable: true
+
+  ClientPool:
+    Type: AWS::Cognito::UserPoolClient
+    Properties:
+      ClientName: !Sub '${NomeProgetto}-web'
+      UserPoolId: !Ref PoolUtenti
+      # Nessun segreto: il client e' un'applicazione nel browser, non puo'
+      # custodire niente. Il flusso e' authorization code con PKCE.
+      GenerateSecret: false
+      # Accesso con email e password dentro l'applicazione, senza passare dalla
+      # Hosted UI. La password viaggia a Cognito su TLS: SRP eviterebbe di
+      # mandarla del tutto, ma richiede una libreria di crittografia nel
+      # browser per un guadagno che, con TLS gia' obbligatorio, e' marginale.
+      ExplicitAuthFlows:
+        - ALLOW_USER_PASSWORD_AUTH
+        - ALLOW_REFRESH_TOKEN_AUTH
+      AllowedOAuthFlows:
+        - code
+      AllowedOAuthScopes:
+        - openid
+        - email
+        - profile
+      AllowedOAuthFlowsUserPoolClient: true
+      SupportedIdentityProviders:
+        - COGNITO
+      CallbackURLs:
+        - !Sub 'https://${Distribuzione.DomainName}/'
+        - 'http://localhost:5173/'
+      LogoutURLs:
+        - !Sub 'https://${Distribuzione.DomainName}/'
+        - 'http://localhost:5173/'
+      AccessTokenValidity: 8
+      IdTokenValidity: 8
+      RefreshTokenValidity: 30
+      TokenValidityUnits:
+        AccessToken: hours
+        IdToken: hours
+        RefreshToken: days
+
+  DominioPool:
+    Type: AWS::Cognito::UserPoolDomain
+    Properties:
+      Domain: !Sub '${NomeProgetto}-${AWS::AccountId}'
+      UserPoolId: !Ref PoolUtenti
+
+  # =========================================================================
+  # Segreti
+  #
+  # Creato vuoto: i valori si mettono a mano dopo, e non passano mai da qui.
+  # Un segreto scritto nel template finirebbe negli eventi dello stack.
+  # =========================================================================
+
+  Segreti:
+    Type: AWS::SecretsManager::Secret
+    Properties:
+      Name: !Sub '${NomeProgetto}/produzione'
+      Description: Credenziali Aura e chiavi API. Da popolare a mano dopo la creazione.
+      SecretString: |
+        {
+          "NEO4J_URI": "DA_COMPILARE",
+          "NEO4J_USERNAME": "DA_COMPILARE",
+          "NEO4J_PASSWORD": "DA_COMPILARE",
+          "NEO4J_DATABASE": "neo4j",
+          "ANTHROPIC_API_KEY": "DA_COMPILARE",
+          "VOYAGE_API_KEY": "DA_COMPILARE"
+        }
+
+  # =========================================================================
+  # Frontend statico
+  # =========================================================================
+
+  BucketFrontend:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub '${NomeProgetto}-frontend-${AWS::AccountId}'
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+
+  # =========================================================================
+  # Archivio delle fonti
+  #
+  # I PDF originali e i JSON parsati esistono solo sul disco di chi ha fatto
+  # lo scraping. Riacquisirli e' dieci ore di richieste al portale con tre
+  # secondi di pausa fra l'una e l'altra: non e' una copia che si rifa' in
+  # fretta.
+  #
+  # DeletionPolicy Retain: se un giorno lo stack viene cancellato, questo
+  # bucket resta. Il resto e' ricreabile in un quarto d'ora, l'archivio no.
+  # =========================================================================
+
+  BucketArchivio:
+    Type: AWS::S3::Bucket
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      BucketName: !Sub '${NomeProgetto}-archivio-${AWS::AccountId}'
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      # I PDF non cambiano mai: il versionamento non serve a tracciare
+      # modifiche, serve a sopravvivere a una cancellazione per sbaglio.
+      VersioningConfiguration:
+        Status: Enabled
+      LifecycleConfiguration:
+        Rules:
+          - Id: verso-accesso-infrequente
+            Status: Enabled
+            # Dati scritti una volta e letti di rado: dopo un mese non c'e'
+            # ragione di pagarli a tariffa piena.
+            Transitions:
+              - StorageClass: STANDARD_IA
+                TransitionInDays: 30
+          - Id: pota-le-versioni-vecchie
+            Status: Enabled
+            NoncurrentVersionExpirationInDays: 90
+
+  PolicyBucketFrontend:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref BucketFrontend
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: cloudfront.amazonaws.com
+            Action: s3:GetObject
+            Resource: !Sub '${BucketFrontend.Arn}/*'
+            Condition:
+              StringEquals:
+                AWS:SourceArn: !Sub 'arn:aws:cloudfront::${AWS::AccountId}:distribution/${Distribuzione}'
+
+  ControlloAccessoOrigine:
+    Type: AWS::CloudFront::OriginAccessControl
+    Properties:
+      OriginAccessControlConfig:
+        Name: !Sub '${NomeProgetto}-oac'
+        OriginAccessControlOriginType: s3
+        SigningBehavior: always
+        SigningProtocol: sigv4
+
+  # =========================================================================
+  # Bilanciatore
+  # =========================================================================
+
+  Bilanciatore:
+    Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+    Properties:
+      Type: application
+      Scheme: internet-facing
+      Subnets:
+        - !Ref SubnetA
+        - !Ref SubnetB
+      SecurityGroups:
+        - !Ref SgBilanciatore
+      LoadBalancerAttributes:
+        # Lo streaming SSE puo' restare aperto a lungo mentre l'agente lavora:
+        # i 60 secondi predefiniti lo taglierebbero a meta'.
+        - Key: idle_timeout.timeout_seconds
+          Value: '300'
+
+  GruppoBersaglio:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      VpcId: !Ref Vpc
+      Port: 8000
+      Protocol: HTTP
+      TargetType: ip
+      # L'health check NON deve interrogare Neo4j: se Aura ha un singhiozzo,
+      # l'ALB ucciderebbe e ricreerebbe i container in ciclo, trasformando un
+      # problema del database in un'interruzione totale.
+      HealthCheckPath: /salute
+      HealthCheckIntervalSeconds: 30
+      HealthyThresholdCount: 2
+      UnhealthyThresholdCount: 3
+      Matcher:
+        HttpCode: '200'
+      TargetGroupAttributes:
+        - Key: deregistration_delay.timeout_seconds
+          Value: '30'
+
+  Ascoltatore:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Properties:
+      LoadBalancerArn: !Ref Bilanciatore
+      Port: 80
+      Protocol: HTTP
+      # Chi arriva senza l'intestazione segreta di CloudFront viene respinto:
+      # l'ALB e' raggiungibile in rete, ma non utilizzabile scavalcando la CDN.
+      DefaultActions:
+        - Type: fixed-response
+          FixedResponseConfig:
+            StatusCode: '403'
+            ContentType: text/plain
+            MessageBody: Passare da CloudFront.
+
+  RegolaOrigineVerificata:
+    Type: AWS::ElasticLoadBalancingV2::ListenerRule
+    Properties:
+      ListenerArn: !Ref Ascoltatore
+      Priority: 1
+      Conditions:
+        - Field: http-header
+          HttpHeaderConfig:
+            HttpHeaderName: X-Origine-Verificata
+            Values:
+              - !Select [2, !Split ['/', !Ref AWS::StackId]]
+      Actions:
+        - Type: forward
+          TargetGroupArn: !Ref GruppoBersaglio
+
+  # =========================================================================
+  # CloudFront
+  # =========================================================================
+
+  Distribuzione:
+    Type: AWS::CloudFront::Distribution
+    Properties:
+      DistributionConfig:
+        Enabled: true
+        Comment: !Sub '${NomeProgetto} - frontend e API'
+        DefaultRootObject: index.html
+        HttpVersion: http2and3
+        PriceClass: PriceClass_100      # Europa e Nord America: basta e avanza
+        Origins:
+          - Id: origineS3
+            DomainName: !GetAtt BucketFrontend.RegionalDomainName
+            OriginAccessControlId: !GetAtt ControlloAccessoOrigine.Id
+            S3OriginConfig:
+              OriginAccessIdentity: ''
+          - Id: origineAlb
+            DomainName: !GetAtt Bilanciatore.DNSName
+            CustomOriginConfig:
+              OriginProtocolPolicy: http-only
+              HTTPPort: 80
+              # Predefinito 30 s. L'agente puo' impiegare di piu' prima del
+              # primo byte su una consultazione con molti giri di strumenti.
+              OriginReadTimeout: 120
+              OriginKeepaliveTimeout: 60
+            OriginCustomHeaders:
+              - HeaderName: X-Origine-Verificata
+                HeaderValue: !Select [2, !Split ['/', !Ref AWS::StackId]]
+
+        DefaultCacheBehavior:
+          TargetOriginId: origineS3
+          ViewerProtocolPolicy: redirect-to-https
+          Compress: true
+          AllowedMethods: [GET, HEAD, OPTIONS]
+          CachePolicyId: 658327ea-f89d-4fab-a63d-7e88639e58f6   # CachingOptimized
+
+        CacheBehaviors:
+          # CachingDisabled non e' un dettaglio di prestazioni: senza, CloudFront
+          # bufferizza la risposta e lo streaming SSE arriva tutto insieme alla
+          # fine. Nessun errore, solo un'esperienza che sembra lentissima.
+          - PathPattern: /chat
+            TargetOriginId: origineAlb
+            ViewerProtocolPolicy: redirect-to-https
+            Compress: false
+            AllowedMethods: [GET, HEAD, OPTIONS, PUT, POST, PATCH, DELETE]
+            CachePolicyId: 4135ea2d-6df8-44a3-9df3-4b5a84be39ad         # CachingDisabled
+            OriginRequestPolicyId: b689b0a8-53d0-40ab-baf2-68738e2966ac # AllViewerExceptHostHeader
+          - PathPattern: /riscontro
+            TargetOriginId: origineAlb
+            ViewerProtocolPolicy: redirect-to-https
+            AllowedMethods: [GET, HEAD, OPTIONS, PUT, POST, PATCH, DELETE]
+            CachePolicyId: 4135ea2d-6df8-44a3-9df3-4b5a84be39ad
+            OriginRequestPolicyId: b689b0a8-53d0-40ab-baf2-68738e2966ac
+          - PathPattern: /conversazioni*
+            TargetOriginId: origineAlb
+            ViewerProtocolPolicy: redirect-to-https
+            AllowedMethods: [GET, HEAD, OPTIONS, PUT, POST, PATCH, DELETE]
+            CachePolicyId: 4135ea2d-6df8-44a3-9df3-4b5a84be39ad
+            OriginRequestPolicyId: b689b0a8-53d0-40ab-baf2-68738e2966ac
+          - PathPattern: /stato
+            TargetOriginId: origineAlb
+            ViewerProtocolPolicy: redirect-to-https
+            AllowedMethods: [GET, HEAD, OPTIONS]
+            CachePolicyId: 4135ea2d-6df8-44a3-9df3-4b5a84be39ad
+            OriginRequestPolicyId: b689b0a8-53d0-40ab-baf2-68738e2966ac
+
+        # La UI e' un'applicazione a pagina singola: un percorso sconosciuto
+        # non e' un file mancante, e' una rotta del client.
+        CustomErrorResponses:
+          - ErrorCode: 403
+            ResponseCode: 200
+            ResponsePagePath: /index.html
+            ErrorCachingMinTTL: 10
+          - ErrorCode: 404
+            ResponseCode: 200
+            ResponsePagePath: /index.html
+            ErrorCachingMinTTL: 10
+
+  # =========================================================================
+  # Ruoli
+  # =========================================================================
+
+  RuoloEsecuzione:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal: {Service: ecs-tasks.amazonaws.com}
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy
+      Policies:
+        - PolicyName: LetturaSegreti
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action: secretsmanager:GetSecretValue
+                Resource: !Ref Segreti
+
+  # Il ruolo dell'applicazione: puo' toccare le proprie tabelle e nient'altro.
+  RuoloTask:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal: {Service: ecs-tasks.amazonaws.com}
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: StatoApplicativo
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - dynamodb:GetItem
+                  - dynamodb:PutItem
+                  - dynamodb:UpdateItem
+                  - dynamodb:DeleteItem
+                  - dynamodb:Query
+                  - dynamodb:BatchGetItem
+                  - dynamodb:BatchWriteItem
+                Resource:
+                  - !GetAtt TabellaCheckpoint.Arn
+                  - !GetAtt TabellaScritture.Arn
+                  - !GetAtt TabellaUtenti.Arn
+                  - !GetAtt TabellaConversazioni.Arn
+                  - !GetAtt TabellaRiscontri.Arn
+                  - !GetAtt TabellaConsumi.Arn
+                  - !Sub '${TabellaConversazioni.Arn}/index/*'
+                  - !Sub '${TabellaRiscontri.Arn}/index/*'
+
+  # =========================================================================
+  # Servizio
+  # =========================================================================
+
+  RegistroLog:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub '/ecs/${NomeProgetto}'
+      RetentionInDays: 30
+
+  Cluster:
+    Type: AWS::ECS::Cluster
+    Properties:
+      ClusterName: !Sub '${NomeProgetto}-cluster'
+
+  DefinizioneTask:
+    Type: AWS::ECS::TaskDefinition
+    Properties:
+      Family: !Sub '${NomeProgetto}-api'
+      RequiresCompatibilities: [FARGATE]
+      NetworkMode: awsvpc
+      Cpu: !Ref CpuTask
+      Memory: !Ref MemoriaTask
+      ExecutionRoleArn: !GetAtt RuoloEsecuzione.Arn
+      TaskRoleArn: !GetAtt RuoloTask.Arn
+      RuntimePlatform:
+        CpuArchitecture: X86_64
+        OperatingSystemFamily: LINUX
+      ContainerDefinitions:
+        - Name: api
+          Image: !Sub '${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/${Registro}:${TagImmagine}'
+          Essential: true
+          PortMappings:
+            - ContainerPort: 8000
+          Environment:
+            - Name: TABELLA_CHECKPOINT
+              Value: !Ref TabellaCheckpoint
+            - Name: TABELLA_SCRITTURE
+              Value: !Ref TabellaScritture
+            - Name: TABELLA_UTENTI
+              Value: !Ref TabellaUtenti
+            - Name: TABELLA_CONVERSAZIONI
+              Value: !Ref TabellaConversazioni
+            - Name: TABELLA_RISCONTRI
+              Value: !Ref TabellaRiscontri
+            - Name: TABELLA_CONSUMI
+              Value: !Ref TabellaConsumi
+            - Name: LIMITE_RICHIESTE_GIORNO
+              Value: !Ref LimiteRichiesteGiorno
+            - Name: LIMITE_COSTO_MESE
+              Value: !Ref LimiteCostoMese
+            - Name: COGNITO_POOL_ID
+              Value: !Ref PoolUtenti
+            - Name: COGNITO_CLIENT_ID
+              Value: !Ref ClientPool
+            - Name: REGIONE
+              Value: !Ref AWS::Region
+            - Name: GIORNI_CONSERVAZIONE_CHAT
+              Value: !Ref GiorniConservazioneChat
+          # I segreti arrivano da Secrets Manager, non dall'immagine.
+          Secrets:
+            - Name: NEO4J_URI
+              ValueFrom: !Sub '${Segreti}:NEO4J_URI::'
+            - Name: NEO4J_USERNAME
+              ValueFrom: !Sub '${Segreti}:NEO4J_USERNAME::'
+            - Name: NEO4J_PASSWORD
+              ValueFrom: !Sub '${Segreti}:NEO4J_PASSWORD::'
+            - Name: NEO4J_DATABASE
+              ValueFrom: !Sub '${Segreti}:NEO4J_DATABASE::'
+            - Name: ANTHROPIC_API_KEY
+              ValueFrom: !Sub '${Segreti}:ANTHROPIC_API_KEY::'
+            - Name: VOYAGE_API_KEY
+              ValueFrom: !Sub '${Segreti}:VOYAGE_API_KEY::'
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-group: !Ref RegistroLog
+              awslogs-region: !Ref AWS::Region
+              awslogs-stream-prefix: api
+
+  Servizio:
+    Type: AWS::ECS::Service
+    DependsOn: RegolaOrigineVerificata
+    Properties:
+      ServiceName: !Sub '${NomeProgetto}-api'
+      Cluster: !Ref Cluster
+      TaskDefinition: !Ref DefinizioneTask
+      DesiredCount: !Ref NumeroTask
+      LaunchType: FARGATE
+      HealthCheckGracePeriodSeconds: 60
+      DeploymentConfiguration:
+        MinimumHealthyPercent: 100
+        MaximumPercent: 200
+      NetworkConfiguration:
+        AwsvpcConfiguration:
+          # IP pubblico per raggiungere Aura, Anthropic ed ECR senza NAT.
+          # L'ingresso resta chiuso: lo consente solo il security group dell'ALB.
+          AssignPublicIp: ENABLED
+          Subnets: [!Ref SubnetA, !Ref SubnetB]
+          SecurityGroups: [!Ref SgTask]
+      LoadBalancers:
+        - ContainerName: api
+          ContainerPort: 8000
+          TargetGroupArn: !Ref GruppoBersaglio
+
+  # Cablato e inattivo: e' la differenza fra "ampliabile" e "da rifare".
+  BersaglioScalabile:
+    Type: AWS::ApplicationAutoScaling::ScalableTarget
+    Properties:
+      MinCapacity: 1
+      MaxCapacity: 4
+      ResourceId: !Sub 'service/${Cluster}/${Servizio.Name}'
+      ScalableDimension: ecs:service:DesiredCount
+      ServiceNamespace: ecs
+      RoleARN: !Sub 'arn:aws:iam::${AWS::AccountId}:role/aws-service-role/ecs.application-autoscaling.amazonaws.com/AWSServiceRoleForApplicationAutoScaling_ECSService'
+
+  PoliticaScalabilita:
+    Type: AWS::ApplicationAutoScaling::ScalingPolicy
+    Properties:
+      PolicyName: !Sub '${NomeProgetto}-cpu'
+      PolicyType: TargetTrackingScaling
+      ScalingTargetId: !Ref BersaglioScalabile
+      TargetTrackingScalingPolicyConfiguration:
+        # NON la CPU. Questa applicazione non calcola: aspetta Anthropic e Aura
+        # per decine di secondi, tenendo occupato un thread del pool (40) senza
+        # scaldare il processore. Il servizio si pianta quando i thread
+        # finiscono, con la CPU ancora intorno al 5%: un allarme sulla CPU non
+        # scatterebbe mai.
+        # Le richieste in corso per container, invece, salgono davvero.
+        TargetValue: 12
+        PredefinedMetricSpecification:
+          PredefinedMetricType: ALBRequestCountPerTarget
+          ResourceLabel: !Sub '${Bilanciatore.LoadBalancerFullName}/${GruppoBersaglio.TargetGroupFullName}'
+        ScaleInCooldown: 300
+        ScaleOutCooldown: 60
+
+Outputs:
+  UrlPubblico:
+    Description: L'indirizzo del servizio
+    Value: !Sub 'https://${Distribuzione.DomainName}'
+
+  UrlRegistro:
+    Description: Dove spingere l'immagine
+    Value: !Sub '${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/${Registro}'
+
+  BucketFrontend:
+    Description: Dove caricare il frontend compilato
+    Value: !Ref BucketFrontend
+
+  BucketArchivio:
+    Description: PDF originali e JSON parsati delle norme
+    Value: !Ref BucketArchivio
+
+  IdDistribuzione:
+    Description: Serve per invalidare la cache dopo un aggiornamento della UI
+    Value: !Ref Distribuzione
+
+  DominioCognito:
+    Description: Hosted UI per l'accesso
+    Value: !Sub 'https://${DominioPool}.auth.${AWS::Region}.amazoncognito.com'
+
+  IdPoolUtenti:
+    Value: !Ref PoolUtenti
+
+  IdClientCognito:
+    Value: !Ref ClientPool
+
+  NomeSegreto:
+    Description: Da popolare a mano prima di portare NumeroTask a 1
+    Value: !Ref Segreti
+
+  TabellaConsumi:
+    Description: Contabilita' per utente, con i tetti applicati
+    Value: !Ref TabellaConsumi

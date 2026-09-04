@@ -31,7 +31,7 @@ if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(line_buffering=True)
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from comune import PREFISSI, norma_id  # noqa: E402
+from comune import PREFISSI, norma_id, id_qualificato, normalizza_estremi  # noqa: E402
 
 BASE = "https://www.consigliograndeegenerale.sm"
 ARCHIVIO = f"{BASE}/on-line/home/archivio-leggi-decreti-e-regolamenti.html"
@@ -301,15 +301,45 @@ def salva_indice(indice):
         pass
 
 
+def detentore_di(nid):
+    """
+    Lo schedaId a cui appartiene la cartella <nid>, letto dalla sua scheda.
+
+    Restituisce None se la cartella non esiste o non e' interpretabile: in
+    entrambi i casi l'id e' libero.
+    """
+    scheda = RAW / nid / "scheda.json"
+    if not scheda.exists():
+        return None
+    try:
+        d = json.loads(scheda.read_text(encoding="utf-8"))
+    except (ValueError, OSError):
+        return None
+    m = re.search(r"scheda(\d+)\.html", d.get("urlScheda") or "")
+    return m.group(1) if m else None
+
+
 def scarica_uno(r, indice):
     """Scarica scheda + PDF di un risultato. Restituisce l'id, o None se salta."""
     gia = indice.get(r["schedaId"])
-    if gia and (RAW / gia / "testo.pdf").exists():
+    if gia and (RAW / gia / "testo.pdf").exists() and detentore_di(gia) == r["schedaId"]:
         return None                      # gia' in archivio locale
 
     time.sleep(PAUSA)
     campi, nome_file, iter_url = leggi_scheda(r["urlScheda"])
-    nid = norma_id(campi.get("tipo"), campi.get("numero"), campi.get("anno"))
+    # Il portale a volte scambia numero e anno, o lascia l'anno a zero: si
+    # raddrizzano qui, prima che l'errore finisca nell'id e diventi permanente.
+    numero, anno = normalizza_estremi(campi.get("numero"), campi.get("anno"),
+                                      data_iso(campi.get("data")))
+    nid = norma_id(campi.get("tipo"), numero, anno)
+
+    # Tipo+numero+anno non e' una chiave: se la cartella e' gia' di un'altra
+    # scheda, sovrascriverla farebbe sparire quell'atto dall'archivio. L'id
+    # viene qualificato con lo schedaId invece di rubare quello altrui.
+    detentore = detentore_di(nid)
+    if detentore is not None and detentore != r["schedaId"]:
+        nid = id_qualificato(nid, r["schedaId"])
+        print(f"      id conteso da {detentore}: uso {nid}")
 
     cartella = RAW / nid
     cartella.mkdir(parents=True, exist_ok=True)
@@ -319,8 +349,8 @@ def scarica_uno(r, indice):
     meta = {
         "id": nid,
         "tipo": campi.get("tipo"),
-        "numero": int(campi["numero"]) if campi.get("numero", "").isdigit() else campi.get("numero"),
-        "anno": int(campi["anno"]) if campi.get("anno", "").isdigit() else campi.get("anno"),
+        "numero": numero,
+        "anno": anno,
         "data": data_iso(campi.get("data")),
         "dataPubblicazione": data_iso(campi.get("data pubblicazione")),
         "dataEntrataVigore": data_iso(campi.get("data entrata vigore")),

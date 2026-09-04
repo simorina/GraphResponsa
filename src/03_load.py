@@ -126,14 +126,40 @@ MERGE (cm)-[:CITA_ARTICOLO]->(a)
 """
 
 
+def motivo_scarto(dati):
+    """
+    Dice perche' un record non e' caricabile, o None se e' sano.
+
+    Non tutto cio' che sta in data/parsed viene da 02_parse.py: alcuni Statuti
+    sono stati integrati da script a parte e portano i byte grezzi del PDF al
+    posto del testo estratto. Caricarli riempirebbe i nodi :Comma di binario,
+    che finirebbe nell'indice full-text, negli embedding e quindi nelle
+    risposte dell'agente come se fosse testo normativo. Meglio saltarli, e
+    dirlo forte: un record scartato in silenzio e' un buco che nessuno trova.
+    """
+    for a in dati.get("articoli") or []:
+        for c in a.get("commi") or []:
+            if "id" not in c:
+                return "commi privi di id: non prodotto da 02_parse.py"
+            testo = (c.get("testo") or "").lstrip()
+            if testo.startswith("%PDF") or "endstream" in testo[:2000]:
+                return "testo binario: il PDF non e' stato estratto"
+    return None
+
+
 def prepara(dati):
     """Appiattisce il JSON nelle forme attese dalle query."""
     nid = dati["id"]
 
     # Titolo e Capo diventano proprieta' dell'articolo: la struttura del grafo
     # e' Norma -> Articolo -> Comma, ma il contesto tematico non si perde.
+    #
+    # Le chiavi si leggono con .get(): non tutti i JSON in data/parsed vengono
+    # da 02_parse.py - alcuni Statuti sono stati integrati a parte, con una
+    # forma piu' povera. Una chiave assente non deve far cadere il caricamento
+    # dell'intero corpus a tre quarti del lavoro.
     contesto = {}
-    for t in dati["partizioni"]:
+    for t in dati.get("partizioni") or []:
         contesto[t["id"]] = {"titolo": f"{t['tipo']} {t['numero']}",
                              "titoloRubrica": t.get("rubrica"),
                              "capo": None, "capoRubrica": None}
@@ -144,25 +170,25 @@ def prepara(dati):
                                  "capoRubrica": c.get("rubrica")}
 
     articoli = []
-    for a in dati["articoli"]:
+    for a in dati.get("articoli") or []:
         # L'id del comma arriva dal parser: e' lui a sapere come disambiguare
         # i numeri ripetuti (novelle e refusi della legge).
         commi = [{"id": c["id"], "numero": c["numero"], "testo": c["testo"],
-                  "ordine": i, "numerazioneAnomala": c["numerazioneAnomala"],
+                  "ordine": i, "numerazioneAnomala": c.get("numerazioneAnomala", False),
                   "commaImplicito": c.get("commaImplicito", False)}
-                 for i, c in enumerate(a["commi"])]
-        ctx = contesto.get(a["partizioneId"]) or {
+                 for i, c in enumerate(a.get("commi") or [])]
+        ctx = contesto.get(a.get("partizioneId")) or {
             "titolo": None, "titoloRubrica": None, "capo": None, "capoRubrica": None}
         articoli.append({
-            "id": a["id"], "numero": a["numero"], "rubrica": a["rubrica"],
-            "ordine": a["ordine"], **ctx,
-            "testo": " ".join(c["testo"] for c in a["commi"]),
+            "id": a["id"], "numero": a["numero"], "rubrica": a.get("rubrica"),
+            "ordine": a.get("ordine", 0), **ctx,
+            "testo": " ".join(c["testo"] for c in a.get("commi") or []),
             "commi": commi,
         })
 
     citazioni = []
-    for a in dati["articoli"]:
-        for c in a["citazioni"]:
+    for a in dati.get("articoli") or []:
+        for c in a.get("citazioni") or []:
             if not c["anno"]:
                 continue  # senza anno la norma non e' identificabile
             citazioni.append({
@@ -248,9 +274,24 @@ def main(reset=False):
     tutte_preambolo = []
 
     # Carica le norme e gli articoli
+    scartati = []
     for idx, f in enumerate(file_json, 1):
-        dati = json.loads(f.read_text(encoding="utf-8"))
+        # L'elenco dei file si legge all'inizio, ma il caricamento dura minuti:
+        # se nel frattempo qualcosa tocca data/parsed - una riparazione, un
+        # nuovo parsing - il file puo' non esserci piu'. Non e' un motivo per
+        # buttare via il lavoro fatto su altri diecimila.
+        try:
+            dati = json.loads(f.read_text(encoding="utf-8"))
+        except (FileNotFoundError, ValueError) as e:
+            scartati.append((f.stem, f"illeggibile: {type(e).__name__}"))
+            continue
         nid = dati["id"]
+
+        motivo = motivo_scarto(dati)
+        if motivo:
+            scartati.append((nid, motivo))
+            continue
+
         articoli, citazioni, cit_preambolo, allegati = prepara(dati)
         tutte_preambolo += cit_preambolo
         tutte_citazioni += citazioni
@@ -282,6 +323,13 @@ def main(reset=False):
 
         if idx % 25 == 0 or idx == len(file_json):
             print(f"  [{idx}/{len(file_json)}] caricate...")
+
+    if scartati:
+        print(f"\nScartati {len(scartati)} record non caricabili:")
+        for nid, motivo in scartati[:10]:
+            print(f"  {nid}: {motivo}")
+        if len(scartati) > 10:
+            print(f"  ... e altri {len(scartati) - 10}")
 
     print(f"\nCaricamento citazioni ({len(tutte_citazioni)} totali)...")
     for chunk in chunk_list(tutte_citazioni, 500):

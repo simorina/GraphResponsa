@@ -1,5 +1,6 @@
 import { useState, useRef } from 'react';
 import { Message } from '../types';
+import { token } from '../auth/cognito';
 
 export function useChat() {
   const [messages, setMessages] = useState<Message[]>([]);
@@ -22,6 +23,17 @@ export function useChat() {
     setConversazione('');
     localStorage.removeItem('gr_conv_id');
     setSessionTitle('Nuova consultazione');
+  };
+
+  /** Riapre una consultazione passata: i messaggi arrivano dal checkpoint. */
+  const apriConversazione = (id: string, messaggi: {role:'user'|'assistant'; content:string}[]) => {
+    if (loading && abortControllerRef.current) abortControllerRef.current.abort();
+    setMessages(messaggi.map((m) => ({ ...m, isStreaming: false })));
+    setConversazione(id);
+    localStorage.setItem('gr_conv_id', id);
+    const prima = messaggi.find((m) => m.role === 'user')?.content ?? 'Consultazione';
+    setSessionTitle(prima.length > 35 ? prima.slice(0, 35) + '…' : prima);
+    setLoading(false);
   };
 
   const stopGeneration = () => {
@@ -68,9 +80,15 @@ export function useChat() {
     abortControllerRef.current = new AbortController();
 
     try {
+      // Senza il token il backend risponde 401 e non chiama Anthropic: e' cio'
+      // che impedisce a un estraneo di spendere la chiave dell'esercente.
+      const t = await token();
       const response = await fetch('/chat', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          ...(t ? { Authorization: `Bearer ${t}` } : {}),
+        },
         body: JSON.stringify({
           domanda: query,
           conversazione: conversazione || null,
@@ -79,7 +97,16 @@ export function useChat() {
       });
 
       if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
+        // 429 non e' un guasto: e' il tetto di spesa o di frequenza che scatta,
+        // e il messaggio del server spiega quale. Va mostrato com'e'.
+        if (response.status === 429 || response.status === 403) {
+          const d = await response.json().catch(() => null);
+          throw new Error(d?.detail || 'Limite raggiunto.');
+        }
+        if (response.status === 401) {
+          throw new Error('Sessione scaduta. Ricarica la pagina per rientrare.');
+        }
+        throw new Error(`Il server ha risposto ${response.status}.`);
       }
 
       const reader = response.body?.getReader();
@@ -178,6 +205,8 @@ export function useChat() {
   };
 
   return {
+    apriConversazione,
+    conversazione,
     messages,
     input,
     setInput,

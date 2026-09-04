@@ -14,6 +14,7 @@ La docstring di ogni funzione diventa la descrizione che il modello legge per
 decidere se usarla: e' documentazione operativa, non commento.
 """
 
+import logging
 import os
 from pathlib import Path
 
@@ -26,9 +27,23 @@ load_dotenv(ROOT / ".env")
 
 # Un comma puo' essere lunghissimo: negli elenchi si tronca per non saturare il
 # contesto, ma l'agente ha sempre leggi_articolo() per il testo integrale.
-MAX_TESTO = 1200
+#
+# A 1200 caratteri si tagliava il 6,5% dei commi; a 2000 si scende al 2,6%, e
+# il costo in contesto resta modesto perche' i risultati sono otto. Cio' che
+# resta tagliato viene ora dichiarato con `troncato: true`: prima il modello
+# vedeva un testo mutilo senza sapere che mancava qualcosa, e non aveva motivo
+# di chiamare leggi_articolo().
+MAX_TESTO = 2000
 
 _grafo = None
+
+
+# Aura avverte che db.index.vector.queryNodes e' deprecata a ogni singola
+# ricerca. La chiamata la fa LangChain, non noi, e non possiamo cambiarla:
+# ottanta righe di avviso identico per ogni domanda seppellivano i log veri.
+# Si spegne il logger e non il driver, perche' la notifica esce anche dalla
+# connessione separata del vector store, che non passa da grafo().
+logging.getLogger("neo4j.notifications").setLevel(logging.ERROR)
 
 
 def grafo() -> Neo4jGraph:
@@ -52,6 +67,10 @@ def _taglia(testo, limite=MAX_TESTO):
     return testo if len(testo) <= limite else testo[:limite] + " [...]"
 
 
+def _troncato(testo, limite=MAX_TESTO):
+    return len((testo or "").strip()) > limite
+
+
 # --------------------------------------------------------------- strumenti
 
 # --------------------------------------------------------------- ricerca ibrida
@@ -64,14 +83,24 @@ MODELLO_EMBEDDING = "voyage-4"
 # disponibili: e' il punto in cui si risale il grafo. Ricerca semantica e
 # navigazione delle relazioni diventano cosi' una query sola.
 RISALITA = """
-MATCH (art:Articolo)-[:HA_COMMA]->(node)
+// L'indice full-text copre Comma E Articolo, rubriche comprese. La versione
+// precedente pretendeva (art)-[:HA_COMMA]->(node): un Articolo agganciato per
+// la sua rubrica produceva zero righe e spariva senza errore, proprio mentre
+// l'indice lo aveva trovato per primo. La rubrica e' la riga piu' densa di
+// senso di un articolo - "(Incompatibilita' con altre cariche)" - e perderla
+// era il difetto piu' costoso del recupero.
+OPTIONAL MATCH (padre:Articolo)-[:HA_COMMA]->(node)
+WITH node, score,
+     coalesce(padre, CASE WHEN node:Articolo THEN node END) AS art
+WHERE art IS NOT NULL
 MATCH (norma:Norma)-[:HA_ARTICOLO]->(art)
 RETURN node.testo AS text, score,
        {normaId: norma.id, normaTitolo: norma.titolo,
+        anno: norma.anno,
         inVigoreDal: toString(norma.dataEntrataVigore),
         articolo: art.numero, rubrica: art.rubrica,
         partizioneTitolo: art.titolo, partizioneCapo: art.capoRubrica,
-        comma: node.numero} AS metadata
+        comma: CASE WHEN node:Comma THEN node.numero ELSE null END} AS metadata
 """
 
 _vettoriale = "non_provato"   # None = non disponibile, altrimenti lo store
@@ -108,66 +137,105 @@ def ricerca_vettoriale():
     return _vettoriale
 
 
-def _full_text(query, limite):
+def _full_text(query, limite, dal_anno=None):
     """Ricerca lessicale: la riserva quando il vettoriale non e' disponibile."""
     righe = grafo().query("""
         CALL db.index.fulltext.queryNodes('testo_normativo', $query)
         YIELD node, score
-        WHERE node:Comma
-        MATCH (art:Articolo)-[:HA_COMMA]->(node)
+        // Anche qui l'articolo agganciato per la rubrica va tenuto, non scartato.
+        OPTIONAL MATCH (padre:Articolo)-[:HA_COMMA]->(node)
+        WITH node, score,
+             coalesce(padre, CASE WHEN node:Articolo THEN node END) AS art
+        WHERE art IS NOT NULL
         MATCH (norma:Norma)-[:HA_ARTICOLO]->(art)
-        RETURN round(score, 2) AS punteggio,
-               norma.id AS normaId, norma.titolo AS normaTitolo,
+        WHERE $dal_anno IS NULL OR norma.anno >= $dal_anno
+        RETURN norma.id AS normaId, norma.titolo AS normaTitolo,
+               norma.anno AS anno,
                toString(norma.dataEntrataVigore) AS inVigoreDal,
                art.numero AS articolo, art.rubrica AS rubrica,
                art.titolo AS partizioneTitolo, art.capoRubrica AS partizioneCapo,
-               node.numero AS comma, node.testo AS testo
-        ORDER BY score DESC LIMIT $limite
-    """, {"query": query, "limite": limite})
-    for r in righe:
+               CASE WHEN node:Comma THEN node.numero ELSE null END AS comma,
+               node.testo AS testo
+        ORDER BY score DESC, norma.anno DESC LIMIT $limite
+    """, {"query": query, "limite": limite, "dal_anno": dal_anno})
+    for i, r in enumerate(righe, 1):
+        r["rango"] = i
+        r["troncato"] = _troncato(r["testo"])
         r["testo"] = _taglia(r["testo"])
     return righe
 
 
 @tool
-def cerca_testo(query: str, limite: int = 8) -> dict:
-    """Cerca nel testo dei commi di tutte le norme in archivio.
+def cerca_testo(query: str, limite: int = 8, dal_anno: int | None = None) -> dict:
+    """Cerca nel testo della normativa in archivio.
 
     E' lo strumento da usare per primo su qualunque domanda di merito
-    ("cosa prevede la legge su X"). Restituisce i commi piu' pertinenti, ognuno
+    ("cosa prevede la legge su X"). Restituisce i passi piu' pertinenti, ognuno
     gia' corredato di norma, articolo, rubrica e collocazione nel testo.
 
     La ricerca e' ibrida: trova sia per corrispondenza di parole sia per
     significato, quindi puoi usare tanto i termini tecnici del linguaggio
     normativo quanto le parole con cui la domanda e' stata posta.
 
+    Se un risultato ha `troncato: true` il testo mostrato e' tagliato: per il
+    contenuto completo chiama leggi_articolo().
+
+    Se la prima ricerca rende poco, riformula con il lessico normativo prima di
+    concludere che l'archivio non contiene la materia.
+
+    ATTENZIONE: questa ricerca restituisce SEMPRE dei risultati, anche quando
+    l'archivio non disciplina affatto la materia chiesta - in quel caso rende
+    i passi meno lontani, che possono non entrarci nulla. Il `rango` dice solo
+    l'ordine, non la pertinenza. L'unico modo di stabilire se un risultato
+    risponde e' leggerne il testo. Se nessuno parla davvero della materia,
+    la risposta giusta e' che l'archivio non la contiene.
+
     Args:
         query: cosa cercare, es. "vincoli alla edificazione in zona agricola"
-        limite: quanti commi restituire (default 8)
+        limite: quanti risultati restituire (default 8, alzalo se la materia e' ampia)
+        dal_anno: opzionale, scarta le norme anteriori a quell'anno. Utile per
+            cercare la disciplina piu' recente su una materia gia' individuata.
     """
     store = ricerca_vettoriale()
     if store is None:
-        righe = _full_text(query, limite)
+        righe = _full_text(query, limite, dal_anno)
         modo = "solo lessicale"
     else:
         try:
-            trovati = store.similarity_search_with_score(query, k=limite)
+            # Con un filtro sull'anno si pesca piu' largo e si taglia dopo:
+            # il filtro agisce sui risultati, non sull'indice.
+            k = limite * 4 if dal_anno else limite
+            trovati = store.similarity_search_with_score(query, k=k)
             righe = []
             for documento, punteggio in trovati:
                 m = documento.metadata or {}
+                if dal_anno and (m.get("anno") or 0) < dal_anno:
+                    continue
                 righe.append({
-                    "punteggio": round(float(punteggio), 3),
+                    # Niente punteggio: il retriever ibrido lo rinormalizza, e
+                    # misurato vale ~1.000 tanto per "termine per il ricorso
+                    # elettorale" (che l'archivio disciplina) quanto per
+                    # "requisiti della nave rompighiaccio in Artico" (che non
+                    # esiste in San Marino). Un numero costante che si legge
+                    # come confidenza spinge a rispondere sul nulla. Il rango
+                    # dice il vero: questo e' il k-esimo passo piu' vicino fra
+                    # quelli esistenti, senza promettere che sia pertinente.
+                    "rango": len(righe) + 1,
                     "normaId": m.get("normaId"), "normaTitolo": m.get("normaTitolo"),
+                    "anno": m.get("anno"),
                     "inVigoreDal": m.get("inVigoreDal"),
                     "articolo": m.get("articolo"), "rubrica": m.get("rubrica"),
                     "partizioneTitolo": m.get("partizioneTitolo"),
                     "partizioneCapo": m.get("partizioneCapo"),
                     "comma": m.get("comma"),
+                    "troncato": _troncato(documento.page_content),
                     "testo": _taglia(documento.page_content),
                 })
+                if len(righe) >= limite:
+                    break
             modo = "ibrida"
         except Exception:
-            righe = _full_text(query, limite)
+            righe = _full_text(query, limite, dal_anno)
             modo = "solo lessicale (ricerca ibrida non disponibile)"
 
     if not righe:
@@ -199,8 +267,23 @@ def leggi_articolo(norma_id: str, numero: str) -> dict:
                collect({numero: c.numero, testo: c.testo}) AS commi
     """, {"norma_id": norma_id, "numero": str(numero)})
     if not righe:
-        return {"errore": f"Articolo {numero} non trovato in {norma_id}. "
-                          f"Verifica con trova_norma() che la norma sia in archivio."}
+        # Un vicolo cieco costringe a indovinare, e indovinare costa un giro
+        # intero. La numerazione vera ha forme che non si prevedono - "12 bis",
+        # "3-ter", "1 (Definizioni)" - quindi si restituisce l'elenco: dallo
+        # sbaglio si esce leggendo, non ritentando alla cieca.
+        esistenti = grafo().query("""
+            MATCH (n:Norma {id: $norma_id})-[:HA_ARTICOLO]->(a:Articolo)
+            RETURN a.numero AS numero ORDER BY a.ordine
+        """, {"norma_id": norma_id})
+        if not esistenti:
+            return {"errore": f"La norma '{norma_id}' non e' in archivio, oppure "
+                              f"il suo testo non e' stato caricato. Individuala "
+                              f"con trova_norma()."}
+        numeri = [e["numero"] for e in esistenti]
+        return {"errore": f"L'articolo {numero} non esiste in {norma_id}.",
+                "articoliDisponibili": numeri if len(numeri) <= 60 else
+                                       numeri[:60] + [f"... e altri {len(numeri) - 60}"],
+                "quantiArticoli": len(numeri)}
     return righe[0]
 
 
@@ -285,8 +368,31 @@ def trova_norma(numero: int | None = None, anno: int | None = None,
     else:
         return {"errore": "Serve almeno 'numero' oppure 'testo'."}
 
+    if not righe and numero is not None:
+        # Come per leggi_articolo: dal buco si esce con un dato, non con un
+        # nuovo tentativo alla cieca. Quasi sempre il numero e' giusto e ballano
+        # l'anno o la tipologia, quindi si mostra quel numero negli altri anni.
+        altrove = grafo().query("""
+            MATCH (n:Norma) WHERE n.numero = $numero
+            RETURN n.id AS id, n.tipo AS tipo, n.anno AS anno,
+                   n.caricata AS testoDisponibile, left(n.titolo, 90) AS titolo
+            ORDER BY abs(n.anno - coalesce($anno, n.anno)), n.anno DESC LIMIT 8
+        """, {"numero": int(numero), "anno": int(anno) if anno else None})
+        if altrove:
+            return {"risultati": [], "nota":
+                    f"Nessun atto n. {numero}"
+                    + (f" del {anno}" if anno else "")
+                    + (f" di tipo '{tipo}'" if tipo else "")
+                    + ". Con quel numero l'archivio ha pero' questi:",
+                    "altriCandidati": altrove}
+        return {"risultati": [], "nota":
+                f"Nessun atto porta il numero {numero}. Se il numero viene da "
+                f"una citazione puo' essere errato: cerca per materia con "
+                f"cerca_testo(), o per parole del titolo con trova_norma(testo=...)."}
     if not righe:
-        return {"risultati": [], "nota": "Nessuna norma corrisponde."}
+        return {"risultati": [], "nota":
+                "Nessun titolo corrisponde a queste parole. L'indice cerca nel "
+                "titolo, non nel testo: per il merito usa cerca_testo()."}
     return {"risultati": righe}
 
 
