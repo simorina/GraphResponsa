@@ -100,7 +100,8 @@ RETURN node.testo AS text, score,
         inVigoreDal: toString(norma.dataEntrataVigore),
         articolo: art.numero, rubrica: art.rubrica,
         partizioneTitolo: art.titolo, partizioneCapo: art.capoRubrica,
-        comma: CASE WHEN node:Comma THEN node.numero ELSE null END} AS metadata
+        comma: CASE WHEN node:Comma THEN node.numero ELSE null END,
+        urlDocumento: norma.urlDocumento} AS metadata
 """
 
 _vettoriale = "non_provato"   # None = non disponibile, altrimenti lo store
@@ -155,7 +156,7 @@ def _full_text(query, limite, dal_anno=None):
                art.numero AS articolo, art.rubrica AS rubrica,
                art.titolo AS partizioneTitolo, art.capoRubrica AS partizioneCapo,
                CASE WHEN node:Comma THEN node.numero ELSE null END AS comma,
-               node.testo AS testo
+               node.testo AS testo, norma.urlDocumento AS urlDocumento
         ORDER BY score DESC, norma.anno DESC LIMIT $limite
     """, {"query": query, "limite": limite, "dal_anno": dal_anno})
     for i, r in enumerate(righe, 1):
@@ -230,6 +231,7 @@ def cerca_testo(query: str, limite: int = 8, dal_anno: int | None = None) -> dic
                     "comma": m.get("comma"),
                     "troncato": _troncato(documento.page_content),
                     "testo": _taglia(documento.page_content),
+                    "urlDocumento": m.get("urlDocumento"),
                 })
                 if len(righe) >= limite:
                     break
@@ -264,6 +266,7 @@ def leggi_articolo(norma_id: str, numero: str) -> dict:
                toString(n.dataEntrataVigore) AS inVigoreDal,
                a.numero AS articolo, a.rubrica AS rubrica,
                a.titolo AS partizioneTitolo, a.capoRubrica AS partizioneCapo,
+               n.urlDocumento AS urlDocumento,
                collect({numero: c.numero, testo: c.testo}) AS commi
     """, {"norma_id": norma_id, "numero": str(numero)})
     if not righe:
@@ -285,6 +288,16 @@ def leggi_articolo(norma_id: str, numero: str) -> dict:
                                        numeri[:60] + [f"... e altri {len(numeri) - 60}"],
                 "quantiArticoli": len(numeri)}
     return righe[0]
+
+
+def url_documento(norma_id: str) -> str | None:
+    """URL del PDF originale sul portale, se la norma esiste e lo possiede.
+
+    Non e' un tool per l'agente: serve al proxy del server web.
+    """
+    righe = grafo().query(
+        "MATCH (n:Norma {id: $id}) RETURN n.urlDocumento AS url", {"id": norma_id})
+    return righe[0]["url"] if righe else None
 
 
 @tool

@@ -5,6 +5,7 @@ export interface Fonte {
   rubrica?: string;
   comma: string | number;
   testo: string;
+  haDocumento?: boolean;
 }
 
 export interface ThoughtStep {

@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { Copy, Check, AlertTriangle } from 'lucide-react';
 import { marked } from 'marked';
 import type { Message, Fonte } from '../types';
+import { inserisciCitazioniInline, rimuoviMarcatori, trovaFonteDaDataset } from '../citazioni';
 import { ThinkingTrail } from './ThinkingTrail';
 import { Sigillo } from './Sigillo';
 import { Riscontro } from './Riscontro';
@@ -35,7 +36,7 @@ export const MessageItem: React.FC<MessageItemProps> = ({
 
   const copia = async () => {
     try {
-      await navigator.clipboard.writeText(message.content);
+      await navigator.clipboard.writeText(rimuoviMarcatori(message.content));
       setCopiato(true);
       setTimeout(() => setCopiato(false), 1800);
     } catch {
@@ -55,6 +56,13 @@ export const MessageItem: React.FC<MessageItemProps> = ({
 
   const fonti = message.fonti ?? [];
 
+  const gestisciClickCitazione = (e: React.MouseEvent<HTMLDivElement>) => {
+    const bottone = (e.target as HTMLElement).closest('.cita-inline') as HTMLElement | null;
+    if (!bottone) return;
+    const trovata = trovaFonteDaDataset(bottone.dataset, fonti);
+    if (trovata) onSelectSource(trovata);
+  };
+
   return (
     <div className="group/msg flex items-start gap-3.5 py-3 md:gap-4">
       <div className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-lg border border-dorato-2/45 bg-gradient-to-b from-canvas to-alloro-3/55">
@@ -69,7 +77,10 @@ export const MessageItem: React.FC<MessageItemProps> = ({
         {message.content ? (
           <div
             className="prose-legal select-text"
-            dangerouslySetInnerHTML={{ __html: marked.parse(message.content) as string }}
+            onClick={gestisciClickCitazione}
+            dangerouslySetInnerHTML={{
+              __html: marked.parse(inserisciCitazioniInline(message.content, fonti)) as string,
+            }}
           />
         ) : message.isStreaming ? (
           <Attesa />

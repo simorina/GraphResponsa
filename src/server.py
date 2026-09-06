@@ -13,7 +13,10 @@ degrada a vuoto e il server continua a funzionare da solo.
 """
 
 import json
+import mimetypes
 import sys
+import urllib.error
+import urllib.request
 from pathlib import Path
 
 import uvicorn
@@ -25,7 +28,7 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "src"))
 
 from agente.agente import rispondi, nuova_conversazione   # noqa: E402
-from agente.strumenti import grafo                        # noqa: E402
+from agente.strumenti import grafo, url_documento          # noqa: E402
 from servizio import archivio                             # noqa: E402
 from servizio.identita import Utente, utente_corrente     # noqa: E402
 
@@ -113,6 +116,50 @@ def stato():
         return _stato_cache
     except Exception as e:
         return {"ok": False, "errore": str(e)}
+
+
+# ------------------------------------------------------------------ documenti
+
+@app.get("/documenti/{norma_id}")
+def documento(norma_id: str):
+    """
+    Proxy verso il PDF originale della norma sul portale del Consiglio Grande
+    e Generale, senza autenticazione: sono atti pubblici, e a differenza di
+    /chat non spendono la chiave Anthropic, quindi non c'e' conto da proteggere.
+
+    Il portale marca la risposta `Content-Disposition: attachment`: il browser
+    la scarica invece di mostrarla. Qui si rilegge il file e lo si re-inoltra
+    con `inline`, cosi' si apre nel visualizzatore PDF del browser.
+    """
+    url = url_documento(norma_id)
+    if not url:
+        raise HTTPException(status_code=404, detail="Documento non disponibile per questa norma.")
+
+    try:
+        richiesta = urllib.request.Request(url, headers={"User-Agent": "graphResponsa/1.0"})
+        risposta = urllib.request.urlopen(richiesta, timeout=20)
+    except urllib.error.URLError as e:
+        raise HTTPException(status_code=502, detail=f"Portale del Consiglio non raggiungibile: {e}")
+
+    tipo = risposta.headers.get_content_type() or "application/pdf"
+    estensione = mimetypes.guess_extension(tipo) or ".pdf"
+
+    def a_pezzi():
+        # Non l'intero file in memoria: un allegato puo' pesare diversi MB, e
+        # ogni richiesta concorrente terrebbe una copia completa piu' un
+        # thread del pool per tutta la durata del download.
+        with risposta:
+            while pezzo := risposta.read(65536):
+                yield pezzo
+
+    return StreamingResponse(
+        a_pezzi(),
+        media_type=tipo,
+        headers={
+            "Content-Disposition": f'inline; filename="{norma_id}{estensione}"',
+            "Cache-Control": "public, max-age=86400",
+        },
+    )
 
 
 # ---------------------------------------------------------------- consultazione

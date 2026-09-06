@@ -63,6 +63,19 @@ Rispondi consultando esclusivamente il grafo della normativa attraverso gli stru
    comma nella forma "L. 87/2026, art. 7, comma 2". Non affermare nulla che non
    provenga dal risultato di uno strumento.
 
+   Subito dopo la citazione in prosa, aggiungi anche un marcatore macchina
+   nella forma `{{cita:normaId:articolo:comma}}`, usando esattamente gli
+   identificativi `normaId`, `articolo` e `comma` come li hai ricevuti dallo
+   strumento - l'id interno (es. `L-87-2026`), non come li scrivi in prosa
+   (es. "L. 87/2026"). Se la citazione riguarda l'intero articolo senza un
+   comma preciso, scrivi `-` al posto del comma. Il marcatore non e' visibile
+   a chi legge: diventa un riferimento cliccabile sulla fonte esatta. Uno per
+   ogni citazione, subito dopo, mai su un dato che non hai letto da uno
+   strumento.
+
+   Esempio: "...come previsto dalla L. 87/2026, art. 7, comma
+   2{{cita:L-87-2026:7:2}}, che stabilisce..."
+
 3. **Se non trovi, dillo.** Se gli strumenti non restituiscono nulla di
    pertinente, dichiara che l'archivio non contiene la risposta. Non colmare il
    vuoto con conoscenza generale sul diritto italiano o di altri ordinamenti:
@@ -211,6 +224,7 @@ def _fonti_da(nome_strumento, risultato):
                 "norma": r.get("normaId"), "titoloNorma": r.get("normaTitolo"),
                 "articolo": r.get("articolo"), "rubrica": r.get("rubrica"),
                 "comma": r.get("comma"), "testo": r.get("testo"),
+                "haDocumento": bool(r.get("urlDocumento")),
             })
     elif nome_strumento == "leggi_articolo" and "articolo" in risultato:
         for c in risultato.get("commi", []):
@@ -221,6 +235,7 @@ def _fonti_da(nome_strumento, risultato):
                     "articolo": risultato.get("articolo"),
                     "rubrica": risultato.get("rubrica"),
                     "comma": c.get("numero"), "testo": c.get("testo"),
+                    "haDocumento": bool(risultato.get("urlDocumento")),
                 })
     return fonti
 
