@@ -120,17 +120,27 @@ def interroga_locale(domanda, agente):
         return {"errore": f"{type(e).__name__}: {e}"[:90], "testo": "",
                 "secondi": 0, "strumenti": [], "costo": 0}
     strumenti, testo, ingresso, uscita = [], "", 0, 0
+    letti = scritti = 0
     for m in out["messages"]:
         for tc in getattr(m, "tool_calls", None) or []:
             strumenti.append(tc["name"])
         u = getattr(m, "usage_metadata", None) or {}
+        # `input_tokens` comprende i token riletti dalla cache, che costano un
+        # decimo, e quelli scritti, che costano un quarto in piu'. Sommarli al
+        # prezzo pieno gonfiava il costo misurato: il primo giro completo del
+        # benchmark riportava $0,0306 a domanda per questo motivo.
+        d = u.get("input_token_details") or {}
+        letti += d.get("cache_read", 0)
+        scritti += d.get("cache_creation", 0)
         ingresso += u.get("input_tokens", 0)
         uscita += u.get("output_tokens", 0)
         if m.__class__.__name__ == "AIMessage" and not getattr(m, "tool_calls", None):
             testo = m.content if isinstance(m.content, str) else "".join(
                 b.get("text", "") for b in m.content if isinstance(b, dict))
     return {"testo": testo, "secondi": time.time() - t0, "strumenti": strumenti,
-            "costo": ingresso / 1e6 * 1.0 + uscita / 1e6 * 5.0, "errore": None}
+            "costo": ((ingresso - letti - scritti) + scritti * 1.25
+                      + letti * 0.10) / 1e6 * 1.0 + uscita / 1e6 * 5.0,
+            "daCache": letti, "errore": None}
 
 
 def cita_giusto(risposta, riferimento):
