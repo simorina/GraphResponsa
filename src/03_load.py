@@ -126,16 +126,27 @@ MERGE (cm)-[:CITA_ARTICOLO]->(a)
 """
 
 
+# Oltre questa soglia un atto non e' piu' credibile: vedi motivo_scarto().
+MAX_RIPETIZIONI_NUMERO = 3
+
+
 def motivo_scarto(dati):
     """
     Dice perche' un record non e' caricabile, o None se e' sano.
 
-    Non tutto cio' che sta in data/parsed viene da 02_parse.py: alcuni Statuti
-    sono stati integrati da script a parte e portano i byte grezzi del PDF al
-    posto del testo estratto. Caricarli riempirebbe i nodi :Comma di binario,
-    che finirebbe nell'indice full-text, negli embedding e quindi nelle
-    risposte dell'agente come se fosse testo normativo. Meglio saltarli, e
-    dirlo forte: un record scartato in silenzio e' un buco che nessuno trova.
+    Tre motivi, e tutti nascono dallo stesso principio: cio' che entra nel grafo
+    finisce nell'indice full-text, negli embedding e quindi nelle risposte
+    dell'agente. Un record sbagliato non produce un errore, produce una
+    citazione plausibile e falsa.
+
+      - commi privi di id: non viene da 02_parse.py, forma sconosciuta;
+      - testo binario: il PDF non e' stato estratto e i byte grezzi
+        finirebbero nei nodi :Comma come fossero testo normativo;
+      - numerazione patologica: un Allegato e' stato letto come corpo, e i
+        rimandi ad articoli di ALTRE leggi sono diventati articoli propri.
+
+    Uno scarto va sempre dichiarato: un record saltato in silenzio e' un buco
+    che nessuno trova.
     """
     for a in dati.get("articoli") or []:
         for c in a.get("commi") or []:
@@ -144,6 +155,31 @@ def motivo_scarto(dati):
             testo = (c.get("testo") or "").lstrip()
             if testo.startswith("%PDF") or "endstream" in testo[:2000]:
                 return "testo binario: il PDF non e' stato estratto"
+
+    # Numerazione patologica: il riconoscitore ha scambiato per articoli propri
+    # i rimandi contenuti in un Allegato. Succede nei decreti sulle violazioni
+    # amministrative, i cui allegati sono tabelle "4) / art. 222 / sanzione da
+    # euro 20,00 a euro 51,00": quei "art. 222" appartengono ad altre leggi.
+    # DD-149-2016 arriva cosi' a 524 articoli contro i 110 reali, con "art. 3"
+    # ripetuto ventotto volte.
+    #
+    # La soglia e' misurata sull'intero archivio: 10.782 norme non ripetono mai
+    # un numero, 245 arrivano a due (le novelle che citano testualmente i commi
+    # di un altro atto), 37 a tre. Oltre il tre ci sono 71 norme sole, e sono
+    # tutte di quella famiglia: 7.737 articoli in gran parte inventati.
+    #
+    # Si rifiuta l'atto intero invece di provare a salvarne una parte: tenere
+    # la sola sequenza crescente iniziale rendeva 17 articoli contro i 110
+    # veri, quindi il recupero automatico sbaglierebbe piu' di quanto ripari.
+    # Meglio dichiararlo e lasciarlo a un riconoscitore che sappia leggere gli
+    # allegati.
+    numeri = [str(a.get("numero")) for a in dati.get("articoli") or []]
+    if numeri:
+        piu_ripetuto = max(numeri.count(n) for n in set(numeri))
+        if piu_ripetuto > MAX_RIPETIZIONI_NUMERO:
+            return (f"numerazione patologica: uno stesso numero d'articolo "
+                    f"ricorre {piu_ripetuto} volte su {len(numeri)} articoli. "
+                    f"Con ogni probabilita' un Allegato letto come corpo")
     return None
 
 
