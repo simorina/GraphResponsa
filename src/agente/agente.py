@@ -30,6 +30,13 @@ ROOT = Path(__file__).resolve().parent.parent.parent
 load_dotenv(ROOT / ".env")
 
 MODELLO = "claude-haiku-4-5"
+# ChatAnthropic non manda la temperatura se non gliela si da', e l'API allora
+# usa la propria: 1.0, cioe' il massimo campionamento casuale. Su un assistente
+# giuridico e' la scelta peggiore possibile - la stessa domanda deve dare la
+# stessa risposta, e chi legge non sa quale delle due versioni ha ricevuto.
+# Si puo' alzare con TEMPERATURA nell'ambiente, per confrontare gli assetti.
+TEMPERATURA = float(os.environ.get("TEMPERATURA", "0"))
+
 MAX_GIRI = 12   # Ogni chiamata a uno strumento consuma DUE passi del grafo
                 # (nodo modello + nodo strumenti), quindi il tetto vero e'
                 # circa MAX_GIRI-1 chiamate. Con 8 si fermava a sette, e le
@@ -223,6 +230,7 @@ def agente():
         modello = ChatAnthropic(
             model=MODELLO,
             max_tokens=16000,
+            temperature=TEMPERATURA,
             api_key=os.environ["ANTHROPIC_API_KEY"],
         )
 
