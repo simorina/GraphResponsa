@@ -69,6 +69,23 @@ def _taglia(testo, limite=MAX_TESTO):
     return testo if len(testo) <= limite else testo[:limite] + " [...]"
 
 
+def _lucene(query):
+    """Neutralizza la sintassi Lucene: la query e' italiano, non un'espressione.
+
+    `db.index.fulltext.queryNodes` passa la stringa al parser di Lucene, che su
+    una parentesi non bilanciata solleva un errore invece di cercare. Misurato:
+    "art. 47 lettera a) b) c) sosta" faceva fallire la consultazione, e l'agente
+    scrive query cosi' ogni volta che riformula citando un elenco di lettere.
+    Colpisce anche l'utente che digita "art. 47 (comma 2)".
+
+    Si sfugge ogni carattere speciale perche' qui nessuno vuole davvero gli
+    operatori: chi cerca "AND" intende la parola, non la congiunzione booleana.
+    """
+    speciali = set('+-&|!(){}[]^"~*?:' + '\\' + '/')
+    fuori = "".join('\\' + c if c in speciali else c for c in (query or ""))
+    return fuori.strip() or '""'
+
+
 def _firma(testo):
     """Impronta del testo, per riconoscere i passi identici.
 
@@ -180,7 +197,8 @@ def _full_text(query, limite, dal_anno=None):
                CASE WHEN node:Comma THEN node.numero ELSE null END AS comma,
                node.testo AS testo
         ORDER BY score DESC, norma.anno DESC LIMIT $ampio
-    """, {"query": query, "limite": limite, "ampio": limite * 3, "dal_anno": dal_anno})
+    """, {"query": _lucene(query), "limite": limite, "ampio": limite * 3,
+          "dal_anno": dal_anno})
 
     # Stessa potatura dei doppioni del ramo ibrido: due rami, una semantica.
     tenute, viste = [], {}
@@ -466,7 +484,7 @@ def trova_norma(numero: int | None = None, anno: int | None = None,
                    toString(node.dataEntrataVigore) AS inVigoreDal,
                    node.urlScheda AS urlScheda, articoli
             ORDER BY score DESC LIMIT 10
-        """, {"testo": testo})
+        """, {"testo": _lucene(testo)})
     else:
         return {"errore": "Serve almeno 'numero' oppure 'testo'."}
 

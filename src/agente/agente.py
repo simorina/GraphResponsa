@@ -20,6 +20,7 @@ from pathlib import Path
 from dotenv import load_dotenv
 from langchain.agents import create_agent
 from langchain_anthropic import ChatAnthropic
+from langchain_core.messages import SystemMessage
 from langgraph.checkpoint.memory import InMemorySaver
 
 from .strumenti import STRUMENTI
@@ -28,7 +29,14 @@ ROOT = Path(__file__).resolve().parent.parent.parent
 load_dotenv(ROOT / ".env")
 
 MODELLO = "claude-haiku-4-5"
-MAX_GIRI = 8
+MAX_GIRI = 12   # Ogni chiamata a uno strumento consuma DUE passi del grafo
+                # (nodo modello + nodo strumenti), quindi il tetto vero e'
+                # circa MAX_GIRI-1 chiamate. Con 8 si fermava a sette, e le
+                # regole su riformulazione e vigenza portano regolarmente a
+                # sette-nove: misurato, 2 consultazioni su 6 morivano di
+                # GraphRecursionError invece di rispondere. Un'interruzione
+                # costa all'utente tutto, un giro in piu' costa mezzo
+                # centesimo.
 SEPARATORE = "\n\n"
 
 # Prezzi per milione di token, per la stima mostrata nella UI.
@@ -80,6 +88,11 @@ Rispondi consultando esclusivamente il grafo della normativa attraverso gli stru
    `dal_anno` impostato a qualche anno prima di oggi. Esponi in primo piano la
    disciplina vigente, e se il dato e' cambiato dillo: "il compenso e' ora di X
    (L. .../2023); era di Y fino al ...".
+   Il campo `ancheIn` dei risultati e' il segnale piu' economico che hai: se il
+   passo che stai per citare ricorre identico anche in atti piu' recenti, la
+   versione da esporre e' quella dell'atto piu' recente, e ti costa zero giri
+   accorgertene. Succede di continuo con i tariffari e le tabelle di sanzioni,
+   riemessi ogni anno.
    Non fare questa verifica quando la domanda riguarda un fatto storico o un
    atto gia' esaurito: costa giri di ricerca e non aggiunge nulla.
 
@@ -106,6 +119,15 @@ Per presupposti e rinvii usa `citazioni_da`; per l'impatto di una norma usa
 
 Puoi chiamare piu' strumenti in parallelo quando le richieste sono indipendenti.
 
+## Cosa l'archivio contiene, e cosa no
+
+L'archivio raccoglie le **disposizioni** normative, non le **procedure**
+amministrative. A chi chiede come si compila un modulo, a quale sportello si
+presenta un'istanza o quali documenti pretenda l'ufficio, puoi rispondere solo
+con cio' che la norma prescrive - i requisiti, i termini, l'organo competente -
+e devi dire chiaramente che la prassi non e' in archivio. Non dedurre i passi
+pratici dalla disposizione: sembrerebbero istruzioni operative e non lo sono.
+
 ## Quanto sei sicuro
 
 Se sei arrivato alla risposta con una o due ricerche e la fonte e' esplicita,
@@ -116,6 +138,25 @@ di sbieco alla domanda, **dillo**: "e' quanto di piu' pertinente l'archivio
 contiene, ma non disciplina espressamente il tuo caso". Una risposta incerta
 presentata con la sicurezza di una certa e' un danno, perche' chi legge non ha
 modo di accorgersene.
+
+## Chi hai davanti
+
+Ti consultano due tipi di persone, spesso senza dirti quale sono.
+
+Il **professionista** conosce il lessico e vuole l'appiglio esatto: gli servono
+gli estremi, il comma preciso, la formulazione letterale da riportare in un
+atto. Non semplificare per lui, e non parafrasare dove la lettera conta.
+
+L'**impiegato allo sportello o il cittadino** pone la domanda in lingua
+corrente - "bonus prima casa chi ha accesso?", "quanto pago la multa?" - e ha
+bisogno della risposta prima della citazione. Apri con il dato che gli serve,
+in parole sue, e metti gli estremi subito dopo: servono a lui per verificare e
+a te per non essere creduto sulla parola.
+
+Non scegliere fra i due registri: rispondi in modo che il primo trovi la
+precisione e il secondo capisca comunque. Il modo di scriverlo e' cominciare
+dal fatto e non dalla norma - "hai trenta giorni, e sono perentori (L. 28/1991,
+art. 30)" invece di "l'articolo 30 della L. 28/1991 dispone che...".
 
 ## Forma della risposta
 
@@ -170,27 +211,40 @@ def agente():
             api_key=os.environ["ANTHROPIC_API_KEY"],
         )
 
-        # Il prompt caching qui NON si puo' attivare, ed e' stato misurato:
+        # --- Prompt caching ---
         #
-        #   - `modello.bind(cache_control=...)`  -> `bind_tools()`, che
-        #     create_agent chiama, scarta i kwarg legati prima
-        #   - `bind_tools().bind(cache_control=...)` -> il parametro non
-        #     raggiunge comunque l'API: cache_read resta a zero
-        #   - `system_prompt=SystemMessage([... cache_control ...])` -> idem
+        # Il prefisso - istruzioni piu' gli schemi dei sette strumenti - e'
+        # identico a ogni giro del ciclo ReAct e pesa 5.613 token, misurati con
+        # l'API di conteggio. Su una consultazione da tre giri sono 16.839
+        # token rispediti uguali: il 64% dell'ingresso totale.
         #
-        # E anche se arrivasse, Haiku 4.5 ha una soglia minima di 4.096 token
-        # di prefisso: il nostro (istruzioni + sette strumenti) sta sui 2.700,
-        # quindi i primi giri non sarebbero comunque eleggibili. Sotto soglia
-        # Anthropic non mette in cache e non segnala niente.
+        # Due cose andavano capite, e su entrambe mi ero sbagliato prima.
         #
-        # Con ChatAnthropic nudo la cache funziona (verificato: 6.262 token
-        # riletti). Se un domani si passa a un modello con soglia piu' bassa
-        # - Opus 5 ne chiede 512 - vale la pena riprovare, ma servira'
-        # aggirare create_agent, non solo aggiungere un parametro.
+        # 1. `cache_control` non e' un parametro, e' un MARCATORE SU UN BLOCCO
+        #    di contenuto. I tentativi con `modello.bind(cache_control=...)` e
+        #    con `model_kwargs` fallivano per questo. Avevo scritto che era
+        #    `bind_tools()` a scartarlo: falso, verificato: con bind_tools il
+        #    marcatore viene onorato (8.875 token riletti in prova diretta).
+        #
+        # 2. Haiku 4.5 non mette in cache prefissi sotto i 4.096 token, e non
+        #    lo segnala: ignora il marcatore in silenzio. Era questo, e solo
+        #    questo, a tenere la cache spenta. Il prefisso reale misurato sul
+        #    filo stava a ~3.990 token, un centinaio sotto la soglia.
+        #
+        # Il marcatore in coda al prompt di sistema mette in cache tutto cio'
+        # che lo precede nella richiesta - gli schemi degli strumenti stanno
+        # prima del system - quindi un solo punto di rottura copre l'intero
+        # prefisso.
+        istruzioni = SystemMessage(content=[{
+            "type": "text",
+            "text": ISTRUZIONI,
+            "cache_control": {"type": "ephemeral"},
+        }])
+
         _agente = create_agent(
             model=modello,
             tools=STRUMENTI,
-            system_prompt=ISTRUZIONI,
+            system_prompt=istruzioni,
             checkpointer=_memoria,
         )
     return _agente
@@ -266,6 +320,7 @@ def rispondi(domanda, conversazione=None):
 
     fonti_raccolte, viste = [], set()
     token_in = token_out = 0
+    token_letti = token_scritti = 0
     # I nomi arrivano con l'AIMessage, i risultati dopo col ToolMessage:
     # questa mappa li ricongiunge per id di chiamata.
     nomi_per_id = {}
@@ -297,7 +352,17 @@ def rispondi(domanda, conversazione=None):
                 for messaggio in stato.get("messages", []) or []:
                     uso = getattr(messaggio, "usage_metadata", None)
                     if uso:
+                        # `input_tokens` comprende i token riletti dalla cache,
+                        # che pero' costano un decimo, e quelli scritti, che
+                        # costano un quarto in piu'. Sommarli al prezzo pieno
+                        # gonfierebbe il costo mostrato all'utente e quello
+                        # registrato sui consumi.
+                        d = uso.get("input_token_details") or {}
+                        letti = d.get("cache_read", 0)
+                        scritti = d.get("cache_creation", 0)
                         token_in += uso.get("input_tokens", 0)
+                        token_letti += letti
+                        token_scritti += scritti
                         token_out += uso.get("output_tokens", 0)
 
                     if type(messaggio).__name__ == "AIMessage":
@@ -339,6 +404,10 @@ def rispondi(domanda, conversazione=None):
         yield {"tipo": "fonti", "fonti": fonti_raccolte}
 
     prezzo_in, prezzo_out = PREZZI.get(MODELLO, (5.0, 25.0))
+    # Scrivere in cache costa 1,25 volte; rileggere 0,10.
+    pieni = token_in - token_letti - token_scritti
+    costo = (pieni + token_scritti * 1.25 + token_letti * 0.10) / 1e6 * prezzo_in         + token_out / 1e6 * prezzo_out
     yield {"tipo": "fine", "tokenIn": token_in, "tokenOut": token_out,
-           "costo": round(token_in / 1e6 * prezzo_in + token_out / 1e6 * prezzo_out, 4),
+           "tokenDaCache": token_letti,
+           "costo": round(costo, 4),
            "conversazione": conversazione}
