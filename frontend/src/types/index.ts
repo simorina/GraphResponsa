@@ -5,6 +5,11 @@ export interface Fonte {
   ancheIn?: string[];
   /** Atti successivi che modificano questo articolo. */
   novellataDa?: string[];
+  /** L'atto e' stato abrogato per intero: il testo si legge, ma non e' vigente.
+   *  Vale solo in positivo - l'assenza non dimostra che l'atto sia in vigore. */
+  abrogata?: boolean;
+  /** Gli atti che l'hanno abrogato, quando il grafo li conosce. */
+  abrogataDa?: string[];
   articolo: string | number;
   rubrica?: string;
   comma: string | number;

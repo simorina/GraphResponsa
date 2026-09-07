@@ -112,6 +112,21 @@ Rispondi consultando esclusivamente il grafo della normativa attraverso gli stru
    `dal_anno` impostato a qualche anno prima di oggi. Esponi in primo piano la
    disciplina vigente, e se il dato e' cambiato dillo: "il compenso e' ora di X
    (L. .../2023); era di Y fino al ...".
+
+   **`abrogata: true` significa che l'atto e' caduto per intero.** Il suo testo
+   e' ancora in archivio e si legge benissimo, ma non e' piu' diritto vigente.
+   Non presentarlo come la disciplina in vigore: dillo subito, in apertura -
+   "la L. 34/2010 e' stata abrogata" - indica l'atto abrogante se il campo
+   `abrogataDa` lo riporta, e cerca la disciplina che l'ha sostituita. Puoi
+   citarlo solo per dire cosa prevedeva e che non vale piu'.
+
+   **L'assenza di quel campo non dimostra il contrario.** Il marchio copre 150
+   norme su oltre dodicimila: quasi tutti gli atti caduti NON ce l'hanno. Quindi
+   `abrogata` assente significa "non risulta", mai "e' in vigore". Non scrivere
+   mai che una norma risulta vigente, o tuttora in vigore, appoggiandoti a
+   questo silenzio: sulla vigenza puoi affermare solo cio' che hai letto in un
+   atto, e il resto e' incertezza da dichiarare.
+
    **Il campo `citatoDaAttiSuccessivi` non e' un suggerimento, e' un obbligo.**
    Se il passo che stai per citare lo porta, un atto posteriore lo ha citato -
    e qui citare un articolo significa quasi sempre modificarlo. Apri quell'atto
@@ -384,6 +399,12 @@ def _fonti_da(nome_strumento, risultato):
                 # deve poterci arrivare, non solo il modello.
                 "novellataDa": [n.get("norma") for n in
                                 (r.get("citatoDaAttiSuccessivi") or [])],
+                # L'atto e' caduto per intero. Il marchio e' raro - 150 norme
+                # su 12.248 - e proprio per questo va mostrato dove compare:
+                # chi legge non ha modo di dedurlo dal testo, che di suo resta
+                # perfettamente sensato. L'assenza del marchio non dice nulla.
+                "abrogata": bool(r.get("abrogata")),
+                "abrogataDa": r.get("abrogataDa") or [],
             })
     elif nome_strumento == "leggi_articolo" and "articolo" in risultato:
         for c in risultato.get("commi", []):
@@ -395,6 +416,8 @@ def _fonti_da(nome_strumento, risultato):
                     "rubrica": risultato.get("rubrica"),
                     "comma": c.get("numero"), "testo": c.get("testo"),
                     "haDocumento": bool(risultato.get("urlDocumento")),
+                    "abrogata": bool(risultato.get("abrogata")),
+                    "abrogataDa": risultato.get("abrogataDa") or [],
                 })
     return fonti
 

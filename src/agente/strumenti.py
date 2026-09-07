@@ -280,7 +280,8 @@ RETURN norma.id AS normaId, norma.titolo AS normaTitolo, norma.anno AS anno,
        art.numero AS articolo, art.rubrica AS rubrica,
        art.titolo AS partizioneTitolo, art.capoRubrica AS partizioneCapo,
        node.numero AS comma, node.testo AS testo,
-       norma.urlDocumento AS urlDocumento
+       norma.urlDocumento AS urlDocumento,
+       norma.abrogata AS abrogata, norma.abrogataDa AS abrogataDa
 ORDER BY score DESC
 """
 
@@ -299,7 +300,8 @@ RETURN norma.id AS normaId, norma.titolo AS normaTitolo, norma.anno AS anno,
        art.numero AS articolo, art.rubrica AS rubrica,
        art.titolo AS partizioneTitolo, art.capoRubrica AS partizioneCapo,
        null AS comma, art.testo AS testo,
-       norma.urlDocumento AS urlDocumento
+       norma.urlDocumento AS urlDocumento,
+       norma.abrogata AS abrogata, norma.abrogataDa AS abrogataDa
 ORDER BY score DESC
 """
 
@@ -525,6 +527,12 @@ def cerca_testo(query: str, limite: int = 8, dal_anno: int | None = None) -> dic
     Se un risultato ha `troncato: true` il testo mostrato e' tagliato: per il
     contenuto completo chiama leggi_articolo().
 
+    Il campo `abrogata` e' l'unico che vince su tutto: se e' true, quell'atto
+    e' stato abrogato per intero e non e' piu' diritto vigente, per quanto il
+    testo si legga bene. Dillo in apertura, cita `abrogataDa` se c'e', e cerca
+    la disciplina che l'ha sostituito. L'assenza del campo non prova nulla in
+    senso contrario: il marchio copre 150 norme su oltre dodicimila.
+
     Il campo `citatoDaAttiSuccessivi` e' il piu' importante che leggi. Elenca
     gli atti POSTERIORI che citano proprio quell'articolo, e in questo
     ordinamento citarlo significa quasi sempre modificarlo: "il comma 1
@@ -593,7 +601,8 @@ def leggi_articolo(norma_id: str, numero: str) -> dict:
     testo completo per rispondere con precisione.
 
     Porta gli stessi marchi di vigenza di cerca_testo, e vanno letti prima di
-    citare: `citatoDaAttiSuccessivi` (un atto posteriore cita questo articolo,
+    citare: `abrogata` (l'atto e' caduto per intero: non e' piu' vigente, e
+    l'assenza del campo non dimostra che lo sia), `citatoDaAttiSuccessivi` (un atto posteriore cita questo articolo,
     e qui citare significa quasi sempre modificare) e `versionePiuRecente` (un
     atto posteriore ha un articolo con la stessa rubrica, cioe' quasi sempre la
     stessa disposizione riscritta). Se uno dei due compare, la catena non
@@ -613,6 +622,7 @@ def leggi_articolo(norma_id: str, numero: str) -> dict:
                a.numero AS articolo, a.rubrica AS rubrica,
                a.titolo AS partizioneTitolo, a.capoRubrica AS partizioneCapo,
                n.urlDocumento AS urlDocumento,
+               n.abrogata AS abrogata, n.abrogataDa AS abrogataDa,
                collect({numero: c.numero, testo: c.testo}) AS commi
     """, {"norma_id": norma_id, "numero": str(numero)})
     if not righe:
@@ -743,7 +753,8 @@ def trova_norma(numero: int | None = None, anno: int | None = None,
             RETURN n.id AS id, n.tipo AS tipo, n.numero AS numero, n.anno AS anno,
                    n.titolo AS titolo, n.caricata AS testoDisponibile,
                    toString(n.dataEntrataVigore) AS inVigoreDal,
-                   n.urlScheda AS urlScheda, articoli
+                   n.urlScheda AS urlScheda, articoli,
+                   n.abrogata AS abrogata, n.abrogataDa AS abrogataDa
             ORDER BY n.anno DESC LIMIT 10
         """, {"numero": int(numero), "anno": int(anno) if anno else None, "tipo": tipo})
     elif testo:
@@ -756,7 +767,8 @@ def trova_norma(numero: int | None = None, anno: int | None = None,
                    node.anno AS anno, node.titolo AS titolo,
                    node.caricata AS testoDisponibile,
                    toString(node.dataEntrataVigore) AS inVigoreDal,
-                   node.urlScheda AS urlScheda, articoli
+                   node.urlScheda AS urlScheda, articoli,
+                   node.abrogata AS abrogata, node.abrogataDa AS abrogataDa
             ORDER BY score DESC LIMIT 10
         """, {"testo": _lucene(testo)})
     else:
