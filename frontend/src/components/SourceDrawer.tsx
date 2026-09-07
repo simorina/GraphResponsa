@@ -54,6 +54,31 @@ export const SourceDrawer: React.FC<SourceDrawerProps> = ({ source, onClose }) =
         </div>
 
         <div className="min-h-0 flex-1 overflow-y-auto px-6 py-6">
+          {(source.novellataDa?.length || source.ancheIn?.length) ? (
+            <div className="mb-5 flex flex-col gap-2">
+              {source.novellataDa?.length ? (
+                <div className="rounded-md border border-rosso/30 bg-rosso-2 px-3.5 py-2.5">
+                  <div className="mb-1 text-[11px] font-medium text-rosso">
+                    Modificato da un atto successivo
+                  </div>
+                  <div className="font-mono text-[12px] text-ink-2">
+                    {source.novellataDa.join(' · ')}
+                  </div>
+                </div>
+              ) : null}
+              {source.ancheIn?.length ? (
+                <div className="rounded-md border border-line bg-raise px-3.5 py-2.5">
+                  <div className="mb-1 text-[11px] font-medium text-ink-3">
+                    Stesso testo anche in
+                  </div>
+                  <div className="font-mono text-[12px] text-ink-2">
+                    {source.ancheIn.join(' · ')}
+                  </div>
+                </div>
+              ) : null}
+            </div>
+          ) : null}
+
           {source.titoloNorma && (
             <p className="mb-5 max-w-[52ch] border-l-2 border-alloro-2 py-0.5 pl-3.5 text-[12.5px] leading-relaxed text-ink-3">
               {source.titoloNorma}

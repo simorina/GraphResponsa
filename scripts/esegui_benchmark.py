@@ -158,7 +158,61 @@ def interroga_locale(domanda, agente):
             "daCache": letti, "errore": None}
 
 
-def cita_giusto(risposta, riferimento):
+def atti_equivalenti(riferimenti):
+    """Per ogni riferimento, gli atti che riportano lo STESSO identico comma.
+
+    In questo ordinamento un tariffario o una tabella di sanzioni viene
+    riemesso ogni anno, e il medesimo comma esiste identico sotto cinque
+    decreti diversi. La verita' di riferimento ne nomina uno, scelto a caso
+    fra gli equivalenti, ma citarne un altro non e' un errore: e' la stessa
+    disposizione.
+
+    Senza questa equivalenza il benchmark contava come sbagliate citazioni
+    corrette. Misurato: quattro dei sette casi in cui l'atto atteso "non
+    usciva mai dalla ricerca" erano in realta' presenti come equivalenti.
+
+    Non e' indulgenza: l'atto citato deve portare il testo IDENTICO, non
+    simile. Il confronto e' sul testo normalizzato, non sull'argomento.
+    """
+    import os
+    import re as _re
+    from neo4j import GraphDatabase
+
+    coppie = {}
+    try:
+        drv = GraphDatabase.driver(
+            os.environ["NEO4J_URI"],
+            auth=(os.environ["NEO4J_USERNAME"], os.environ["NEO4J_PASSWORD"]))
+    except Exception:
+        return coppie
+    db = os.environ.get("NEO4J_DATABASE", "neo4j")
+    chiavi = []
+    for rif in riferimenti:
+        m = _re.match(r"(\S+) art\. (\S+) c\. (\S+)", rif or "")
+        if m:
+            chiavi.append({"rif": rif, "n": m.group(1), "a": m.group(2), "c": m.group(3)})
+    if not chiavi:
+        drv.close()
+        return coppie
+    try:
+        with drv.session(database=db) as s_:
+            for r in s_.run("""
+                UNWIND $chiavi AS k
+                MATCH (:Norma {id: k.n})-[:HA_ARTICOLO]->(:Articolo {numero: k.a})
+                      -[:HA_COMMA]->(c:Comma {numero: k.c})
+                WITH k, trim(c.testo) AS testo WHERE size(testo) > 40
+                MATCH (altro:Norma)-[:HA_ARTICOLO]->(:Articolo)-[:HA_COMMA]->(g:Comma)
+                WHERE trim(g.testo) = testo AND altro.id <> k.n
+                RETURN k.rif AS rif, collect(DISTINCT altro.id)[..8] AS equivalenti
+            """, chiavi=chiavi):
+                coppie[r["rif"]] = r["equivalenti"]
+    except Exception:
+        pass
+    drv.close()
+    return coppie
+
+
+def cita_giusto(risposta, riferimento, equivalenti=()):
     """
     La norma attesa compare nella risposta, in una qualunque delle forme d'uso?
 
@@ -199,7 +253,18 @@ def cita_giusto(risposta, riferimento):
         # DD-44-2008, l'id degli strumenti
         rf"\b[A-Z]{{1,3}}-{n}-{a}\b",
     ]
-    return any(re.search(f, risposta, re.IGNORECASE) for f in forme)
+    if any(re.search(f, risposta, re.IGNORECASE) for f in forme):
+        return True
+    # Un atto che porta il testo identico vale quanto quello atteso.
+    for alt in equivalenti or ():
+        ma = re.match(r"([A-Z]+)-(-?\d+|None)-(\d{4})", alt)
+        if not ma or ma.group(2) == "None":
+            continue
+        an, aa = re.escape(ma.group(2)), re.escape(ma.group(3))
+        if (re.search(rf"\b{an}\s*/\s*{aa}\b", risposta)
+                or re.search(rf"\b[A-Z]{{1,3}}-{an}-{aa}\b", risposta)):
+            return True
+    return False
 
 
 def main():
@@ -231,6 +296,12 @@ def main():
         chiedi = lambda d: interroga(d, H)
         print(f"Eseguo {len(righe)} domande contro {BASE}\n")
 
+    equivalenze = atti_equivalenti([r["riferimento"] for r in righe])
+    quante = sum(1 for v in equivalenze.values() if v)
+    if quante:
+        print(f"  {quante} riferimenti hanno atti equivalenti: citarne uno "
+              f"qualunque vale, portano il testo identico\n")
+
     esiti, t0 = [], time.time()
     for i, r in enumerate(righe, 1):
         e = chiedi(r["domanda"])
@@ -253,7 +324,8 @@ def main():
         m = re.search(r"\{.*\}", t, re.S)
         d = json.loads(m.group(0)) if m else {"esito": "errata", "motivo": "giudizio illeggibile"}
 
-        fonte = cita_giusto(e["testo"], r["riferimento"])
+        fonte = cita_giusto(e["testo"], r["riferimento"],
+                            equivalenze.get(r["riferimento"], ()))
         esiti.append({**r, "esito": d.get("esito", "errata"), "motivo": d.get("motivo", ""),
                       "risposta_agente": e["testo"], "secondi": round(e["secondi"], 1),
                       "costo": e["costo"], "fonte_giusta": fonte,

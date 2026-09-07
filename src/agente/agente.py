@@ -352,6 +352,17 @@ def _fonti_da(nome_strumento, risultato):
                 "norma": r.get("normaId"), "titoloNorma": r.get("normaTitolo"),
                 "articolo": r.get("articolo"), "rubrica": r.get("rubrica"),
                 "comma": r.get("comma"), "testo": r.get("testo"),
+                # Gli atti che riportano lo STESSO identico testo. La potatura
+                # li collassa in una riga sola per non sprecare i posti utili,
+                # ma come fonti valgono quanto quello mostrato: un tariffario
+                # riemesso in cinque decreti si puo' citare da ognuno dei
+                # cinque. Non elencarli faceva sembrare unica una fonte che
+                # non lo e', e chi cercava la propria versione non la trovava.
+                "ancheIn": r.get("ancheIn") or [],
+                # L'atto successivo che modifica questo articolo: chi legge
+                # deve poterci arrivare, non solo il modello.
+                "novellataDa": [n.get("norma") for n in
+                                (r.get("citatoDaAttiSuccessivi") or [])],
             })
     elif nome_strumento == "leggi_articolo" and "articolo" in risultato:
         for c in risultato.get("commi", []):

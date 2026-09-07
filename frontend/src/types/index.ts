@@ -1,6 +1,10 @@
 export interface Fonte {
   norma: string;
   titoloNorma?: string;
+  /** Atti che riportano lo stesso identico testo: citarne uno vale l'altro. */
+  ancheIn?: string[];
+  /** Atti successivi che modificano questo articolo. */
+  novellataDa?: string[];
   articolo: string | number;
   rubrica?: string;
   comma: string | number;
