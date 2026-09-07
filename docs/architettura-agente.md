@@ -186,8 +186,10 @@ sempre qualcosa su cui ripartire:
 ```mermaid
 flowchart LR
     Q["Query Utente"] --> FT["Indice Full-Text Lucene (italiano)<br/>su Comma E Articolo"]
-    Q --> VOY["Embedding Voyage-4 (1024d)"]
-    VOY --> VS["Indice Vettoriale Neo4j (cosine)<br/>su Comma.embedding"]
+    Q --> VOY["Embedding Voyage-4 (1024d)<br/>calcolato una volta sola"]
+    VOY --> VS["commi_vettoriale<br/>su Comma.embedding"]
+    VOY --> VR["rubriche_vettoriale<br/>su Articolo.embedding"]
+    VR --> HYB
 
     FT --> HYB["Fusione a ranghi reciproci<br/>peso / (20 + rango), sommata"]
     VS --> HYB
@@ -243,23 +245,25 @@ pertinenza - spinge in cima.
 **I due parametri sono tarati, non scelti.** Su tre famiglie di prove, misurando
 il rango reciproco medio:
 
-| K | peso lessicale | colloquiali | trappole | rubriche |
+| peso lessicale | colloquiali | trappole | rubriche | media |
 |---|---|---|---|---|
-| 20 | 0,0 (solo semantico) | 0,767 | 0,750 | 0,042 |
-| 20 | 1,0 | 1,000 | 0,750 | 0,348 |
-| **20** | **1,5** | **1,000** | **0,750** | **0,500** |
-| 20 | 2,0 | 1,000 | 0,134 | 0,875 |
-| 20 | 3,0 | 1,000 | 0,000 | 1,000 |
+| 0,00 (solo semantico) | 1,000 | 0,750 | 0,312 | 0,688 |
+| 0,30 | 1,000 | 0,750 | 0,542 | 0,764 |
+| 0,50 | 1,000 | 0,750 | 0,875 | 0,875 |
+| **0,75** | **1,000** | **0,750** | **1,000** | **0,917** |
+| 1,00 | 0,900 | 0,667 | 1,000 | 0,856 |
 
-Il compromesso va in una direzione sola: alzando il peso lessicale le rubriche
-si trovano meglio ma tornano le trappole. **1,5 e' l'ultimo punto prima del
-crollo, e domina lo spegnimento del ramo lessicale su ogni colonna.**
+**C'era un compromesso, ed e' stato eliminato alla radice.** Finche' gli
+`:Articolo` non avevano un embedding, il peso ottimale era 1,5 e bisognava
+scegliere: alzandolo si trovavano le rubriche (0,875) ma le trappole crollavano
+(0,134); abbassandolo, il contrario. Vettorializzare le rubriche
+(`07b_embeddings_rubriche.py`, $0,025) ha reso possibile **1,000 su rubriche e
+1,000 su colloquiali insieme**, e ha dimezzato il peso che serve al lessicale.
 
-Il ramo lessicale non si puo' spegnere: e' l'unico che aggancia un `:Articolo`
-per la sua rubrica, perche' un Articolo non ha un embedding proprio - ce l'hanno
-i suoi commi (vedi §5.1 dell'architettura del grafo). Con il peso a zero, su 12
-query di prova uscivano **0 nodi `:Articolo`** contro gli 88 presenti nella lista
-lessicale; a 1,5 ne sopravvivono 40.
+Il ramo lessicale resta comunque acceso: a peso zero le rubriche scendono da
+1,000 a 0,312, perche' l'embedding di una rubrica ne coglie il senso ma non la
+corrispondenza letterale - ed e' letteralmente che si cerca un articolo di cui
+si conosce il nome.
 
 ### 4.3 I doppioni non occupano piu' i posti utili
 
@@ -275,8 +279,8 @@ passo ricorre anche in atti piu' recenti, la versione da esporre e' quella. Sul
 divieto di sosta il primo risultato e' diventato l'importo della sanzione, con
 i cinque decreti che la riportano su una riga sola.
 
-Esito complessivo sulle dieci domande da sportello: **9 su 10 hanno l'atto
-giusto al primo posto**, contro 6 su 10 prima di questi interventi.
+Esito complessivo sulle dieci domande da sportello: **10 su 10 hanno l'atto
+giusto nei primi tre**, contro 6 su 10 prima di questi interventi.
 
 ### 4.4 Il punteggio non e' esposto, e non e' una svista
 

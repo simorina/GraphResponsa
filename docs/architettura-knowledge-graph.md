@@ -256,15 +256,31 @@ VECTOR INDEX commi_vettoriale FOR (c:Comma) ON c.embedding
 E' un'asimmetria voluta, ma va conosciuta perche' condiziona chi legge i
 risultati:
 
-| | `testo_normativo` (Lucene) | `commi_vettoriale` (Voyage) |
-|---|---|---|
-| etichette | `Comma` **e** `Articolo` | solo `Comma` |
-| proprieta' | `testo` e `rubrica` | `embedding` |
-| trova per | parole esatte, flesse dall'analizzatore italiano | significato, anche con parole del tutto diverse |
+| | `testo_normativo` (Lucene) | `commi_vettoriale` | `rubriche_vettoriale` |
+|---|---|---|---|
+| etichette | `Comma` **e** `Articolo` | `Comma` | `Articolo` |
+| proprieta' | `testo` e `rubrica` | `embedding` | `embedding` |
+| cosa vettorializza | - | il testo del comma | titolo della norma + rubrica |
+| trova per | parole esatte, flesse dall'analizzatore italiano | significato del contenuto | significato dell'argomento |
 
-La conseguenza pratica: **un `:Articolo` puo' entrare nei risultati solo dal ramo
-lessicale**, agganciato per la sua rubrica. Un articolo non ha `embedding`
-proprio — lo hanno i suoi commi.
+Un `:Articolo` ha un embedding **della propria rubrica**, non dei suoi commi: la
+rubrica dice di cosa tratta l'articolo, i commi dicono cosa dispone.
+
+Si vettorializza `titolo della norma + rubrica`, non la rubrica nuda: le rubriche
+sono spesso una parola sola - «Destinatari», «Sanzioni», «Definizioni» - e da
+sole darebbero un vettore ambiguo. Con il titolo davanti si collocano, che e'
+anche il modo in cui un giurista le legge. Il testo dell'articolo non entra: e'
+gia' coperto dagli embedding dei suoi commi.
+
+Costo: 35.713 rubriche, ~425.000 token, **$0,025** con voyage-4, e ~140 MB in
+piu' su Aura. Lo calcola `07b_embeddings_rubriche.py`, idempotente come il 07 e
+da rieseguire insieme a quello dopo ogni caricamento.
+
+**Prima che esistesse il terzo indice**, un `:Articolo` poteva entrare nei
+risultati solo dal ramo lessicale, e questo imponeva un compromesso nella
+fusione: alzando il peso lessicale si trovavano le rubriche ma tornavano i
+risultati fuori tema agganciati da una parola comune. Il terzo indice ha tolto
+il compromesso - vedi §4.2 dell'architettura dell'agente.
 
 Le rubriche restano indicizzate perche' sono la riga piu' densa di senso di un
 articolo (`(Incompatibilita' con altre cariche)`, `(Morte dell'assegnatario)`):

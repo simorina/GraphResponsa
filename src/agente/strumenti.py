@@ -222,60 +222,108 @@ def _full_text(query, limite, dal_anno=None):
 
 # Fusione a ranghi reciproci: punteggio = peso / (K + rango), sommato sui rami.
 #
-# I due parametri sono tarati, non scelti. Su tre famiglie di prove - domande
-# in lingua corrente, trappole lessicali su parole comuni ("spedire", "documenti")
-# e ricerche per rubrica esatta - misurando il rango reciproco medio:
+# I due parametri sono tarati, non scelti, e la taratura e' stata rifatta dopo
+# aver vettorializzato le rubriche degli articoli (07b_embeddings_rubriche.py).
+# Misurando il rango reciproco medio su tre famiglie di prove - domande in
+# lingua corrente, trappole lessicali su parole comuni, ricerca per rubrica:
 #
-#     K   peso   colloquiali  trappole  rubriche
-#    20    0.0        0.767      0.750     0.042
-#    20    1.0        1.000      0.750     0.348
-#    20    1.5        1.000      0.750     0.500   <- scelto
-#    20    2.0        1.000      0.134     0.875
-#    20    3.0        1.000      0.000     1.000
+#     peso   colloquiali  trappole  rubriche   media
+#     0.00       1.000      0.750     0.312    0.688   <- solo semantico
+#     0.30       1.000      0.750     0.542    0.764
+#     0.50       1.000      0.750     0.875    0.875
+#     0.75       1.000      0.750     1.000    0.917   <- scelto
+#     1.00       0.900      0.667     1.000    0.856
 #
-# Il compromesso e' netto e va in una direzione sola: alzando il peso lessicale
-# le rubriche si trovano meglio ma tornano le trappole, cioe' i risultati fuori
-# tema agganciati da una parola comune. 1.5 e' l'ultimo punto prima del crollo,
-# e domina lo spegnimento del ramo lessicale su ogni colonna.
+# Prima che gli articoli avessero un embedding il peso ottimale era 1.5, e
+# c'era un compromesso obbligato: alzandolo si trovavano le rubriche ma
+# tornavano le trappole, e viceversa. Vettorializzare le rubriche ha tolto il
+# compromesso - ora 1.000 su entrambe insieme - e ha dimezzato il peso che
+# serve al ramo lessicale.
 #
-# Il peso lessicale maggiore di quello semantico non significa che conti di piu':
-# compensa il fatto che la lista lessicale e' precisa in cima e decade in fretta,
-# mentre quella semantica resta utile a lungo. E il ramo lessicale non si puo'
-# spegnere: e' l'unico che aggancia un :Articolo per la sua rubrica, perche' un
-# Articolo non ha un embedding proprio - ce l'hanno i suoi commi.
+# Il lessicale resta comunque acceso: a peso zero le rubriche scendono da
+# 1.000 a 0.312, perche' l'embedding di una rubrica coglie il senso ma non la
+# corrispondenza letterale, ed e' letteralmente che si cerca un articolo di
+# cui si conosce il nome.
 K_RRF = 20
 PESO_SEMANTICO = 1.0
-PESO_LESSICALE = 1.5
+PESO_LESSICALE = 0.75
 
 
-def _semantico(query, limite, dal_anno=None):
-    """Solo ricerca vettoriale. None se gli embedding non sono disponibili."""
+# Due indici vettoriali, non uno. `commi_vettoriale` sta su Comma.embedding,
+# `rubriche_vettoriale` su Articolo.embedding: un articolo non ha un embedding
+# dei suoi commi, ha quello della propria rubrica, preceduta dal titolo della
+# norma (vedi 07b_embeddings_rubriche.py). Senza il secondo, cercare per
+# rubrica - come cerca un giurista - era possibile solo dal ramo lessicale.
+INDICE_RUBRICHE = "rubriche_vettoriale"
+
+RISALITA_COMMI = """
+CALL db.index.vector.queryNodes($indice, $k, $vettore) YIELD node, score
+MATCH (art:Articolo)-[:HA_COMMA]->(node)
+MATCH (norma:Norma)-[:HA_ARTICOLO]->(art)
+WHERE $dal_anno IS NULL OR norma.anno >= $dal_anno
+RETURN norma.id AS normaId, norma.titolo AS normaTitolo, norma.anno AS anno,
+       toString(norma.dataEntrataVigore) AS inVigoreDal,
+       art.numero AS articolo, art.rubrica AS rubrica,
+       art.titolo AS partizioneTitolo, art.capoRubrica AS partizioneCapo,
+       node.numero AS comma, node.testo AS testo
+ORDER BY score DESC
+"""
+
+RISALITA_RUBRICHE = """
+CALL db.index.vector.queryNodes($indice, $k, $vettore) YIELD node AS art, score
+MATCH (norma:Norma)-[:HA_ARTICOLO]->(art)
+WHERE $dal_anno IS NULL OR norma.anno >= $dal_anno
+RETURN norma.id AS normaId, norma.titolo AS normaTitolo, norma.anno AS anno,
+       toString(norma.dataEntrataVigore) AS inVigoreDal,
+       art.numero AS articolo, art.rubrica AS rubrica,
+       art.titolo AS partizioneTitolo, art.capoRubrica AS partizioneCapo,
+       null AS comma, art.testo AS testo
+ORDER BY score DESC
+"""
+
+
+def _vettore_domanda(query):
+    """La domanda in 1024 numeri. None se gli embedding non sono disponibili.
+
+    Si vettorializza UNA volta sola e si interrogano entrambi gli indici con lo
+    stesso vettore: passando dallo store di LangChain, che vettorializza da se'
+    a ogni ricerca, si pagherebbe Voyage due volte per la stessa domanda.
+    """
     store = ricerca_vettoriale()
     if store is None:
         return None
     try:
-        trovati = store.similarity_search_with_score(query, k=limite)
+        return store.embedding.embed_query(query)
     except Exception:
         return None
-    righe = []
-    for documento, _punteggio in trovati:
-        m = documento.metadata or {}
-        # Il filtro sull'anno agisce sui risultati, non sull'indice: per questo
-        # a monte si pesca piu' largo di quanto serva.
-        if dal_anno and (m.get("anno") or 0) < dal_anno:
+
+
+def _semantico(query, limite, dal_anno=None):
+    """I due indici vettoriali fusi in una lista sola. None se non disponibili."""
+    vettore = _vettore_domanda(query)
+    if vettore is None:
+        return None
+    liste = []
+    for indice, risalita in ((INDICE_VETTORIALE, RISALITA_COMMI),
+                             (INDICE_RUBRICHE, RISALITA_RUBRICHE)):
+        try:
+            liste.append(grafo().query(risalita, {
+                "indice": indice, "k": limite, "vettore": vettore,
+                "dal_anno": dal_anno}))
+        except Exception:
+            # L'indice delle rubriche puo' non esserci ancora: si prosegue con
+            # quello dei commi invece di far fallire tutta la ricerca.
             continue
-        righe.append({
-            "normaId": m.get("normaId"), "normaTitolo": m.get("normaTitolo"),
-            "anno": m.get("anno"), "inVigoreDal": m.get("inVigoreDal"),
-            "articolo": m.get("articolo"), "rubrica": m.get("rubrica"),
-            "partizioneTitolo": m.get("partizioneTitolo"),
-            "partizioneCapo": m.get("partizioneCapo"),
-            "comma": m.get("comma"), "testo": documento.page_content,
-        })
-    return righe
+    if not liste:
+        return None
+    # I commi pesano piu' delle rubriche: una rubrica dice di cosa tratta
+    # l'articolo, un comma contiene la disposizione. Ma una rubrica centrata
+    # vale piu' di un comma alla lontana, quindi non si azzera.
+    return _fondi([(liste[0], 1.0)] + [(l, 0.7) for l in liste[1:]],
+                  limite, taglia=False)
 
 
-def _fondi(liste, limite):
+def _fondi(liste, limite, taglia=True):
     """Unisce piu' liste ordinate col metodo dei ranghi reciproci.
 
     Ogni risultato vale `peso / (K + rango)` in ciascuna lista dove compare, e
@@ -305,8 +353,9 @@ def _fondi(liste, limite):
     for i, impronta in enumerate(ordinate, 1):
         r = primo[impronta]
         r["rango"] = i
-        r["troncato"] = _troncato(r["testo"])
-        r["testo"] = _taglia(r["testo"])
+        if taglia:
+            r["troncato"] = _troncato(r["testo"])
+            r["testo"] = _taglia(r["testo"])
         finali.append(r)
     return finali
 
