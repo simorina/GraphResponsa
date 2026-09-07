@@ -29,13 +29,16 @@ from .strumenti import STRUMENTI
 ROOT = Path(__file__).resolve().parent.parent.parent
 load_dotenv(ROOT / ".env")
 
-MODELLO = "claude-haiku-4-5"
+# Sovrascrivibile con MODELLO nell'ambiente, per confrontare i modelli a
+# parita' di tutto il resto senza toccare il codice.
+MODELLO = os.environ.get("MODELLO", "claude-haiku-4-5")
 # ChatAnthropic non manda la temperatura se non gliela si da', e l'API allora
 # usa la propria: 1.0, cioe' il massimo campionamento casuale. Su un assistente
 # giuridico e' la scelta peggiore possibile - la stessa domanda deve dare la
 # stessa risposta, e chi legge non sa quale delle due versioni ha ricevuto.
 # Si puo' alzare con TEMPERATURA nell'ambiente, per confrontare gli assetti.
 TEMPERATURA = float(os.environ.get("TEMPERATURA", "0"))
+ACCETTANO_TEMPERATURA = {"claude-haiku-4-5"}
 
 MAX_GIRI = 12   # Ogni chiamata a uno strumento consuma DUE passi del grafo
                 # (nodo modello + nodo strumenti), quindi il tetto vero e'
@@ -240,12 +243,14 @@ def agente():
     global _agente, _memoria
     if _agente is None:
         _memoria = _checkpointer()
-        modello = ChatAnthropic(
-            model=MODELLO,
-            max_tokens=16000,
-            temperature=TEMPERATURA,
-            api_key=os.environ["ANTHROPIC_API_KEY"],
-        )
+        # La temperatura si manda solo dove il modello la accetta: su Sonnet 5
+        # e Opus 5 il parametro e' deprecato e l'API rifiuta la richiesta con
+        # un 400. Il campionamento la' lo governa il modello, non noi.
+        parametri = {"model": MODELLO, "max_tokens": 16000,
+                     "api_key": os.environ["ANTHROPIC_API_KEY"]}
+        if MODELLO in ACCETTANO_TEMPERATURA:
+            parametri["temperature"] = TEMPERATURA
+        modello = ChatAnthropic(**parametri)
 
         # --- Prompt caching ---
         #
