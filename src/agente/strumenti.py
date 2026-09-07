@@ -244,6 +244,11 @@ def _full_text(query, limite, dal_anno=None):
 # 1.000 a 0.312, perche' l'embedding di una rubrica coglie il senso ma non la
 # corrispondenza letterale, ed e' letteralmente che si cerca un articolo di
 # cui si conosce il nome.
+# Quanti candidati pescare per ramo, in multipli di `limite`. Piu' e' largo,
+# piu' e' probabile che il passo giusto sia nel bacino - il riordino e la
+# fusione possono solo ordinare cio' che ricevono, non ripescare cio' che
+# manca - ma oltre un certo punto si aggiunge solo rumore.
+AMPIEZZA = 3
 K_RRF = 20
 PESO_SEMANTICO = 1.0
 PESO_LESSICALE = 0.75
@@ -323,6 +328,42 @@ def _semantico(query, limite, dal_anno=None):
                   limite, taglia=False)
 
 
+MODELLO_RERANK = "rerank-2.5"
+RERANK = os.environ.get("RERANK", "").lower() in ("1", "si", "true")
+_riordinatore = "non_provato"
+
+
+def _rerank(query, righe, limite):
+    """Riordina i candidati con un cross-encoder, che legge domanda e testo insieme.
+
+    Il bi-encoder confronta due vettori calcolati separatamente; il cross-encoder
+    guarda la coppia, quindi coglie sfumature che la distanza fra vettori perde.
+    Puo' solo riordinare cio' che riceve: se il passo giusto non e' fra i
+    candidati, nessun riordino lo fa comparire.
+
+    La rubrica entra nel testo dato al riordinatore: e' la riga piu' densa di
+    senso dell'articolo, e senza di essa il modello non vedrebbe proprio il
+    dato su cui si gioca la corrispondenza letterale.
+    """
+    global _riordinatore
+    if _riordinatore == "non_provato":
+        try:
+            import voyageai
+            _riordinatore = voyageai.Client(api_key=os.environ["VOYAGE_API_KEY"])
+        except Exception:
+            _riordinatore = None
+    if _riordinatore is None or not righe:
+        return righe[:limite]
+    documenti = [((r.get("rubrica") or "") + " " + (r.get("testo") or ""))[:2000]
+                 for r in righe]
+    try:
+        esito = _riordinatore.rerank(query=query, documents=documenti,
+                                     model=MODELLO_RERANK, top_k=limite)
+    except Exception:
+        return righe[:limite]
+    return [righe[x.index] for x in esito.results]
+
+
 def _fondi(liste, limite, taglia=True):
     """Unisce piu' liste ordinate col metodo dei ranghi reciproci.
 
@@ -398,14 +439,26 @@ def cerca_testo(query: str, limite: int = 8, dal_anno: int | None = None) -> dic
         dal_anno: opzionale, scarta le norme anteriori a quell'anno. Utile per
             cercare la disciplina piu' recente su una materia gia' individuata.
     """
-    lessicali = _full_text(query, limite * 3, dal_anno)
-    semantici = _semantico(query, limite * 3, dal_anno)
+    lessicali = _full_text(query, limite * AMPIEZZA, dal_anno)
+    semantici = _semantico(query, limite * AMPIEZZA, dal_anno)
     if semantici is None:
         righe = lessicali[:limite]
         modo = "solo lessicale (semantica non disponibile)"
     else:
-        righe = _fondi([(semantici, PESO_SEMANTICO), (lessicali, PESO_LESSICALE)], limite)
-        modo = "ibrida"
+        if RERANK:
+            # Si riordina sui CANDIDATI, non sui primi otto: riordinare solo il
+            # risultato finale non potrebbe ripescare nulla da piu' in basso.
+            larghi = _fondi([(semantici, PESO_SEMANTICO), (lessicali, PESO_LESSICALE)],
+                            limite * AMPIEZZA, taglia=False)
+            righe = _rerank(query, larghi, limite)
+            for i, r in enumerate(righe, 1):
+                r["rango"] = i
+                r["troncato"] = _troncato(r["testo"])
+                r["testo"] = _taglia(r["testo"])
+            modo = "ibrida con riordino"
+        else:
+            righe = _fondi([(semantici, PESO_SEMANTICO), (lessicali, PESO_LESSICALE)], limite)
+            modo = "ibrida"
 
     if not righe:
         return {"risultati": [], "quanti": 0, "ricerca": modo,
