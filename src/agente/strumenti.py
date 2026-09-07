@@ -414,6 +414,48 @@ def _novelle(righe):
     return righe
 
 
+def _piu_recenti(righe):
+    """Marca i risultati che hanno un omologo piu' recente nella stessa lista.
+
+    Il criterio e' la rubrica identica. Due atti con la stessa rubrica -
+    "Disposizioni in materia di imposte per la prima casa" in L-158-2025 e in
+    DD-52-2026 - sono quasi sempre la stessa disposizione riscritta, e quello
+    con l'anno maggiore e' la versione da esporre.
+
+    Serve dove gli archi non arrivano. _novelle() segue CITA_ARTICOLO, ma quei
+    due commi non ce l'hanno: modificano entrambi una TABELLA della L. 85/1981,
+    e il parser crea gli archi verso gli articoli, non verso le tabelle. Il
+    risultato e' che due novelle parallele allo stesso bersaglio si ignorano.
+    Misurato sul caso reale: l'agente citava la versione 2025 senza accorgersi
+    che il 2026 la riscriveva.
+
+    Non costa nulla: si confrontano le righe gia' in mano, senza interrogare.
+    """
+    gruppi = {}
+    for r in righe:
+        chiave = " ".join((r.get("rubrica") or "").lower().split())
+        if len(chiave) > 12:          # le rubriche corte ("Definizioni",
+            gruppi.setdefault(chiave, []).append(r)   # "Sanzioni") coincidono
+                                                      # per caso, non per parentela
+    for gruppo in gruppi.values():
+        if len(gruppo) < 2:
+            continue
+        recente = max(gruppo, key=lambda r: r.get("anno") or 0)
+        for r in gruppo:
+            if r is not recente and (r.get("anno") or 0) < (recente.get("anno") or 0):
+                # Il testo, non solo il rimando: col solo riferimento il
+                # modello riconosceva la catena ma non la percorreva fino in
+                # fondo. Il testo e' gia' in mano - quel risultato sta nella
+                # stessa lista - quindi allegarlo non costa una query.
+                r["versionePiuRecente"] = {
+                    "norma": recente.get("normaId"), "anno": recente.get("anno"),
+                    "articolo": recente.get("articolo"),
+                    "comma": recente.get("comma"),
+                    "testo": _taglia(recente.get("testo"), 900),
+                }
+    return righe
+
+
 def _fondi(liste, limite, taglia=True):
     """Unisce piu' liste ordinate col metodo dei ranghi reciproci.
 
@@ -518,7 +560,7 @@ def cerca_testo(query: str, limite: int = 8, dal_anno: int | None = None) -> dic
             righe = _fondi([(semantici, PESO_SEMANTICO), (lessicali, PESO_LESSICALE)], limite)
             modo = "ibrida"
     if righe:
-        righe = _novelle(righe)
+        righe = _piu_recenti(_novelle(righe))
 
     if not righe:
         return {"risultati": [], "quanti": 0, "ricerca": modo,

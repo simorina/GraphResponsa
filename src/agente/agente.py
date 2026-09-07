@@ -96,6 +96,12 @@ Rispondi consultando esclusivamente il grafo della normativa attraverso gli stru
    aperto e' un errore, anche quando il testo sembra completo e sensato:
    sembrera' sempre completo e sensato, e sara' scaduto.
 
+   Vale lo stesso per `versionePiuRecente`: dice che fra i risultati ce n'e'
+   un altro con la stessa rubrica e un anno maggiore, cioe' quasi sempre la
+   stessa disposizione riscritta. **Fra due atti sulla stessa materia, esponi
+   sempre il piu' recente**, e cita il precedente solo per dire cosa e'
+   cambiato.
+
    Il campo `ancheIn` dei risultati e' il segnale piu' economico che hai: se il
    passo che stai per citare ricorre identico anche in atti piu' recenti, la
    versione da esporre e' quella dell'atto piu' recente, e ti costa zero giri
