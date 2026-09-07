@@ -103,7 +103,37 @@ Nel nostro Knowledge Graph, le rubriche svolgono due funzioni cruciali:
 | **`CITA`** | **`69.662`** | `(Comma/Norma) ➔ Norma` | Rinvio normativo formale |
 | **`CITA_ARTICOLO`** | **`16.763`** | `Comma ➔ Articolo` | Rinvio puntuale ad articolo specifico risolto |
 | **`HA_ALLEGATO`** | **`519`** | `Norma ➔ Allegato` | Presenza di allegato tecnico |
-| **TOTALE ARCHI** | **`342.618`** | | |
+| **`ABROGA`** | **`31`** | `Norma ➔ Norma` | Abrogazione di un atto per intero, riconosciuta senza ambiguità |
+| **TOTALE ARCHI** | **`342.649`** | | |
+
+#### `ABROGA`, e perché è così piccolo
+
+Nel corpus ci sono **1.316 commi** che contengono «è abrogato» o «sono
+abrogati», e se ne modellano 31. Non è una svista: la forma più comune abroga
+una **parte** — *«All'articolo 2 della Legge n.55/1994, il punto 8.0 è
+abrogato»* — e leggerla come abrogazione dell'articolo 2 dichiarerebbe morta
+una norma viva. In un archivio che deve dire a un cittadino se ha diritto a
+qualcosa, quello è l'errore peggiore disponibile: gli errori di omissione
+lasciano l'utente dov'era, questo gli nega un diritto che ha.
+
+Si riconosce perciò **una sola forma**, l'abrogazione di un atto intero
+(`È abrogata la Legge 27 ottobre 2004 n. 146`), scartando più bersagli, parti
+d'articolo, decorrenze differite a date future e clausole di salvezza. Il
+riconoscimento porta le proprie prove in `src/08_abrogazioni.py`: se una
+fallisce, lo script esce senza scrivere.
+
+La marcatura effettiva non viene solo da lì. L'archivio di Stato segna da sé
+gli atti caduti premettendo `ABROGATO - ` al titolo — **125 norme** — e i due
+segnali sono quasi disgiunti, appena **3 in comune**: il titolo dice *che* un
+atto è caduto, i commi dicono *da chi*. L'unione marca **150 norme** con
+`Norma.abrogata`, e le 28 con attribuzione nota portano anche
+`Norma.abrogataDa`.
+
+**Il rischio non è l'arco sbagliato, è l'arco assente.** Con l'1,2% di
+copertura, l'assenza del marchio non dimostra nulla, ma un indice rado invita a
+leggerla come conferma di vigenza. Perciò il campo entra nel prompt come avviso
+esclusivamente positivo: la presenza autorizza «è stata abrogata», l'assenza
+non autorizza «risulta vigente», e le istruzioni lo vietano espressamente.
 
 ---
 
