@@ -234,11 +234,26 @@ def _quante(risultato):
     return 0
 
 
+def _testo_di(messaggio):
+    """Il testo di un AIMessage, che il contenuto sia una stringa o blocchi.
+
+    Nella forma a blocchi interessa solo `type == "text"`: gli altri blocchi
+    sono gli argomenti degli strumenti, che non vanno nella risposta.
+    """
+    contenuto = getattr(messaggio, "content", None)
+    if isinstance(contenuto, str):
+        return contenuto.strip()
+    if isinstance(contenuto, list):
+        return "".join(b.get("text", "") for b in contenuto
+                       if isinstance(b, dict) and b.get("type") == "text").strip()
+    return ""
+
+
 def rispondi(domanda, conversazione=None):
     """
     Genera eventi: {"tipo": ..., ...}
 
-      testo       testo della risposta, incrementale
+      testo       la risposta, in un unico evento a fine ciclo
       strumento   lo strumento sta per essere eseguito
       risultato   lo strumento ha risposto
       fonti       i commi consultati, per il pannello delle fonti
@@ -254,34 +269,28 @@ def rispondi(domanda, conversazione=None):
     # I nomi arrivano con l'AIMessage, i risultati dopo col ToolMessage:
     # questa mappa li ricongiunge per id di chiamata.
     nomi_per_id = {}
-    # Il modello riprende a scrivere dopo gli strumenti: senza uno stacco la
-    # frase nuova si salda a quella precedente.
-    dopo_strumento = False
+    # I blocchi di testo che il modello scrive lungo il ciclo - le frasi di
+    # servizio prima di uno strumento e la risposta finale - si accumulano qui
+    # e partono insieme. Il modello riprende a scrivere dopo gli strumenti:
+    # senza uno stacco la frase nuova si salderebbe alla precedente.
+    blocchi_testo = []
 
     try:
-        for modo, pezzo in agente().stream(
+        # `_modo` non serve piu' - resta perche' stream() con una lista di
+        # modi restituisce comunque coppie (modo, pezzo).
+        for _modo, pezzo in agente().stream(
             {"messages": [{"role": "user", "content": domanda}]},
             config=config,
-            stream_mode=["updates", "messages"],
+            # Solo "updates": il modo "messages" serviva a emettere il testo
+            # frammento per frammento, e la risposta non si consegna piu' cosi'.
+            # Gli eventi degli strumenti restano in diretta - misurate, le
+            # consultazioni durano 8 secondi mediani e 22 al massimo, e tanto
+            # silenzio si legge come un blocco - ma il testo arriva intero,
+            # cosi' il Markdown viene reso una volta sola, gia' completo: una
+            # tabella o un blocco di codice non passano piu' per gli stati
+            # intermedi in cui la sintassi e' ancora a meta'.
+            stream_mode=["updates"],
         ):
-            if modo == "messages":
-                messaggio, _meta = pezzo
-                contenuto = getattr(messaggio, "content", None)
-                # Il contenuto e' una lista di blocchi: interessa solo il testo,
-                # non i frammenti di JSON degli argomenti degli strumenti.
-                if isinstance(contenuto, list):
-                    for blocco in contenuto:
-                        if isinstance(blocco, dict) and blocco.get("type") == "text":
-                            if blocco.get("text"):
-                                if dopo_strumento:
-                                    yield {"tipo": "testo", "testo": SEPARATORE}
-                                    dopo_strumento = False
-                                yield {"tipo": "testo", "testo": blocco["text"]}
-                elif isinstance(contenuto, str) and contenuto and \
-                        type(messaggio).__name__ == "AIMessageChunk":
-                    yield {"tipo": "testo", "testo": contenuto}
-                continue
-
             for _nodo, stato in pezzo.items():
                 if not isinstance(stato, dict):
                     continue
@@ -290,6 +299,11 @@ def rispondi(domanda, conversazione=None):
                     if uso:
                         token_in += uso.get("input_tokens", 0)
                         token_out += uso.get("output_tokens", 0)
+
+                    if type(messaggio).__name__ == "AIMessage":
+                        scritto = _testo_di(messaggio)
+                        if scritto:
+                            blocchi_testo.append(scritto)
 
                     for chiamata in getattr(messaggio, "tool_calls", None) or []:
                         nomi_per_id[chiamata["id"]] = chiamata["name"]
@@ -310,7 +324,6 @@ def rispondi(domanda, conversazione=None):
                             if chiave not in viste:
                                 viste.add(chiave)
                                 fonti_raccolte.append(f)
-                        dopo_strumento = True
                         yield {"tipo": "risultato", "nome": nome,
                                "quante": _quante(esito),
                                "errore": esito.get("errore") if isinstance(esito, dict) else None}
@@ -318,6 +331,9 @@ def rispondi(domanda, conversazione=None):
     except Exception as e:
         yield {"tipo": "errore", "messaggio": f"{type(e).__name__}: {e}"}
         return
+
+    if blocchi_testo:
+        yield {"tipo": "testo", "testo": SEPARATORE.join(blocchi_testo)}
 
     if fonti_raccolte:
         yield {"tipo": "fonti", "fonti": fonti_raccolte}

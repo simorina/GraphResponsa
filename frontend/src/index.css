@@ -116,7 +116,6 @@ body {
   0%, 100% { opacity: 0.4; transform: scale(1); }
   50%      { opacity: 1;   transform: scale(1.35); }
 }
-@keyframes caret { 0%, 45% { opacity: 1; } 55%, 100% { opacity: 0; } }
 
 .rise {
   opacity: 0;
@@ -132,7 +131,6 @@ body {
 .veil-in { animation: veil-in 0.25s ease-out both; }
 
 .pulse-dot { animation: breathe 2.6s ease-in-out infinite; }
-.caret { animation: caret 1.05s step-end infinite; }
 
 .skeleton {
   position: relative;

@@ -14,8 +14,10 @@ La docstring di ogni funzione diventa la descrizione che il modello legge per
 decidere se usarla: e' documentazione operativa, non commento.
 """
 
+import hashlib
 import logging
 import os
+import re
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -65,6 +67,19 @@ def grafo() -> Neo4jGraph:
 def _taglia(testo, limite=MAX_TESTO):
     testo = (testo or "").strip()
     return testo if len(testo) <= limite else testo[:limite] + " [...]"
+
+
+def _firma(testo):
+    """Impronta del testo, per riconoscere i passi identici.
+
+    Lo stesso comma ricorre in archivio sotto piu' atti: un decreto che ne
+    ripubblica un altro, una versione consolidata accanto all'originale, un
+    id qualificato per collisione. Sono atti distinti e vanno tenuti distinti,
+    ma mostrarne il testo due volte consuma i posti utili senza aggiungere
+    nulla: misurato su dieci domande poste in lingua corrente, il 21% dei
+    risultati era una ripetizione, e su una domanda 5 posti su 8.
+    """
+    return hashlib.md5(re.sub(r"\W+", "", (testo or "").lower())[:300].encode()).hexdigest()
 
 
 def _troncato(testo, limite=MAX_TESTO):
@@ -128,8 +143,16 @@ def ricerca_vettoriale():
             password=os.environ["NEO4J_PASSWORD"],
             database=os.environ.get("NEO4J_DATABASE", "neo4j"),
             index_name=INDICE_VETTORIALE,
-            keyword_index_name=INDICE_KEYWORD,
-            search_type="hybrid",
+            # NON "hybrid": la fusione dell'integrazione normalizza ogni ramo
+            # sul proprio massimo e poi prende il maggiore, cosi' il primo
+            # risultato lessicale vale SEMPRE 1.000 e pareggia col primo
+            # vettoriale, spazzatura compresa. Misurato: su "quanto costa
+            # spedire una raccomandata" il ramo lessicale portava in cima la
+            # convocazione di un consiglio d'amministrazione (aggancio su
+            # "spedire") mentre quello semantico trovava il "Diritto di
+            # raccomandazione" del D-37/1947. Qui si prende la sola semantica
+            # e si fonde a valle con _fondi(), a ranghi reciproci.
+            search_type="vector",
             retrieval_query=RISALITA,
         )
     except Exception:
@@ -156,13 +179,118 @@ def _full_text(query, limite, dal_anno=None):
                art.titolo AS partizioneTitolo, art.capoRubrica AS partizioneCapo,
                CASE WHEN node:Comma THEN node.numero ELSE null END AS comma,
                node.testo AS testo
-        ORDER BY score DESC, norma.anno DESC LIMIT $limite
-    """, {"query": query, "limite": limite, "dal_anno": dal_anno})
-    for i, r in enumerate(righe, 1):
+        ORDER BY score DESC, norma.anno DESC LIMIT $ampio
+    """, {"query": query, "limite": limite, "ampio": limite * 3, "dal_anno": dal_anno})
+
+    # Stessa potatura dei doppioni del ramo ibrido: due rami, una semantica.
+    tenute, viste = [], {}
+    for r in righe:
+        impronta = _firma(r["testo"])
+        if impronta in viste:
+            gia = viste[impronta]
+            if r["normaId"] != gia["normaId"] and r["normaId"] not in gia.get("ancheIn", []):
+                gia.setdefault("ancheIn", []).append(r["normaId"])
+            continue
+        viste[impronta] = r
+        tenute.append(r)
+        if len(tenute) >= limite:
+            break
+    for i, r in enumerate(tenute, 1):
         r["rango"] = i
         r["troncato"] = _troncato(r["testo"])
         r["testo"] = _taglia(r["testo"])
+    return tenute
+
+
+# Fusione a ranghi reciproci: punteggio = peso / (K + rango), sommato sui rami.
+#
+# I due parametri sono tarati, non scelti. Su tre famiglie di prove - domande
+# in lingua corrente, trappole lessicali su parole comuni ("spedire", "documenti")
+# e ricerche per rubrica esatta - misurando il rango reciproco medio:
+#
+#     K   peso   colloquiali  trappole  rubriche
+#    20    0.0        0.767      0.750     0.042
+#    20    1.0        1.000      0.750     0.348
+#    20    1.5        1.000      0.750     0.500   <- scelto
+#    20    2.0        1.000      0.134     0.875
+#    20    3.0        1.000      0.000     1.000
+#
+# Il compromesso e' netto e va in una direzione sola: alzando il peso lessicale
+# le rubriche si trovano meglio ma tornano le trappole, cioe' i risultati fuori
+# tema agganciati da una parola comune. 1.5 e' l'ultimo punto prima del crollo,
+# e domina lo spegnimento del ramo lessicale su ogni colonna.
+#
+# Il peso lessicale maggiore di quello semantico non significa che conti di piu':
+# compensa il fatto che la lista lessicale e' precisa in cima e decade in fretta,
+# mentre quella semantica resta utile a lungo. E il ramo lessicale non si puo'
+# spegnere: e' l'unico che aggancia un :Articolo per la sua rubrica, perche' un
+# Articolo non ha un embedding proprio - ce l'hanno i suoi commi.
+K_RRF = 20
+PESO_SEMANTICO = 1.0
+PESO_LESSICALE = 1.5
+
+
+def _semantico(query, limite, dal_anno=None):
+    """Solo ricerca vettoriale. None se gli embedding non sono disponibili."""
+    store = ricerca_vettoriale()
+    if store is None:
+        return None
+    try:
+        trovati = store.similarity_search_with_score(query, k=limite)
+    except Exception:
+        return None
+    righe = []
+    for documento, _punteggio in trovati:
+        m = documento.metadata or {}
+        # Il filtro sull'anno agisce sui risultati, non sull'indice: per questo
+        # a monte si pesca piu' largo di quanto serva.
+        if dal_anno and (m.get("anno") or 0) < dal_anno:
+            continue
+        righe.append({
+            "normaId": m.get("normaId"), "normaTitolo": m.get("normaTitolo"),
+            "anno": m.get("anno"), "inVigoreDal": m.get("inVigoreDal"),
+            "articolo": m.get("articolo"), "rubrica": m.get("rubrica"),
+            "partizioneTitolo": m.get("partizioneTitolo"),
+            "partizioneCapo": m.get("partizioneCapo"),
+            "comma": m.get("comma"), "testo": documento.page_content,
+        })
     return righe
+
+
+def _fondi(liste, limite):
+    """Unisce piu' liste ordinate col metodo dei ranghi reciproci.
+
+    Ogni risultato vale `peso / (K + rango)` in ciascuna lista dove compare, e
+    i contributi si sommano. Cosi' nessun ramo puo' imporre il primo posto da
+    solo - e' la comparsa in entrambi a spingere davvero un passo in cima, che
+    e' il vero segnale di pertinenza. Sostituisce la fusione precedente, che
+    normalizzava ogni ramo sul proprio massimo e prendeva il maggiore: li' il
+    primo lessicale valeva sempre 1.000 anche quando era fuori tema.
+    """
+    punti, primo = {}, {}
+    for righe, peso in liste:
+        for rango, r in enumerate(righe, 1):
+            impronta = _firma(r["testo"])
+            punti[impronta] = punti.get(impronta, 0.0) + peso / (K_RRF + rango)
+            if impronta not in primo:
+                primo[impronta] = dict(r)
+            else:
+                # Stesso testo sotto un altro atto: si annota dove ricorre,
+                # invece di spendere un posto utile per ripeterlo.
+                gia = primo[impronta]
+                altro = r.get("normaId")
+                if altro and altro != gia["normaId"] and altro not in gia.get("ancheIn", []):
+                    gia.setdefault("ancheIn", []).append(altro)
+
+    ordinate = sorted(punti, key=lambda f: punti[f], reverse=True)[:limite]
+    finali = []
+    for i, impronta in enumerate(ordinate, 1):
+        r = primo[impronta]
+        r["rango"] = i
+        r["troncato"] = _troncato(r["testo"])
+        r["testo"] = _taglia(r["testo"])
+        finali.append(r)
+    return finali
 
 
 @tool
@@ -180,6 +308,13 @@ def cerca_testo(query: str, limite: int = 8, dal_anno: int | None = None) -> dic
     Se un risultato ha `troncato: true` il testo mostrato e' tagliato: per il
     contenuto completo chiama leggi_articolo().
 
+    Il campo `ancheIn` elenca altri atti che riportano lo stesso identico testo:
+    tariffari riemessi ogni anno, decreti che ne ripubblicano altri, versioni
+    consolidate. Compaiono una volta sola per non sprecare i posti utili, ma
+    l'elenco e' un indizio di vigenza da non ignorare: se il passo che stai per
+    citare ricorre anche in atti piu' recenti, la versione da esporre e' quella,
+    e vale la pena aprirla con leggi_articolo() prima di rispondere.
+
     Se la prima ricerca rende poco, riformula con il lessico normativo prima di
     concludere che l'archivio non contiene la materia.
 
@@ -196,47 +331,14 @@ def cerca_testo(query: str, limite: int = 8, dal_anno: int | None = None) -> dic
         dal_anno: opzionale, scarta le norme anteriori a quell'anno. Utile per
             cercare la disciplina piu' recente su una materia gia' individuata.
     """
-    store = ricerca_vettoriale()
-    if store is None:
-        righe = _full_text(query, limite, dal_anno)
-        modo = "solo lessicale"
+    lessicali = _full_text(query, limite * 3, dal_anno)
+    semantici = _semantico(query, limite * 3, dal_anno)
+    if semantici is None:
+        righe = lessicali[:limite]
+        modo = "solo lessicale (semantica non disponibile)"
     else:
-        try:
-            # Con un filtro sull'anno si pesca piu' largo e si taglia dopo:
-            # il filtro agisce sui risultati, non sull'indice.
-            k = limite * 4 if dal_anno else limite
-            trovati = store.similarity_search_with_score(query, k=k)
-            righe = []
-            for documento, punteggio in trovati:
-                m = documento.metadata or {}
-                if dal_anno and (m.get("anno") or 0) < dal_anno:
-                    continue
-                righe.append({
-                    # Niente punteggio: il retriever ibrido lo rinormalizza, e
-                    # misurato vale ~1.000 tanto per "termine per il ricorso
-                    # elettorale" (che l'archivio disciplina) quanto per
-                    # "requisiti della nave rompighiaccio in Artico" (che non
-                    # esiste in San Marino). Un numero costante che si legge
-                    # come confidenza spinge a rispondere sul nulla. Il rango
-                    # dice il vero: questo e' il k-esimo passo piu' vicino fra
-                    # quelli esistenti, senza promettere che sia pertinente.
-                    "rango": len(righe) + 1,
-                    "normaId": m.get("normaId"), "normaTitolo": m.get("normaTitolo"),
-                    "anno": m.get("anno"),
-                    "inVigoreDal": m.get("inVigoreDal"),
-                    "articolo": m.get("articolo"), "rubrica": m.get("rubrica"),
-                    "partizioneTitolo": m.get("partizioneTitolo"),
-                    "partizioneCapo": m.get("partizioneCapo"),
-                    "comma": m.get("comma"),
-                    "troncato": _troncato(documento.page_content),
-                    "testo": _taglia(documento.page_content),
-                })
-                if len(righe) >= limite:
-                    break
-            modo = "ibrida"
-        except Exception:
-            righe = _full_text(query, limite, dal_anno)
-            modo = "solo lessicale (ricerca ibrida non disponibile)"
+        righe = _fondi([(semantici, PESO_SEMANTICO), (lessicali, PESO_LESSICALE)], limite)
+        modo = "ibrida"
 
     if not righe:
         return {"risultati": [], "quanti": 0, "ricerca": modo,

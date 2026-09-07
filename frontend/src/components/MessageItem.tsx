@@ -75,10 +75,6 @@ export const MessageItem: React.FC<MessageItemProps> = ({
           <Attesa />
         ) : null}
 
-        {message.isStreaming && message.content && (
-          <span className="caret ml-0.5 inline-block h-[15px] w-[7px] translate-y-[2px] bg-dorato-2 align-baseline" />
-        )}
-
         {message.error && (
           <div className="mt-4 flex items-start gap-2.5 rounded-xl border border-[#e8cec7] bg-rosso-2 px-3.5 py-3">
             <AlertTriangle className="mt-px h-3.5 w-3.5 shrink-0 text-rosso" strokeWidth={1.5} />

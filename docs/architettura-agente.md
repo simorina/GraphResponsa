@@ -65,7 +65,7 @@ flowchart TB
 | Componente | Scelta | Ruolo & Rationale |
 |---|---|---|
 | **Interfaccia Web** | **React 19 + Vite + Tailwind v4** | UI in stile ChatGPT / Claude con accordion per il ragionamento, chip delle fonti e visualizzatore di norme. |
-| **Server Web** | **FastAPI + Uvicorn** | Streaming SSE a bassissima latenza; la UI mostra in diretta quali strumenti vengono invocati. |
+| **Server Web** | **FastAPI + Uvicorn** | Canale SSE: la UI mostra in diretta quali strumenti vengono invocati. La **risposta** invece non e' incrementale, arriva in un unico evento a fine ciclo (vedi §2.1). |
 | **Orchestrazione Agente** | **LangChain 1.x (`create_agent`)** | Ciclo ReAct, max 8 giri di strumenti. In locale la memoria e' `InMemorySaver`; in produzione il checkpointer DynamoDB, che rende i container senza stato. |
 | **Modello di Ragionamento (LLM)** | **Anthropic `claude-haiku-4-5`** | Bassa latenza, alta fedeltà alle istruzioni del prompt e costo contenuto ($1 / $5 MTok). |
 | **Knowledge Graph** | **Neo4j Aura** | Grafo nativo con indici full-text Lucene e vincoli di unicità idempotenti. |
@@ -105,12 +105,36 @@ sequenceDiagram
     end
 
     Claude-->>Agent: Testo della risposta finale con ancoraggio fonti
-    Agent-->>Server: SSE evento: {"tipo": "testo", "testo": ...}
+    Agent-->>Server: SSE evento: {"tipo": "testo", "testo": ...} UNICO, risposta intera
     Agent-->>Server: SSE evento: {"tipo": "fonti", "fonti": [...]}
     Agent-->>Server: SSE evento: {"tipo": "fine", "tokenIn": ..., "costo": ...}
     Server-->>UI: Render Markdown + Chip Fonti Interattivi
     UI-->>User: Visualizzazione completa con fonti verificabili
 ```
+
+### 2.1 Perche' la risposta non e' incrementale
+
+Il canale resta SSE, ma trasporta due cose con tempi diversi.
+
+Gli eventi `strumento` e `risultato` partono **appena accadono**: una
+consultazione dura 8 secondi mediani, 13 al novantesimo percentile e 22 nel
+caso peggiore (misurato su 96 domande in produzione), e tanto silenzio si
+legge come un blocco. La scia del ragionamento e' cio' che rende leggibile
+l'attesa, quindi resta in diretta.
+
+Il testo no. Il modello scrive lungo tutto il ciclo - le frasi di servizio prima
+di uno strumento, poi la risposta - e quei blocchi ora si accumulano e partono
+insieme in **un solo evento**, subito prima di `fonti` e `fine`.
+
+La ragione e' la resa: la risposta e' Markdown, e il Markdown si legge solo per
+intero. Consegnato a frammenti, il browser rende stati intermedi in cui la
+sintassi e' a meta' - una tabella senza le righe, un blocco di codice non ancora
+chiuso, un grassetto con un solo asterisco - e la pagina sussulta a ogni token.
+
+Sul piano tecnico, `rispondi()` non usa piu' lo `stream_mode` `"messages"` di
+LangGraph, che serviva a intercettare i frammenti: bastano gli `updates`, da cui
+si legge il testo degli `AIMessage` gia' completo. Lato interfaccia il cursore
+lampeggiante e' stato tolto: quando il testo compare, e' gia' finito.
 
 ---
 
@@ -165,10 +189,11 @@ flowchart LR
     Q --> VOY["Embedding Voyage-4 (1024d)"]
     VOY --> VS["Indice Vettoriale Neo4j (cosine)<br/>su Comma.embedding"]
 
-    FT --> HYB["Fusione: ogni ramo normalizzato<br/>sul proprio massimo, poi max"]
+    FT --> HYB["Fusione a ranghi reciproci<br/>peso / (20 + rango), sommata"]
     VS --> HYB
 
-    HYB --> GR["Retrieval query sul grafo"]
+    HYB --> DED["Potatura dei doppioni<br/>(campo ancheIn)"]
+    DED --> GR["Retrieval query sul grafo"]
     GR --> OPT["OPTIONAL MATCH (padre)-[:HA_COMMA]->(node)"]
     OPT --> CO["coalesce(padre, node se e' un Articolo)"]
     CO --> NORM["MATCH (norma)-[:HA_ARTICOLO]->(art)"]
@@ -194,7 +219,66 @@ La forma attuale accetta entrambi i casi: `OPTIONAL MATCH` per il padre, e
 l'articolo di riferimento. Verificato: `LQ-186-2005 art. 7`, rubrica
 *Rinvio al Consiglio Grande e Generale*, ora compare fra i risultati.
 
-### 4.2 Il punteggio non e' esposto, e non e' una svista
+### 4.2 La fusione dei due rami, e perche' non e' quella di serie
+
+L'integrazione `langchain-neo4j` offre `search_type="hybrid"`, che interroga i
+due indici e fonde cosi': normalizza ciascun ramo sul proprio massimo, poi
+prende il maggiore dei due punteggi. **Il primo risultato lessicale vale quindi
+sempre 1.000**, qualunque cosa sia, e pareggia col primo semantico.
+
+Misurato, il difetto e' grosso. Su *«quanto costa spedire una raccomandata»* il
+ramo a parole portava in cima la convocazione di un consiglio d'amministrazione
+- il comma dice «avviso... da spedire ai Consiglieri» - mentre quello semantico
+trovava il *Diritto di raccomandazione* del D-37/1947. Su *«che documenti
+servono per sposarsi»* il ramo a parole promuoveva un regolamento sul protocollo
+d'ufficio, e quello semantico dava `L-49/1986 art. 14 (Documenti per le
+pubblicazioni)` al primo posto.
+
+Lo store e' quindi configurato `search_type="vector"` e la fusione la fa
+`_fondi()`, a **ranghi reciproci**: ogni risultato vale `peso / (K + rango)` in
+ciascuna lista dove compare, e i contributi si sommano. Nessun ramo puo' imporre
+il primo posto da solo, e la comparsa in entrambi - il vero segnale di
+pertinenza - spinge in cima.
+
+**I due parametri sono tarati, non scelti.** Su tre famiglie di prove, misurando
+il rango reciproco medio:
+
+| K | peso lessicale | colloquiali | trappole | rubriche |
+|---|---|---|---|---|
+| 20 | 0,0 (solo semantico) | 0,767 | 0,750 | 0,042 |
+| 20 | 1,0 | 1,000 | 0,750 | 0,348 |
+| **20** | **1,5** | **1,000** | **0,750** | **0,500** |
+| 20 | 2,0 | 1,000 | 0,134 | 0,875 |
+| 20 | 3,0 | 1,000 | 0,000 | 1,000 |
+
+Il compromesso va in una direzione sola: alzando il peso lessicale le rubriche
+si trovano meglio ma tornano le trappole. **1,5 e' l'ultimo punto prima del
+crollo, e domina lo spegnimento del ramo lessicale su ogni colonna.**
+
+Il ramo lessicale non si puo' spegnere: e' l'unico che aggancia un `:Articolo`
+per la sua rubrica, perche' un Articolo non ha un embedding proprio - ce l'hanno
+i suoi commi (vedi §5.1 dell'architettura del grafo). Con il peso a zero, su 12
+query di prova uscivano **0 nodi `:Articolo`** contro gli 88 presenti nella lista
+lessicale; a 1,5 ne sopravvivono 40.
+
+### 4.3 I doppioni non occupano piu' i posti utili
+
+Lo stesso comma ricorre in archivio sotto piu' atti: tariffari riemessi ogni
+anno, decreti che ne ripubblicano altri, versioni consolidate accanto
+all'originale. Misurato su dieci domande poste in lingua corrente, **il 21% dei
+risultati era testo gia' mostrato**, e su *«ho preso una multa per divieto di
+sosta quanto pago»* cinque posti su otto.
+
+Ora compaiono una volta sola, con il campo `ancheIn` che elenca gli altri atti.
+L'informazione non si perde e diventa anzi un indizio di vigenza: se lo stesso
+passo ricorre anche in atti piu' recenti, la versione da esporre e' quella. Sul
+divieto di sosta il primo risultato e' diventato l'importo della sanzione, con
+i cinque decreti che la riportano su una riga sola.
+
+Esito complessivo sulle dieci domande da sportello: **9 su 10 hanno l'atto
+giusto al primo posto**, contro 6 su 10 prima di questi interventi.
+
+### 4.4 Il punteggio non e' esposto, e non e' una svista
 
 Il retriever ibrido normalizza ciascun ramo sul proprio massimo prima di
 fondere. Il punteggio del primo risultato vale quindi **sempre ~1.000**,
@@ -219,7 +303,7 @@ esplicito: *la ricerca restituisce SEMPRE dei risultati, anche quando l'archivio
 non disciplina affatto la materia; l'unico modo di stabilire se un risultato
 risponde e' leggerne il testo.*
 
-### 4.3 Troncamento dichiarato
+### 4.5 Troncamento dichiarato
 
 Gli estratti sono tagliati a **2.000 caratteri** (`MAX_TESTO`). La soglia
 precedente di 1.200 tagliava il 6,5% dei commi; questa il 2,6%.
@@ -229,7 +313,7 @@ il prompt istruisce a chiamare `leggi_articolo` prima di citare un passo
 troncato. Senza questo segnale il modello non poteva sapere se il dato che
 cercava fosse proprio nella parte tagliata.
 
-### 4.4 Il filtro `dal_anno`
+### 4.6 Il filtro `dal_anno`
 
 Serve al principio di vigenza: individuata la materia, si cerca se ci sono
 novelle recenti. Il filtro agisce **sui risultati e non sull'indice**, quindi
