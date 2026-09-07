@@ -364,6 +364,56 @@ def _rerank(query, righe, limite):
     return [righe[x.index] for x in esito.results]
 
 
+def _novelle(righe):
+    """Annota quali risultati sono citati da atti SUCCESSIVI.
+
+    Il grafo tiene archi CITA_ARTICOLO fra il comma che cita e l'articolo
+    citato. Quando una legge del 2025 dice "il comma 1 dell'articolo 6 della
+    Legge 171/2022 e' cosi' modificato", quell'arco esiste: e' il segnale
+    deterministico che l'articolo e' stato toccato dopo.
+
+    Serve perche' accorgersene leggendo non e' affidabile. Misurato sulla stessa
+    domanda posta due volte: una volta l'agente ha trovato la novella del 2025 e
+    ha risposto con la disciplina vigente, l'altra ha citato la versione del
+    2022 - 35 anni invece di 40, scadenza 2025 invece di 2026 - pur avendo la
+    novella al terzo posto fra i risultati che aveva sotto gli occhi.
+
+    Si calcola sui soli risultati finali, non sui candidati: una query sola.
+    """
+    chiavi = [{"n": r["normaId"], "a": str(r.get("articolo"))}
+              for r in righe if r.get("normaId") and r.get("articolo")]
+    if not chiavi:
+        return righe
+    try:
+        trovate = grafo().query("""
+            UNWIND $chiavi AS k
+            MATCH (n:Norma {id: k.n})-[:HA_ARTICOLO]->(a:Articolo {numero: k.a})
+            MATCH (c:Comma)-[:CITA_ARTICOLO]->(a)
+            MATCH (dopo:Norma)-[:HA_ARTICOLO]->(artDopo:Articolo)-[:HA_COMMA]->(c)
+            WHERE dopo.anno > n.anno
+            WITH k, dopo, artDopo, c ORDER BY dopo.anno DESC
+            WITH k, collect({norma: dopo.id, anno: dopo.anno,
+                             articolo: artDopo.numero, comma: c.numero,
+                             testo: c.testo})[..2] AS novelle
+            RETURN k.n AS norma, k.a AS articolo, novelle
+        """, {"chiavi": chiavi})
+    except Exception:
+        return righe
+    mappa = {(t["norma"], t["articolo"]): t["novelle"] for t in trovate}
+    for r in righe:
+        novelle = mappa.get((r.get("normaId"), str(r.get("articolo"))))
+        if novelle:
+            # Il TESTO della novella, non solo il suo identificativo. Chiedere
+            # al modello di andarselo a leggere non funziona in modo affidabile:
+            # misurato sulla stessa domanda, a volte apriva l'atto successivo e
+            # a volte citava il testo scaduto pur avendone il riferimento
+            # davanti. Se il testo nuovo arriva insieme, non c'e' piu' un passo
+            # da ricordarsi di fare.
+            r["citatoDaAttiSuccessivi"] = [
+                {**n, "testo": _taglia(n["testo"], 900)} for n in novelle]
+    return righe
+
+
 def _fondi(liste, limite, taglia=True):
     """Unisce piu' liste ordinate col metodo dei ranghi reciproci.
 
@@ -416,6 +466,14 @@ def cerca_testo(query: str, limite: int = 8, dal_anno: int | None = None) -> dic
     Se un risultato ha `troncato: true` il testo mostrato e' tagliato: per il
     contenuto completo chiama leggi_articolo().
 
+    Il campo `citatoDaAttiSuccessivi` e' il piu' importante che leggi. Elenca
+    gli atti POSTERIORI che citano proprio quell'articolo, e in questo
+    ordinamento citarlo significa quasi sempre modificarlo: "il comma 1
+    dell'articolo 6 della Legge 171/2022 e' cosi' modificato". Se compare, il
+    testo che hai davanti puo' NON essere quello vigente: il campo porta con
+    se' il TESTO della modifica, gia' pronto da leggere. Confrontalo con il
+    passo principale ed esponi la versione vigente, dicendo cosa e' cambiato.
+
     Il campo `ancheIn` elenca altri atti che riportano lo stesso identico testo:
     tariffari riemessi ogni anno, decreti che ne ripubblicano altri, versioni
     consolidate. Compaiono una volta sola per non sprecare i posti utili, ma
@@ -459,6 +517,8 @@ def cerca_testo(query: str, limite: int = 8, dal_anno: int | None = None) -> dic
         else:
             righe = _fondi([(semantici, PESO_SEMANTICO), (lessicali, PESO_LESSICALE)], limite)
             modo = "ibrida"
+    if righe:
+        righe = _novelle(righe)
 
     if not righe:
         return {"risultati": [], "quanti": 0, "ricerca": modo,

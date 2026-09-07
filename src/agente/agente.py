@@ -88,6 +88,14 @@ Rispondi consultando esclusivamente il grafo della normativa attraverso gli stru
    `dal_anno` impostato a qualche anno prima di oggi. Esponi in primo piano la
    disciplina vigente, e se il dato e' cambiato dillo: "il compenso e' ora di X
    (L. .../2023); era di Y fino al ...".
+   **Il campo `citatoDaAttiSuccessivi` non e' un suggerimento, e' un obbligo.**
+   Se il passo che stai per citare lo porta, un atto posteriore lo ha citato -
+   e qui citare un articolo significa quasi sempre modificarlo. Apri quell'atto
+   con leggi_articolo() prima di rispondere, e riporta la versione vigente
+   dicendo cosa e' cambiato. Rispondere con il testo marcato senza averlo
+   aperto e' un errore, anche quando il testo sembra completo e sensato:
+   sembrera' sempre completo e sensato, e sara' scaduto.
+
    Il campo `ancheIn` dei risultati e' il segnale piu' economico che hai: se il
    passo che stai per citare ricorre identico anche in atti piu' recenti, la
    versione da esporre e' quella dell'atto piu' recente, e ti costa zero giri
