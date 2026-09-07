@@ -369,15 +369,34 @@ def parse(id_norma, meta):
         if attesa_rubrica:
             if riga.startswith("(") or rubrica_buffer:
                 rubrica_buffer.append(riga)
-                if riga.endswith(")"):
+                # La parentesi puo' essere seguita da punteggiatura: senza
+                # tollerarla, "(Iscrizione dei ricavi ...)." non chiudeva il
+                # buffer, che continuava a inghiottire i commi fino
+                # all'articolo successivo. Misurato: 38 articoli restavano del
+                # tutto vuoti, corpo compreso.
+                if riga.rstrip().rstrip(".:;,").endswith(")"):
                     testo = unisci(rubrica_buffer)
-                    articolo_corrente["rubrica"] = testo.strip("()").strip()
+                    articolo_corrente["rubrica"] = testo.strip(" .:;,").strip("()").strip()
+                    articolo_corrente["_rubricaVera"] = True
                     attesa_rubrica = False
                     rubrica_buffer = []
+                elif len(rubrica_buffer) >= 3:
+                    # Una rubrica non occupa tre righe: se non si e' chiusa,
+                    # non era una rubrica. Si restituisce tutto al testo invece
+                    # di perderlo.
+                    for r in rubrica_buffer:
+                        buffer.append(r)
+                    rubrica_buffer = []
+                    attesa_rubrica = False
                 i += 1
                 continue
             elif not m_art and not m_part and not RE_COMMA.match(riga) and not RE_COMMA_INLINE.match(riga) and len(riga) <= 80 and (riga.endswith(".") or riga.endswith(":")):
                 articolo_corrente["rubrica"] = riga.rstrip(".:").strip()
+                # Presunta, non certa: negli atti storici un articolo e' spesso
+                # una frase sola, e questa regola gliela porta via lasciandolo
+                # senza testo. Si segna la provenienza e si decide a fine
+                # analisi, quando si sa se sono arrivati dei commi.
+                articolo_corrente["_rubricaPresunta"] = riga.rstrip(".:").strip()
                 attesa_rubrica = False
                 i += 1
                 continue
@@ -410,6 +429,26 @@ def parse(id_norma, meta):
     # dedurla e dichiararla che lasciare il testo fuori dalla ricerca.
     if not articoli:
         articoli, preambolo = struttura_dedotta(id_norma, righe)
+
+    # Un articolo senza nemmeno un comma ha perso il proprio testo. Quando la
+    # rubrica era stata solo presunta - riga corta chiusa da un punto - quella
+    # riga E' il testo dell'articolo: "Art. 12. / I registri dello Stato Civile
+    # costituiscono una raccolta di atti pubblici." e' un articolo di una frase,
+    # non un titolo. Si restituisce al testo invece di lasciarlo fuori dalla
+    # ricerca.
+    for art in articoli:
+        presunta = art.pop("_rubricaPresunta", None)
+        art.pop("_rubricaVera", None)
+        if art["commi"] or not presunta:
+            continue
+        art["commi"].append({
+            "id": f"{art['id']}/c-1",
+            "numero": "1",
+            "testo": presunta if presunta.endswith((".", ":", "!", "?")) else presunta + ".",
+            "numerazioneAnomala": False,
+            "commaImplicito": True,
+        })
+        art["rubrica"] = None
 
     # Citazioni: per comma, con l'indicazione del comma di origine.
     for art in articoli:
