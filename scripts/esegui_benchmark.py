@@ -49,13 +49,28 @@ PAROLA = "Benchmark2026Titano"
 
 GIUDICE = """Confronti la risposta di un assistente giuridico con la risposta attesa.
 
-Giudica SOLO il merito: la risposta dell'assistente contiene il fatto atteso?
-Ignora lo stile, la lunghezza e le informazioni in piu', purche' non
-contraddicano quella attesa.
+Giudica UNA cosa sola: il fatto atteso c'e' o non c'e'?
 
-  corretta    contiene il fatto atteso, anche detto con altre parole
-  parziale    va nella direzione giusta ma manca il dato preciso
+  corretta    il fatto atteso c'e', anche detto con altre parole
+  parziale    va nella direzione giusta ma IL DATO PRECISO MANCA
   errata      dice altro, contraddice, oppure dichiara di non sapere
+
+"parziale" significa che manca qualcosa di atteso, mai che ci sia qualcosa in
+piu'. Se il fatto atteso c'e', la risposta e' CORRETTA - punto - e non importa
+quanto sia lunga, quante altre norme citi, quanti casi aggiunga o quanto sia
+articolata. La risposta attesa e' un estratto di un solo comma, quindi e' NORMALE
+che una buona risposta dica molto di piu': l'assistente ha letto l'atto intero.
+
+Errori da non commettere, osservati davvero su questo benchmark:
+
+  - "Contiene il fatto atteso ma aggiunge dettagli non richiesti" -> CORRETTA.
+    Nessun dettaglio in piu' rende una risposta parziale.
+  - "Identifica i tre regimi ma con criteri diversi da quelli attesi" -> se i
+    tre regimi ci sono, CORRETTA: la formulazione non deve coincidere.
+  - "Risponde in modo piu' ampio della domanda" -> CORRETTA.
+
+Declassa a parziale solo se, cercando il dato atteso nella risposta, NON lo
+trovi. Declassa a errata solo se trovi il contrario.
 
 Per le domande su materie NON disciplinate, la risposta corretta e' dichiarare
 che l'archivio non contiene la disciplina. Se l'assistente inventa una risposta,
@@ -222,6 +237,19 @@ def main():
         print(f"  [{i:>3}] {segno}{marchio}  {e['secondi']:4.0f}s  {r['domanda'][:58]}")
 
     dove = OUT / ("benchmark_esiti_locale.csv" if locale else "benchmark_esiti.csv")
+    # Un giro parziale non deve cancellare un giro intero. E' successo: dodici
+    # domande hanno sovrascritto le cento, e le risposte da riesaminare sono
+    # andate perdute. Il giro corto scrive di fianco, con il proprio numero.
+    if limite and dove.exists():
+        import csv as _csv
+        try:
+            esistenti = sum(1 for _ in _csv.reader(open(dove, encoding="utf-8-sig"))) - 1
+        except Exception:
+            esistenti = 0
+        if esistenti > len(esiti):
+            dove = dove.with_name(dove.stem + f"_{len(esiti)}" + dove.suffix)
+            print(f"  (giro parziale: scrivo in {dove.name} per non "
+                  f"cancellare i {esistenti} risultati gia' presenti)")
     with open(dove, "w", newline="", encoding="utf-8-sig") as f:
         w = csv.DictWriter(f, fieldnames=list(esiti[0].keys()), delimiter=";")
         w.writeheader()
