@@ -654,18 +654,44 @@ Resources:
             AllowedMethods: [GET, HEAD, OPTIONS]
             CachePolicyId: 4135ea2d-6df8-44a3-9df3-4b5a84be39ad
             OriginRequestPolicyId: b689b0a8-53d0-40ab-baf2-68738e2966ac
+          # Il PDF originale della norma, riletto dal portale del Consiglio.
+          # Senza questa regola il percorso cadeva nel comportamento
+          # predefinito, cioe' il bucket, e /documenti/D-6-1960 restituiva la
+          # pagina dell'applicazione invece del documento: HTTP 200 e
+          # text/html, un guasto che non si vede finche' non si guarda il tipo.
+          #
+          # Qui la cache si USA, al contrario degli altri percorsi: un atto
+          # pubblicato non cambia piu', l'endpoint dichiara gia'
+          # max-age=86400, e senza cache ogni apertura ripasserebbe dal
+          # portale - che per gli atti con allegati significa rileggere
+          # diciassette megabyte a ogni clic.
+          - PathPattern: /documenti/*
+            TargetOriginId: origineAlb
+            ViewerProtocolPolicy: redirect-to-https
+            AllowedMethods: [GET, HEAD, OPTIONS]
+            CachePolicyId: 658327ea-f89d-4fab-a63d-7e88639e58f6         # CachingOptimized
+            OriginRequestPolicyId: b689b0a8-53d0-40ab-baf2-68738e2966ac
 
-        # La UI e' un'applicazione a pagina singola: un percorso sconosciuto
-        # non e' un file mancante, e' una rotta del client.
-        CustomErrorResponses:
-          - ErrorCode: 403
-            ResponseCode: 200
-            ResponsePagePath: /index.html
-            ErrorCachingMinTTL: 10
-          - ErrorCode: 404
-            ResponseCode: 200
-            ResponsePagePath: /index.html
-            ErrorCachingMinTTL: 10
+        # NIENTE CustomErrorResponses, ed e' una scelta.
+        #
+        # C'era la solita regola da applicazione a pagina singola: 403 e 404
+        # riscritti in 200 con /index.html, perche' "un percorso sconosciuto
+        # non e' un file mancante, e' una rotta del client". Due problemi.
+        #
+        # Primo, non serve: questa UI non ha un router, non esistono rotte
+        # profonde da servire, e la radice arriva gia' da DefaultRootObject.
+        #
+        # Secondo, e' distribuzione-wide: CloudFront la applica anche alle
+        # risposte dell'ALB, quindi riscriveva gli errori dell'API. Misurato in
+        # produzione: POST /chat con la conversazione di un altro utente
+        # tornava 200 e la pagina HTML invece di 403, e il ramo che il frontend
+        # ha per quel caso era codice morto - riceveva HTML e provava a
+        # leggerlo come flusso SSE. Lo stesso valeva per /documenti su una
+        # norma inesistente.
+        #
+        # Senza la regola, un percorso ignoto rende l'errore vero del bucket e
+        # l'API i propri codici. Un errore onesto vale piu' di una pagina
+        # servita al posto suo.
 
   # =========================================================================
   # Ruoli
