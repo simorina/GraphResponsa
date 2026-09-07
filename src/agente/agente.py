@@ -281,14 +281,29 @@ def nuova_conversazione() -> str:
 # DD-4-2014, EC-None-2019~17163212.
 RE_ID_NORMA = re.compile(r"\b([A-Z]{1,3})-(-?\d+|None)-(\d{4})\b")
 
-# Una citazione come la scrive il modello: "L. 171/2022", "Decreto Delegato
-# n. 52/2026", "LQ 186/2005". Si pretende un marcatore di tipo davanti al
-# numero, altrimenti "fino al 31/12/2026" verrebbe letto come la norma 12/2026.
-RE_CITAZIONE = re.compile(
-    r"(?:legge|l\.|lq\.?|lc\.?|d\.l\.|dl\.?|d\.d\.|dd\.?|decreto|regolamento|reg\.|r\.)"
-    r"[\s ]*(?:n[\.°]?[\s ]*)?(\d{1,4})[\s ]*/[\s ]*((?:19|20)\d{2})",
-    re.IGNORECASE)
-
+# Una citazione come la scrive il modello, in tutte le forme d'uso. Un giurista
+# scrive lo stesso atto in quattro modi diversi, e riconoscerne uno solo rende
+# la spia cieca proprio dove servirebbe. Misurato sul benchmark: un controllo
+# che vedeva solo "numero/anno" dava per assenti ventuno citazioni corrette.
+#
+#   L. 164/2022                              numero / anno
+#   Legge n. 164 del 2022                    numero poi anno
+#   Decreto Delegato 23 agosto 2024 n. 134   anno poi numero (la data estesa)
+#   DD-44-2008                               l'id come lo rendono gli strumenti
+TIPO = (r"(?:legge|l\.|lq\.?|lc\.?|d\.l\.|dl\.?|d\.d\.|dd\.?|decreto"
+        r"|regolamento|reg\.|r\.)")
+CITAZIONI = [
+    # Un marcatore di tipo davanti al numero e' obbligatorio nella forma con la
+    # barra, altrimenti "fino al 31/12/2026" verrebbe letto come la norma
+    # 12/2026.
+    re.compile(TIPO + r"[\s\u00a0]*(?:n[\.\u00b0]?[\s\u00a0]*)?"
+               r"(\d{1,4})[\s\u00a0]*/[\s\u00a0]*((?:19|20)\d{2})", re.I),
+    re.compile(TIPO + r"[\s\u00a0]*n[\.\u00b0]?[\s\u00a0]*(\d{1,4})\b"
+               r".{0,40}?\b((?:19|20)\d{2})\b", re.I),
+    re.compile(TIPO + r"[^\n]{0,40}?\b((?:19|20)\d{2})\b[^\n]{0,20}?"
+               r"n[\.\u00b0]?[\s\u00a0]*(\d{1,4})\b", re.I),
+    re.compile(r"\b[A-Z]{1,3}-(\d{1,4})-((?:19|20)\d{2})\b"),
+]
 
 def _citazioni_non_verificate(testo, norme_viste):
     """Le norme citate nella risposta che nessuno strumento ha restituito.
@@ -308,9 +323,16 @@ def _citazioni_non_verificate(testo, norme_viste):
     """
     coppie_viste = {(n, a) for _t, n, a in
                     (m.groups() for m in RE_ID_NORMA.finditer(norme_viste))}
+    coppie = []
+    for i, espressione in enumerate(CITAZIONI):
+        for m in espressione.finditer(testo or ""):
+            # La terza forma trova prima l'anno e poi il numero: si rimette
+            # nell'ordine delle altre invece di duplicare la logica a valle.
+            coppie.append((m.group(2), m.group(1)) if i == 2
+                          else (m.group(1), m.group(2)))
+
     fuori = []
-    for m in RE_CITAZIONE.finditer(testo or ""):
-        numero, anno = m.group(1), m.group(2)
+    for numero, anno in coppie:
         if (numero, anno) in coppie_viste or (numero.lstrip("0"), anno) in coppie_viste:
             continue
         etichetta = f"{numero}/{anno}"

@@ -160,20 +160,46 @@ def interroga_locale(domanda, agente):
 
 def cita_giusto(risposta, riferimento):
     """
-    La norma attesa compare nella risposta?
+    La norma attesa compare nella risposta, in una qualunque delle forme d'uso?
 
-    L'id 'DD-79-2013' nel testo appare come 'Decreto Delegato 79/2013' o
-    'DD 79/2013': si cerca la coppia numero/anno, che e' la parte che identifica
-    l'atto e che un assistente non puo' azzeccare per caso.
+    Un giurista scrive lo stesso atto in almeno quattro modi, e la versione
+    precedente ne riconosceva uno e mezzo. Misurato: dava per sbagliate
+    citazioni corrette come "Decreto Delegato 23 agosto 2024 n. 134" - dove
+    l'anno precede il numero - e "DD-44-2008, art. 7, comma 1", che e' l'id
+    esatto. Su quattro casi esaminati a mano, due erano falsi negativi: la
+    percentuale di fonti sbagliate era gonfiata dal controllo, non dall'agente.
+
+      L. 164/2022                          numero / anno
+      Legge n. 164 del 2022                numero poi anno, vicini
+      Decreto Delegato 23 agosto 2024      anno poi numero, vicini
+        n. 134
+      DD-44-2008                           l'id come lo restituisce lo strumento
+
+    Resta volutamente stretto su una cosa: la coppia numero-anno deve esserci
+    tutta. Un "art. 7" da solo non prova nulla, e contarlo renderebbe la
+    misura compiacente.
     """
     if not riferimento:
         return None
-    m = re.match(r"[A-Z]+-(-?\d+)-(\d+)", riferimento.split()[0])
+    m = re.match(r"([A-Z]+)-(-?\d+|None)-(\d{4})", riferimento.split()[0])
     if not m:
         return None
-    numero, anno = m.groups()
-    return bool(re.search(rf"\b{re.escape(numero)}\s*/\s*{anno}\b", risposta) or
-                re.search(rf"\bn\.?\s*{re.escape(numero)}\b.{{0,40}}\b{anno}\b", risposta))
+    tipo, numero, anno = m.groups()
+    if numero == "None":
+        return None
+    n, a = re.escape(numero), re.escape(anno)
+
+    forme = [
+        # 164/2022
+        rf"\b{n}\s*/\s*{a}\b",
+        # n. 164 ... 2022  (numero prima)
+        rf"\bn[.\u00b0]?\s*{n}\b.{{0,40}}?\b{a}\b",
+        # 23 agosto 2024 ... n. 134  (anno prima: la data estesa)
+        rf"\b{a}\b.{{0,20}}?\bn[.\u00b0]?\s*{n}\b",
+        # DD-44-2008, l'id degli strumenti
+        rf"\b[A-Z]{{1,3}}-{n}-{a}\b",
+    ]
+    return any(re.search(f, risposta, re.IGNORECASE) for f in forme)
 
 
 def main():
