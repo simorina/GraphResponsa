@@ -648,6 +648,18 @@ Resources:
             AllowedMethods: [GET, HEAD, OPTIONS, PUT, POST, PATCH, DELETE]
             CachePolicyId: 4135ea2d-6df8-44a3-9df3-4b5a84be39ad
             OriginRequestPolicyId: b689b0a8-53d0-40ab-baf2-68738e2966ac
+          # /salute non aveva una regola, quindi non arrivava mai all'ALB:
+          # cadeva sul bucket, che rispondeva 403, e la vecchia riscrittura
+          # degli errori lo trasformava in 200 con la pagina dell'applicazione.
+          # Ogni verifica esterna leggeva quindi index.html credendo di
+          # interrogare il backend - un controllo di salute che non poteva
+          # fallire, che e' il tipo di controllo peggiore.
+          - PathPattern: /salute
+            TargetOriginId: origineAlb
+            ViewerProtocolPolicy: redirect-to-https
+            AllowedMethods: [GET, HEAD, OPTIONS]
+            CachePolicyId: 4135ea2d-6df8-44a3-9df3-4b5a84be39ad
+            OriginRequestPolicyId: b689b0a8-53d0-40ab-baf2-68738e2966ac
           - PathPattern: /stato
             TargetOriginId: origineAlb
             ViewerProtocolPolicy: redirect-to-https
