@@ -103,13 +103,13 @@ Nel nostro Knowledge Graph, le rubriche svolgono due funzioni cruciali:
 | **`CITA`** | **`69.662`** | `(Comma/Norma) ➔ Norma` | Rinvio normativo formale |
 | **`CITA_ARTICOLO`** | **`16.763`** | `Comma ➔ Articolo` | Rinvio puntuale ad articolo specifico risolto |
 | **`HA_ALLEGATO`** | **`519`** | `Norma ➔ Allegato` | Presenza di allegato tecnico |
-| **`ABROGA`** | **`31`** | `Norma ➔ Norma` | Abrogazione di un atto per intero, riconosciuta senza ambiguità |
-| **TOTALE ARCHI** | **`342.649`** | | |
+| **`ABROGA`** | **`83`** | `Norma ➔ Norma` | Abrogazione di un atto per intero, riconosciuta senza ambiguità |
+| **TOTALE ARCHI** | **`342.701`** | | |
 
 #### `ABROGA`, e perché è così piccolo
 
-Nel corpus ci sono **1.316 commi** che contengono «è abrogato» o «sono
-abrogati», e se ne modellano 31. Non è una svista: la forma più comune abroga
+Nel corpus ci sono **1.728 commi** che contengono «è abrogato», «sono
+abrogati» o «e' abrogato», e se ne modellano 83. Non è una svista: la forma più comune abroga
 una **parte** — *«All'articolo 2 della Legge n.55/1994, il punto 8.0 è
 abrogato»* — e leggerla come abrogazione dell'articolo 2 dichiarerebbe morta
 una norma viva. In un archivio che deve dire a un cittadino se ha diritto a
@@ -124,12 +124,21 @@ fallisce, lo script esce senza scrivere.
 
 La marcatura effettiva non viene solo da lì. L'archivio di Stato segna da sé
 gli atti caduti premettendo `ABROGATO - ` al titolo — **125 norme** — e i due
-segnali sono quasi disgiunti, appena **3 in comune**: il titolo dice *che* un
-atto è caduto, i commi dicono *da chi*. L'unione marca **150 norme** con
-`Norma.abrogata`, e le 28 con attribuzione nota portano anche
+segnali sono in larga parte disgiunti, appena **7 in comune**: il titolo dice *che* un
+atto è caduto, i commi dicono *da chi*. L'unione marca **193 norme** con
+`Norma.abrogata`, e le 75 con attribuzione nota portano anche
 `Norma.abrogataDa`.
 
-**Il rischio non è l'arco sbagliato, è l'arco assente.** Con l'1,2% di
+Due trappole di lettura sono costate care. La prima è l'apostrofo: gli atti
+scrivono `E' abrogata` e `E’ abrogata` quanto `È abrogata`, e cercare la sola
+forma accentata perdeva **412 commi su 1.728** — fra cui la L-145/2022, che
+abroga la L-106/2009. Senza quella riga l'agente, richiesto della L-106/2009,
+indicava come successore la L-107/2009: un atto anteriore, su un'altra materia.
+La seconda è il tipo dell'atto, che va confrontato col **prefisso dell'id** e
+non con `Norma.tipo`: quest'ultimo è scritto a mano e contiene *Decreto
+Delagato*, *Decreto Delega5to*, *Decreto Conisliare*.
+
+**Il rischio non è l'arco sbagliato, è l'arco assente.** Con l'1,6% di
 copertura, l'assenza del marchio non dimostra nulla, ma un indice rado invita a
 leggerla come conferma di vigenza. Perciò il campo entra nel prompt come avviso
 esclusivamente positivo: la presenza autorizza «è stata abrogata», l'assenza

@@ -56,13 +56,23 @@ sys.path.insert(0, str(ROOT / "src"))
 if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8", line_buffering=True)
 
-TIPO = (r"(?:legge|decreto\s+delegato|decreto\s*[-–]?\s*legge|"
-        r"decreto\s+reggenziale|regolamento|decreto\s+consil\w+)")
+TIPO = (r"(legge|decreto\s+delegato|decreto\s*[-–]?\s*legge|"
+        r"decreto\s+reggenziale|regolamento|decreto\s+consil\w+|decreto\s+consigl\w+)")
 RIF = r"(?:n\.?\s*(\d+)\s*/\s*(\d{4})|(\d{4})\s+n\.?\s*(\d+))"
 AVANTI = re.compile(
     rf"(?:è|e')\s+abrogat[ao]\s+(?:il|la|lo)?\s*{TIPO}[^;]{{0,60}}?{RIF}", re.I)
 INDIETRO = re.compile(
     rf"\b(?:il|la)\s+{TIPO}[^;]{{0,60}}?{RIF}[^;]{{0,40}}?(?:è|e')\s+abrogat[ao]", re.I)
+
+# Il tipo dichiarato nel testo, contro il prefisso dell'id del bersaglio.
+# Si confronta col prefisso e non con Norma.tipo, che e' scritto a mano e pieno
+# di refusi - "Decreto Delagato", "Decreto Delega5to", "Decreto Conisliare".
+# Oggi questo controllo non respinge nulla (83 coppie su 83 concordano): serve
+# a impedire che, crescendo l'archivio, "Legge n.88/2003" si agganci a un
+# decreto con lo stesso numero e lo stesso anno.
+PREFISSO = {"legge": {"L"}, "decreto delegato": {"DD"},
+            "decreto legge": {"DL", "EC"}, "decreto reggenziale": {"D"},
+            "regolamento": {"R"}, "decreto consiliare": {"DC", "DD"}}
 
 # Se compare una partizione, il bersaglio e' quella e non l'atto.
 PARTE = re.compile(r"(?:articol|comm[ai]|punt[oi]|letter[ae]|capovers|allegat)", re.I)
@@ -86,20 +96,36 @@ PROVE = [
     ("È abrogata la Legge n.146/2004 a decorrere dal 1° gennaio 2015.", 0),
     ("È abrogato il DD 12 settembre 2019 n.139, fatti salvi gli effetti prodotti.", 0),
     ("Fatti salvi gli effetti, la Legge 8 giugno 1963 n. 35 è abrogata.", 0),
+    # L'italiano degli atti scrive "e' abrogata" tanto quanto "è abrogata", e
+    # l'apostrofo e' spesso quello tipografico. Ignorarlo faceva perdere 412
+    # commi su 1.728 - fra cui la L-145/2022, che abroga la L-106/2009: senza
+    # questa riga l'agente indicava come vigente una disciplina sostituita.
+    ("E’ abrogata la Legge 31 luglio 2009 n.106, senza reviviscenza.", 1),
+    ("E' abrogato il Decreto Delegato 2 agosto 2012 n.106.", 1),
 ]
+
+# Le due grafie dell'apostrofo sono la stessa parola: si normalizzano prima di
+# leggere, cosi' le espressioni restano scritte in un modo solo.
+APOSTROFI = str.maketrans({"’": "'", "‘": "'", "ʼ": "'"})
 
 
 def bersagli(testo):
     """Gli atti interi che questo comma abroga senza ambiguita'. Quasi sempre zero."""
+    testo = testo.translate(APOSTROFI)
     if PARTE.search(testo) or DIFFERITA.search(testo) or SALVEZZA.search(testo):
         return []
     fuori = []
     for espressione in (AVANTI, INDIETRO):
         for m in espressione.finditer(testo):
-            g = m.groups()
+            tipo, g = m.group(1), m.groups()[1:]
             numero, anno = (g[0], g[1]) if g[0] else (g[3], g[2])
-            if (int(numero), int(anno)) not in fuori:
-                fuori.append((int(numero), int(anno)))
+            # Il tipo si normalizza qui: "Decreto - Legge" e "decreto legge"
+            # sono la stessa cosa, e la grafia varia atto per atto.
+            tipo = re.sub(r"\s*[-–]\s*", " ", " ".join(tipo.lower().split()))
+            tipo = tipo.replace("consigliare", "consiliare")
+            voce = (int(numero), int(anno), tipo)
+            if voce not in fuori:
+                fuori.append(voce)
     return fuori
 
 
@@ -117,6 +143,8 @@ def candidati(g):
         MATCH (c:Comma)
         WHERE toLower(c.testo) CONTAINS 'sono abrogat'
            OR toLower(c.testo) CONTAINS 'è abrogat'
+           OR toLower(c.testo) CONTAINS "e' abrogat"
+           OR toLower(c.testo) CONTAINS 'e’ abrogat'
         MATCH (c)<-[:HA_COMMA]-(:Articolo)<-[:HA_ARTICOLO]-(f:Norma)
         RETURN c.id AS comma, c.testo AS testo, f.id AS fonte, f.anno AS anno
     """)
@@ -124,14 +152,15 @@ def candidati(g):
 
     trovati = []
     scarti = {"piu di un bersaglio o nessuno": 0, "bersaglio assente o ambiguo": 0,
-              "abrogherebbe se stessa": 0, "bersaglio posteriore alla fonte": 0}
+              "abrogherebbe se stessa": 0, "bersaglio posteriore alla fonte": 0,
+              "tipo dell'atto discordante": 0}
     for r in righe:
         testo = " ".join((r["testo"] or "").split())
         trovato = bersagli(testo)
         if len(trovato) != 1:
             scarti["piu di un bersaglio o nessuno"] += 1
             continue
-        numero, anno = trovato[0]
+        numero, anno, tipo = trovato[0]
         norme = g.query("""
             MATCH (n:Norma) WHERE n.numero = $numero AND n.anno = $anno
             RETURN n.id AS id, n.titolo AS titolo
@@ -141,6 +170,10 @@ def candidati(g):
             continue
         if norme[0]["id"] == r["fonte"]:
             scarti["abrogherebbe se stessa"] += 1
+            continue
+        attesi = PREFISSO.get(tipo)
+        if attesi and norme[0]["id"].split("-")[0] not in attesi:
+            scarti["tipo dell'atto discordante"] += 1
             continue
         # Un atto non puo' abrogarne uno successivo: se il verso e' invertito,
         # il riferimento e' stato letto male e va scartato senza discutere.
