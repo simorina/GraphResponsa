@@ -14,6 +14,7 @@ checkpointer, e il client manda solo un identificativo di conversazione.
 
 import json
 import os
+import re
 import uuid
 from pathlib import Path
 
@@ -268,6 +269,48 @@ def nuova_conversazione() -> str:
     return str(uuid.uuid4())
 
 
+# Un id di norma come compare nei risultati degli strumenti: L-171-2022,
+# DD-4-2014, EC-None-2019~17163212.
+RE_ID_NORMA = re.compile(r"\b([A-Z]{1,3})-(-?\d+|None)-(\d{4})\b")
+
+# Una citazione come la scrive il modello: "L. 171/2022", "Decreto Delegato
+# n. 52/2026", "LQ 186/2005". Si pretende un marcatore di tipo davanti al
+# numero, altrimenti "fino al 31/12/2026" verrebbe letto come la norma 12/2026.
+RE_CITAZIONE = re.compile(
+    r"(?:legge|l\.|lq\.?|lc\.?|d\.l\.|dl\.?|d\.d\.|dd\.?|decreto|regolamento|reg\.|r\.)"
+    r"[\s ]*(?:n[\.°]?[\s ]*)?(\d{1,4})[\s ]*/[\s ]*((?:19|20)\d{2})",
+    re.IGNORECASE)
+
+
+def _citazioni_non_verificate(testo, norme_viste):
+    """Le norme citate nella risposta che nessuno strumento ha restituito.
+
+    Il sistema SA quali sono le fonti giuste: gli strumenti tornano normaId,
+    articolo e comma esatti. Il modello poi riscrive la citazione in prosa, e
+    li' puo' sbagliarla. Il confronto e' deterministico - o quell'atto e' stato
+    letto, o e' stato inventato - e non richiede alcun giudizio.
+
+    Misurato sul benchmark: 79 risposte corrette su 96 nel merito, ma fonte
+    giusta solo 50 su 95. Un assistente giuridico che dice la cosa esatta
+    citando la norma sbagliata non e' meta' corretto: chi legge non puo'
+    verificare.
+
+    Volutamente prudente: si segnala solo la forma esplicita "tipo numero/anno".
+    Un falso allarme costa piu' di una segnalazione mancata.
+    """
+    coppie_viste = {(n, a) for _t, n, a in
+                    (m.groups() for m in RE_ID_NORMA.finditer(norme_viste))}
+    fuori = []
+    for m in RE_CITAZIONE.finditer(testo or ""):
+        numero, anno = m.group(1), m.group(2)
+        if (numero, anno) in coppie_viste or (numero.lstrip("0"), anno) in coppie_viste:
+            continue
+        etichetta = f"{numero}/{anno}"
+        if etichetta not in fuori:
+            fuori.append(etichetta)
+    return fuori
+
+
 def _fonti_da(nome_strumento, risultato):
     """Estrae dai risultati i riferimenti da mostrare come fonti nella UI."""
     fonti = []
@@ -333,6 +376,9 @@ def rispondi(domanda, conversazione=None):
               "recursion_limit": MAX_GIRI * 2}
 
     fonti_raccolte, viste = [], set()
+    # Il grezzo di tutti i risultati: serve a stabilire quali norme il
+    # modello ha davvero avuto sotto gli occhi.
+    grezzo_strumenti = []
     token_in = token_out = 0
     token_letti = token_scritti = 0
     # I nomi arrivano con l'AIMessage, i risultati dopo col ToolMessage:
@@ -398,6 +444,8 @@ def rispondi(domanda, conversazione=None):
                                 esito = json.loads(esito)
                             except (ValueError, TypeError):
                                 pass
+                        grezzo_strumenti.append(
+                            json.dumps(esito, ensure_ascii=False, default=str))
                         for f in _fonti_da(nome, esito):
                             chiave = (f["norma"], f["articolo"], f["comma"])
                             if chiave not in viste:
@@ -421,7 +469,11 @@ def rispondi(domanda, conversazione=None):
     # Scrivere in cache costa 1,25 volte; rileggere 0,10.
     pieni = token_in - token_letti - token_scritti
     costo = (pieni + token_scritti * 1.25 + token_letti * 0.10) / 1e6 * prezzo_in         + token_out / 1e6 * prezzo_out
+    sospette = _citazioni_non_verificate(
+        SEPARATORE.join(blocchi_testo), " ".join(grezzo_strumenti))
+
     yield {"tipo": "fine", "tokenIn": token_in, "tokenOut": token_out,
            "tokenDaCache": token_letti,
+           "citazioniNonVerificate": sospette,
            "costo": round(costo, 4),
            "conversazione": conversazione}

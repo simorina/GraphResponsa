@@ -13,6 +13,7 @@ degrada a vuoto e il server continua a funzionare da solo.
 """
 
 import json
+import logging
 import sys
 from pathlib import Path
 
@@ -33,6 +34,8 @@ from fastapi.staticfiles import StaticFiles
 
 WEB = ROOT / "web"
 FRONTEND_DIST = ROOT / "frontend" / "dist"
+
+registro = logging.getLogger("graphresponsa")
 
 app = FastAPI(title="graphResponsa")
 
@@ -145,6 +148,15 @@ def chat(d: Domanda, utente: Utente = Depends(utente_corrente)):
                     archivio.registra_consumo(
                         utente.id, ev.get("tokenIn", 0), ev.get("tokenOut", 0),
                         float(ev.get("costo", 0)))
+                    # Una citazione che nessuno strumento ha restituito e' un
+                    # atto che il modello non ha letto. Va a giornale perche'
+                    # e' l'unico difetto di qualita' misurabile senza un
+                    # giudizio umano: o quella norma e' stata consultata, o no.
+                    sospette = ev.get("citazioniNonVerificate") or []
+                    if sospette:
+                        registro.warning(
+                            "citazioni non verificate conversazione=%s: %s",
+                            conversazione, ", ".join(sospette))
                 yield f"data: {json.dumps(ev, ensure_ascii=False, default=str)}\n\n"
         except Exception as e:
             errore = {"tipo": "errore", "messaggio": f"{type(e).__name__}: {e}"}
