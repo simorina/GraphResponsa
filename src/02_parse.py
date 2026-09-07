@@ -482,14 +482,27 @@ def main(force=False):
         raise RuntimeError("data/raw/ e' vuota: eseguire prima 01_scrape.py")
 
     da_parsare = []
+    saltati = []
     for c in cartelle:
         if not (c / "scheda.json").exists() or not (c / "testo.pdf").exists():
             continue
         if not force and (PARSED / f"{c.name}.json").exists():
             continue
+        # Gli Statuti hanno un integratore dedicato. Qui la struttura non viene
+        # riconosciuta - "RUBRICA I." al posto di "Art. 1" - e si ripiega su
+        # struttura_dedotta, che produce un unico articolo. Con --force questo
+        # calpestava i file buoni: il Libro Primo del 1600 passava da 124
+        # articoli e 4.630 commi a 1 articolo e 153 commi. Si saltano.
+        if c.name.startswith("S-"):
+            saltati.append(c.name)
+            continue
         da_parsare.append(c)
 
     print(f"File totali su disco: {len(cartelle)}. Nuovi da parsare: {len(da_parsare)}.")
+    if saltati:
+        print(f"Statuti saltati ({len(saltati)}): li integra "
+              f"integra_tutti_i_12_statuti.py. Se i loro file mancassero, "
+              f"ricostruiscili con scripts/ricostruisci_statuti_parsed.py")
     errori = 0
     for idx, cartella in enumerate(da_parsare, 1):
         try:
