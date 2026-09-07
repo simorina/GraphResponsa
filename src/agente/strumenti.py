@@ -188,7 +188,10 @@ def _full_text(query, limite, dal_anno=None):
              coalesce(padre, CASE WHEN node:Articolo THEN node END) AS art
         WHERE art IS NOT NULL
         MATCH (norma:Norma)-[:HA_ARTICOLO]->(art)
-        WHERE $dal_anno IS NULL OR norma.anno >= $dal_anno
+        // Stessa guardia: il ramo lessicale puo' agganciare quelle
+        // intestazioni per la loro rubrica.
+        WHERE node.testo IS NOT NULL AND trim(node.testo) <> ''
+          AND ($dal_anno IS NULL OR norma.anno >= $dal_anno)
         RETURN norma.id AS normaId, norma.titolo AS normaTitolo,
                norma.anno AS anno,
                toString(norma.dataEntrataVigore) AS inVigoreDal,
@@ -265,7 +268,13 @@ RISALITA_COMMI = """
 CALL db.index.vector.queryNodes($indice, $k, $vettore) YIELD node, score
 MATCH (art:Articolo)-[:HA_COMMA]->(node)
 MATCH (norma:Norma)-[:HA_ARTICOLO]->(art)
-WHERE $dal_anno IS NULL OR norma.anno >= $dal_anno
+// Un nodo senza testo non e' un risultato. 28 :Articolo esistono come sola
+// intestazione: negli Allegati dei decreti sulle violazioni amministrative
+// compaiono righe come "Art. 50 (Alterazione di marche)" che rimandano a un
+// altro atto e non hanno un corpo. Uscivano fra i risultati col testo vuoto,
+// misurato al secondo posto cercando la loro stessa rubrica.
+WHERE node.testo IS NOT NULL AND trim(node.testo) <> ''
+  AND ($dal_anno IS NULL OR norma.anno >= $dal_anno)
 RETURN norma.id AS normaId, norma.titolo AS normaTitolo, norma.anno AS anno,
        toString(norma.dataEntrataVigore) AS inVigoreDal,
        art.numero AS articolo, art.rubrica AS rubrica,
@@ -277,7 +286,13 @@ ORDER BY score DESC
 RISALITA_RUBRICHE = """
 CALL db.index.vector.queryNodes($indice, $k, $vettore) YIELD node AS art, score
 MATCH (norma:Norma)-[:HA_ARTICOLO]->(art)
-WHERE $dal_anno IS NULL OR norma.anno >= $dal_anno
+// Un nodo senza testo non e' un risultato. 28 :Articolo esistono come sola
+// intestazione: negli Allegati dei decreti sulle violazioni amministrative
+// compaiono righe come "Art. 50 (Alterazione di marche)" che rimandano a un
+// altro atto e non hanno un corpo. Uscivano fra i risultati col testo vuoto,
+// misurato al secondo posto cercando la loro stessa rubrica.
+WHERE art.testo IS NOT NULL AND trim(art.testo) <> ''
+  AND ($dal_anno IS NULL OR norma.anno >= $dal_anno)
 RETURN norma.id AS normaId, norma.titolo AS normaTitolo, norma.anno AS anno,
        toString(norma.dataEntrataVigore) AS inVigoreDal,
        art.numero AS articolo, art.rubrica AS rubrica,
