@@ -575,6 +575,13 @@ def leggi_articolo(norma_id: str, numero: str) -> dict:
     Da usare quando cerca_testo ha individuato un articolo rilevante e serve il
     testo completo per rispondere con precisione.
 
+    Porta gli stessi marchi di vigenza di cerca_testo, e vanno letti prima di
+    citare: `citatoDaAttiSuccessivi` (un atto posteriore cita questo articolo,
+    e qui citare significa quasi sempre modificare) e `versionePiuRecente` (un
+    atto posteriore ha un articolo con la stessa rubrica, cioe' quasi sempre la
+    stessa disposizione riscritta). Se uno dei due compare, la catena non
+    finisce qui: aprilo, perche' il testo che stai leggendo non e' l'ultimo.
+
     Args:
         norma_id: id della norma, es. "L-87-2026"
         numero: numero dell'articolo, es. "7" oppure "12 bis"
@@ -608,6 +615,40 @@ def leggi_articolo(norma_id: str, numero: str) -> dict:
                 "articoliDisponibili": numeri if len(numeri) <= 60 else
                                        numeri[:60] + [f"... e altri {len(numeri) - 60}"],
                 "quantiArticoli": len(numeri)}
+    # Gli stessi marchi di vigenza che porta cerca_testo. Senza, la catena si
+    # spezza proprio quando l'agente va a fondo: misurato sul caso reale,
+    # apriva L-158-2025 con questo strumento e non vedeva piu' che DD-52-2026
+    # la riscrive.
+    riga = dict(righe[0])
+    riga["testo"] = " ".join(c.get("testo") or "" for c in riga.get("commi") or [])
+    riga["normaId"] = riga.get("normaId")
+    _novelle([riga])
+    if riga.get("citatoDaAttiSuccessivi"):
+        righe[0]["citatoDaAttiSuccessivi"] = riga["citatoDaAttiSuccessivi"]
+
+    rub = (righe[0].get("rubrica") or "").strip()
+    if len(rub) > 12:
+        try:
+            piu = grafo().query("""
+                MATCH (mia:Norma {id: $norma_id})
+                MATCH (n:Norma)-[:HA_ARTICOLO]->(a:Articolo)
+                WHERE n.anno > mia.anno AND a.rubrica IS NOT NULL
+                  AND toLower(trim(a.rubrica)) = toLower($rub)
+                OPTIONAL MATCH (a)-[:HA_COMMA]->(c:Comma)
+                WITH n, a, c ORDER BY c.ordine
+                WITH n, a, collect(c.testo)[..3] AS testi
+                RETURN n.id AS norma, n.anno AS anno, a.numero AS articolo,
+                       reduce(t = "", x IN testi | t + " " + coalesce(x, "")) AS testo
+                ORDER BY n.anno DESC LIMIT 2
+            """, {"norma_id": norma_id, "rub": rub})
+        except Exception:
+            piu = []
+        if piu:
+            # Il testo, non solo il rimando. Col solo riferimento l'agente
+            # riconosceva la catena ma la percorreva 1 volta su 4: misurato.
+            righe[0]["versionePiuRecente"] = [
+                {**x, "testo": _taglia(x.get("testo"), 1200)} for x in piu]
+
     return righe[0]
 
 
