@@ -198,7 +198,7 @@ def _full_text(query, limite, dal_anno=None):
                art.numero AS articolo, art.rubrica AS rubrica,
                art.titolo AS partizioneTitolo, art.capoRubrica AS partizioneCapo,
                CASE WHEN node:Comma THEN node.numero ELSE null END AS comma,
-               node.testo AS testo
+               node.testo AS testo, norma.urlDocumento AS urlDocumento
         ORDER BY score DESC, norma.anno DESC LIMIT $ampio
     """, {"query": _lucene(query), "limite": limite, "ampio": limite * 3,
           "dal_anno": dal_anno})
@@ -279,7 +279,8 @@ RETURN norma.id AS normaId, norma.titolo AS normaTitolo, norma.anno AS anno,
        toString(norma.dataEntrataVigore) AS inVigoreDal,
        art.numero AS articolo, art.rubrica AS rubrica,
        art.titolo AS partizioneTitolo, art.capoRubrica AS partizioneCapo,
-       node.numero AS comma, node.testo AS testo
+       node.numero AS comma, node.testo AS testo,
+       norma.urlDocumento AS urlDocumento
 ORDER BY score DESC
 """
 
@@ -297,7 +298,8 @@ RETURN norma.id AS normaId, norma.titolo AS normaTitolo, norma.anno AS anno,
        toString(norma.dataEntrataVigore) AS inVigoreDal,
        art.numero AS articolo, art.rubrica AS rubrica,
        art.titolo AS partizioneTitolo, art.capoRubrica AS partizioneCapo,
-       null AS comma, art.testo AS testo
+       null AS comma, art.testo AS testo,
+       norma.urlDocumento AS urlDocumento
 ORDER BY score DESC
 """
 
@@ -610,6 +612,7 @@ def leggi_articolo(norma_id: str, numero: str) -> dict:
                toString(n.dataEntrataVigore) AS inVigoreDal,
                a.numero AS articolo, a.rubrica AS rubrica,
                a.titolo AS partizioneTitolo, a.capoRubrica AS partizioneCapo,
+               n.urlDocumento AS urlDocumento,
                collect({numero: c.numero, testo: c.testo}) AS commi
     """, {"norma_id": norma_id, "numero": str(numero)})
     if not righe:
@@ -665,6 +668,17 @@ def leggi_articolo(norma_id: str, numero: str) -> dict:
                 {**x, "testo": _taglia(x.get("testo"), 1200)} for x in piu]
 
     return righe[0]
+
+
+def url_documento(norma_id: str) -> str | None:
+    """URL del PDF originale sul portale, se la norma esiste e lo possiede.
+
+    Non e' un tool per l'agente: serve al proxy del server web, che lo
+    rinoltra al browser.
+    """
+    righe = grafo().query(
+        "MATCH (n:Norma {id: $id}) RETURN n.urlDocumento AS url", {"id": norma_id})
+    return righe[0]["url"] if righe else None
 
 
 @tool

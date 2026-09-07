@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { ThumbsUp, ThumbsDown, Check, X } from 'lucide-react';
 import { token } from '../auth/cognito';
+import { rimuoviMarcatori } from '../citazioni';
 import type { Fonte } from '../types';
 
 interface RiscontroProps {
@@ -64,7 +65,7 @@ export const Riscontro: React.FC<RiscontroProps> = ({
           domanda,
           // Il contesto va salvato col riscontro: fra un mese i checkpoint
           // saranno scaduti, e «non utile» da solo non e' analizzabile.
-          estrattoRisposta: risposta.slice(0, 2000),
+          estrattoRisposta: rimuoviMarcatori(risposta).slice(0, 2000),
           fonti: fonti.map((f) => `${f.norma} art.${f.articolo} c.${f.comma}`),
         }),
       });

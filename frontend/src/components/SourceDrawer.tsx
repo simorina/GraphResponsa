@@ -1,5 +1,5 @@
 import React, { useEffect } from 'react';
-import { X } from 'lucide-react';
+import { X, FileText } from 'lucide-react';
 import type { Fonte } from '../types';
 
 interface SourceDrawerProps {
@@ -97,6 +97,15 @@ export const SourceDrawer: React.FC<SourceDrawerProps> = ({ source, onClose }) =
         </div>
 
         <div className="shrink-0 border-t border-line px-6 py-3">
+          {source.haDocumento && (
+            <button
+              onClick={() => window.open(`/documenti/${encodeURIComponent(source.norma)}`, '_blank', 'noopener,noreferrer')}
+              className="mb-2 flex items-center gap-1.5 rounded-lg border border-line px-2.5 py-1.5 text-[12px] font-medium text-ink-2 transition-colors duration-200 hover:border-dorato-2 hover:bg-alloro-3/40"
+            >
+              <FileText className="h-3.5 w-3.5" strokeWidth={1.5} />
+              Apri PDF completo
+            </button>
+          )}
           <p className="text-[11.5px] text-ink-3">
             Estratto dall'archivio · verificare sul Bollettino Ufficiale
           </p>
