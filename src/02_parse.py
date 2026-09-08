@@ -60,12 +60,55 @@ RE_CITAZIONE = re.compile(
 )
 
 # "articolo 10 della Legge ..." -> il bersaglio della citazione precede la norma.
+#
+# La versione precedente pretendeva che il riferimento all'articolo fosse
+# ADIACENTE al nome dell'atto, e nel linguaggio degli atti quasi mai lo e':
+# "l'ultimo comma dell'art. 2 CAP. IV della Legge n.38/1974", "all'art.8 PRIMO
+# COMMA della Legge n.136/1997". Misurato sul corpus, il 6,0% delle citazioni
+# nominava l'articolo senza che venisse agganciato - 3.775 rinvii che il grafo
+# conosceva solo a grana d'atto.
+#
+# Fra l'articolo e l'atto si ammette percio' un tratto, ma non uno spazio
+# libero: solo una LISTA BIANCA di parole strutturali - commi, capi, titoli,
+# lettere, ordinali, numeri romani. Con uno spazio libero si sarebbe agganciato
+# l'articolo di una frase vicina: "dell'articolo 5 e in deroga a quanto
+# previsto dalla Legge X" non riguarda l'articolo 5 della Legge X.
+#
+# Tre errori, nel riscriverla: `articoli?` non aggancia "articolo" (serve
+# `articol[oi]`), `commi?` non aggancia "comma", e senza "del" nella lista
+# bianca "del Cap. V della" restava fuori.
+_TOKEN = (r"(?:e|ed|primo|second[oa]|terz[oa]|quart[oa]|quint[oa]|sest[oa]|ultim[oa]"
+          r"|penultim[oa]|comm[ai]|capo|cap|titolo|sezione|letter[ae]|lett|punt[oi]"
+          r"|numero|n|bis|ter|quater|del|dello|della|dei|degli|delle|dal|dalla"
+          r"|[IVXLC]+|\d+|[a-z]\))")
+_FILLER = r"(?:[\s,;.')]*" + _TOKEN + r"){0,8}[\s,;.')]*"
 RE_BERSAGLIO = re.compile(
-    r"(?:articolo|art\.?)\s*(\d+)(?:\s*,?\s*commi?\s*(\d+))?\s*"
-    r"(?:,\s*(?:lettera|lett\.?)\s*\w\)\s*)?"
-    r"(?:del(?:la)?|di)?\s*$",
+    r"(?:artt?\.?|articol[oi])\s*(\d+)"
+    r"(?:\s*,?\s*comm[ai]\s*(\d+))?"
+    + _FILLER +
+    r"(?:dell[ao]|dell'|del|della|dei|degli|di|al|alla|allo|ai|agli)\s*$",
     re.I,
 )
+
+# Le prove girano all'import: un'espressione che sbaglia qui produce archi
+# CITA_ARTICOLO verso l'articolo sbagliato, e nessuno se ne accorgerebbe.
+_PROVE_BERSAGLIO = [
+    ("ai sensi dell'articolo 5 della ", "5"),
+    ("l'ultimo comma dell'art. 2 Cap. IV della ", "2"),
+    ("in base all'art. 3 del Cap. V della ", "3"),
+    ("di cui all'art.8 primo comma della ", "8"),
+    ("e dagli artt.208 e 209 della ", "208"),
+    ("l'articolo 12, comma 3, della ", "12"),
+    ("all'articolo 4, lettera b), della ", "4"),
+    # fra l'articolo e l'atto c'e' una frase, non una struttura: non aggancia
+    ("dell'articolo 5 e in deroga a quanto previsto dalla ", None),
+    ("l'articolo 7 stabilisce i criteri applicabili alla ", None),
+    ("secondo quanto disposto nella ", None),
+    ("l'articolo 3 e' abrogato. Si applica la ", None),
+]
+for _testo, _atteso in _PROVE_BERSAGLIO:
+    _m = RE_BERSAGLIO.search(_testo)
+    assert (_m.group(1) if _m else None) == _atteso, f"RE_BERSAGLIO: {_testo!r}"
 
 
 

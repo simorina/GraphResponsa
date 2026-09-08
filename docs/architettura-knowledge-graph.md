@@ -3,7 +3,7 @@
 Grafo Neo4j della normativa della Repubblica di San Marino, costruito per essere
 interrogato da un agente in modalità Graph RAG.
 
-**Stato aggiornato:** **268.238 nodi**, **342.828 relazioni**, **11.134 norme con testo
+**Stato aggiornato:** **268.238 nodi**, **350.069 relazioni**, **11.134 norme con testo
 integrale** su 11.136 scaricabili dal portale, distribuite su 16 tipologie di atto:
 leggi, decreti in tutte le loro forme, regolamenti, notifiche, ordinanze, statuti,
 errata corrige e verbali. Tutti i 181.248 commi hanno un embedding, e 358 norme,
@@ -104,9 +104,24 @@ Nel nostro Knowledge Graph, le rubriche svolgono due funzioni cruciali:
 | **`HA_COMMA`** | **`181.248`** | `Articolo ➔ Comma` | Contenimento strutturale |
 | **`HA_ARTICOLO`** | **`74.742`** | `Norma ➔ Articolo` | Contenimento strutturale |
 | **`CITA`** | **`69.662`** | `(Comma/Norma) ➔ Norma` | Rinvio normativo formale |
-| **`CITA_ARTICOLO`** | **`16.763`** | `Comma ➔ Articolo` | Rinvio puntuale ad articolo specifico risolto |
+| **`CITA_ARTICOLO`** | **`24.004`** | `Comma ➔ Articolo` | Rinvio puntuale ad articolo specifico risolto |
 | **`ABROGA`** | **`413`** | `Norma ➔ Norma` | Abrogazione di un atto per intero, riconosciuta senza ambiguità |
-| **TOTALE ARCHI** | **`342.828`** | | |
+| **TOTALE ARCHI** | **`350.069`** | | |
+
+`CITA_ARTICOLO` era fermo a 16.763 finche' `RE_BERSAGLIO`, nel parser,
+pretendeva che il numero d'articolo fosse **adiacente** al nome dell'atto. Nel
+linguaggio degli atti quasi mai lo e' — *«l'ultimo comma dell'art. 2 Cap. IV
+della Legge n.38/1974»* — e il 6% delle citazioni nominava l'articolo senza che
+venisse letto. Allargata l'espressione con una **lista bianca** di parole
+strutturali (commi, capi, titoli, ordinali, numeri romani) invece di uno spazio
+libero, che avrebbe agganciato l'articolo di una frase vicina. Le citazioni
+risolte a livello d'articolo passano dal **32,4% al 46,1%**, e gli articoli con
+una novella rilevabile sono 5.922.
+
+Il guadagno vale per i caricamenti futuri; sul grafo esistente lo applica
+`src/09_riallinea_citazioni.py`, che riusa le espressioni **importandole dal
+parser** invece di ricopiarle — se divergessero, il grafo smetterebbe di
+corrispondere a cio' che un caricamento pulito produrrebbe.
 
 I `:Comma` erano 180.932 fino alla riparazione del parser: i **316 in più** sono
 il testo che si perdeva su 312 articoli, dove il buffer della rubrica non si
@@ -283,7 +298,13 @@ flowchart TD
         P3 --> M
     end
 
-    subgraph AB["5. Marcature di vigenza"]
+    subgraph CA["5. Riallineamento citazioni"]
+        M --> U["09_riallinea_citazioni.py"]
+        U --> V["CITA_ARTICOLO mancanti dai testi gia' caricati"]
+        V --> M
+    end
+
+    subgraph AB["6. Marcature di vigenza"]
         M --> Q["08_abrogazioni.py"]
         Q --> R["Clausole di abrogazione nei commi"]
         Q --> S["Titoli marcati ABROGATO dall'archivio"]
@@ -293,8 +314,9 @@ flowchart TD
     end
 ```
 
-I passi 4 e 5 sono **idempotenti e rieseguibili**: il 07 e il 07b calcolano solo
-ciò che manca, l'08 azzera e riscrive da capo le proprie marcature. Vanno
+I passi 4, 5 e 6 sono **idempotenti e rieseguibili**: il 07 e il 07b calcolano
+solo ciò che manca, il 09 usa `MERGE` e non duplica, l'08 azzera e riscrive da
+capo le proprie marcature. Vanno
 rilanciati dopo ogni caricamento — un comma senza embedding è quasi invisibile
 alla ricerca (§4.5), e un atto abrogato non marcato è indistinguibile da uno
 vigente.
