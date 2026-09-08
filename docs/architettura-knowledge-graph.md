@@ -13,9 +13,10 @@ errata corrige e verbali. Tutti i 181.248 commi hanno un embedding, e 358 norme,
 
 ## 1. Modello Concettuale ed Entità
 
-Un corpus normativo ha due strutture sovrapposte:
+Un corpus normativo ha tre strutture sovrapposte:
 1. **Struttura Gerarchica:** `Norma ➔ Articolo ➔ Comma` (e allegati). Consente l'ancoraggio preciso e la risalita dal frammento al contesto normativo.
 2. **Rete delle Citazioni e Rinvii:** collegamenti incrociati tra commi/norme ed altri atti richiamati (`CITA`, `CITA_ARTICOLO`).
+3. **Vigenza:** quali atti, articoli e commi sono ancora diritto vivo (`ABROGA`, `abrogata`, `abrogato`). È la struttura più difficile da ricostruire e la più incompleta, perché **l'archivio non è consolidato**: conserva gli atti come furono pubblicati, e un articolo soppresso resta scritto per esteso, indistinguibile da uno vigente.
 
 ### Schema Entità-Relazioni (Mermaid)
 
@@ -27,6 +28,7 @@ erDiagram
     COMMA }o--o{ NORMA : CITA
     COMMA }o--o{ ARTICOLO : CITA_ARTICOLO
     NORMA }o--o{ NORMA : CITA
+    NORMA }o--o{ NORMA : ABROGA
 
     NORMA {
         string id PK "es. L-87-2026, LQ-186-2005"
@@ -38,6 +40,8 @@ erDiagram
         string preambolo "Formula di promulgazione"
         date dataPubblicazione "Data Bollettino"
         date dataEntrataVigore "Data efficacia"
+        boolean abrogata "L'atto e' caduto per intero"
+        stringArray abrogataDa "Gli atti che l'hanno abrogato"
     }
 
     ARTICOLO {
@@ -48,6 +52,9 @@ erDiagram
         string titolo "Titolo di appartenenza"
         string capo "Capo di appartenenza"
         string testo "Testo aggregato"
+        floatArray embedding "Vettore della rubrica, 1024d"
+        boolean abrogato "Soppresso dentro un atto vivo"
+        stringArray abrogatoDa "Gli atti che l'hanno soppresso"
     }
 
     COMMA {
@@ -58,6 +65,8 @@ erDiagram
         floatArray embedding "Vettore Voyage-4 1024d"
         boolean numerazioneAnomala "Flag duplicati ufficiali"
         boolean commaImplicito "Flag comma non numerato"
+        boolean abrogato "Soppresso dentro un atto vivo"
+        stringArray abrogatoDa "Gli atti che l'hanno soppresso"
     }
 
     ALLEGATO {
@@ -128,15 +137,20 @@ Le si ricalcola da zero a ogni esecuzione di `src/08_abrogazioni.py --scrivi`,
 archi `ABROGA` compresi: senza cancellarli prima, un arco che smette di essere
 riconosciuto sopravvive alla correzione del filtro che lo escludeva.
 
-#### `ABROGA`, e perché è così piccolo
+#### `ABROGA`, e perché copre meno di quanto sembri
 
-Nel corpus ci sono **1.728 commi** che contengono «è abrogato», «sono
-abrogati» o «e' abrogato», e se ne modellano 413. Non è una svista: la forma più comune abroga
-una **parte** — *«All'articolo 2 della Legge n.55/1994, il punto 8.0 è
+Nel corpus ci sono **1.728 commi** che contengono «è abrogato», «sono abrogati»
+o «e' abrogato», e se ne modellano 413. Non è una svista: la forma più comune
+abroga una **parte** — *«All'articolo 2 della Legge n.55/1994, il punto 8.0 è
 abrogato»* — e leggerla come abrogazione dell'articolo 2 dichiarerebbe morta
 una norma viva. In un archivio che deve dire a un cittadino se ha diritto a
 qualcosa, quello è l'errore peggiore disponibile: gli errori di omissione
 lasciano l'utente dov'era, questo gli nega un diritto che ha.
+
+Da qui il principio che governa tutto il riconoscimento: **la certezza vale più
+della copertura**. Ogni forma ambigua si scarta, e ogni forma nuova si rilegge a
+mano prima di scrivere — è così che sono stati trovati tutti i falsi positivi
+elencati più sotto, nessuno dei quali era stato colto dalle prove automatiche.
 
 Si riconoscono perciò le sole forme che colpiscono un **atto intero** — `È
 abrogata la Legge 27 ottobre 2004 n. 146`, `La Legge n.146/2004 è abrogata`,
@@ -152,38 +166,31 @@ ridondanza: il titolo dice *che* un atto è caduto, i commi dicono *da chi*.
 L'unione marca **358 norme** con `Norma.abrogata`, e le 321 con attribuzione
 nota portano anche `Norma.abrogataDa`.
 
-Tre trappole di lettura sono costate care. La prima è l'apostrofo: gli atti
-scrivono `E' abrogata` e `E’ abrogata` quanto `È abrogata`, e cercare la sola
-forma accentata perdeva **412 commi su 1.728** — fra cui la L-145/2022, che
-abroga la L-106/2009. Senza quella riga l'agente, richiesto della L-106/2009,
-indicava come successore la L-107/2009: un atto anteriore, su un'altra materia.
-La seconda è il tipo dell'atto, che va confrontato col **prefisso dell'id** e
-non con `Norma.tipo`: quest'ultimo è scritto a mano e contiene *Decreto
-Delagato*, *Decreto Delega5to*, *Decreto Conisliare*.
+#### Le trappole, in ordine di quanto sono costate
 
-La terza è la **partizione in testa a un elenco**. Nel plurale la parola che
-delimita il bersaglio compare una volta sola e governa tutto ciò che segue:
-in *«Sono abrogate le disposizioni della Legge n.9/1960, della Legge
-n.24/1972»* la seconda legge ha davanti un innocuo `, della `, e guardare solo
-il tratto adiacente la marcava morta. Si scarta perciò l'elenco intero quando
-una parola di partizione precede il primo atto nominato — e si perde qualche
-bersaglio buono, come il decreto interamente abrogato in coda a *«Sono abrogati
-i Capi I e VII del Decreto n.122 e il Decreto Delegato n.146»*. Vale la pena:
-qui un falso positivo dichiara morta una legge viva. Nella stessa famiglia
-rientrano le abbreviazioni `art.` e `artt.`, che gli atti usano più spesso della
-forma per esteso.
+Nessuna di queste e' stata trovata dalle prove automatiche: le ha trovate tutte
+la rilettura a mano di cio' che ogni forma nuova aggiungeva. E' la ragione per
+cui quel passo non si salta.
 
-#### Cosa `ABROGA` non copre, che è la parte più grande
+| Trappola | Costo | Cosa insegna |
+|---|---|---|
+| **La salvezza degli effetti** — *«e' abrogato il DD n.199/2024. Sono fatti salvi gli atti e gli effetti»* | 117 clausole scartate a torto | Non tutte le salvezze sono uguali: preservare gli **effetti gia' prodotti** non tiene in vita l'atto, preservare una **disposizione** si'. Le trattavo allo stesso modo |
+| **L'apostrofo tipografico** — `E' ` e `E’ ` accanto a `E` | 412 commi su 1.728 mai esaminati | Fra i perduti c'era la L-145/2022 che abroga la L-106/2009: l'agente indicava come successore la L-107/2009, un atto **anteriore** su altra materia |
+| **L'arco come punto di partenza** | 124 articoli su 173 | `CITA_ARTICOLO` esiste per i riferimenti puntuali, non per ogni voce di un elenco |
+| **La partizione in testa a un elenco** — *«le disposizioni della Legge n.9/1960, della Legge n.24/1972»* | falsi positivi su leggi vive | La parola che delimita il bersaglio compare una volta e governa tutto il seguito: la seconda legge ha davanti un innocuo `, della ` |
+| **La clausola di esclusione** — *«ad esclusione dell'articolo 6»* | 5 leggi vive dichiarate morte | Segue il bersaglio invece di precederlo, e in un elenco appartiene alla sola voce che la porta |
+| **L'accento combinante** — `e`+U+0300 invece di `è` | candidati da 1.728 a 1.114 | Un dettaglio di codifica puo' dimezzare il recall **senza che nulla segnali un errore** |
+| **L'atto modificante** — *«la Legge n.76/1976 — modificata con Legge n.14/1982 — e' abrogata»* | 1 legge viva | L'atto nominato per dire *come* il bersaglio era stato modificato non e' esso stesso un bersaglio |
+| **La riscrittura sul posto** — *«e' abrogato e cosi' sostituito: "…"»* | 1 | L'atto non muore, cambia contenuto. Diverso da *«abrogato e sostituito dal presente Decreto»*, dove a sostituirlo e' un altro atto |
+| **L'ultrattivita'** — *«e' abrogato … le disposizioni continuano ad avere applicazione»* | 1 | Abrogato ma ancora applicabile: dirlo morto e basta inganna |
+| **Il confine di frase** — *«…e successive modifiche. 3 bis. E' abrogato…»* | 1 | Il divario fra bersaglio e verbo non deve scavalcare un punto seguito da maiuscola o da un capoverso numerato |
+| **Il tipo dell'atto** | 1 | Va confrontato col **prefisso dell'id**, non con `Norma.tipo`, che e' scritto a mano e contiene *Decreto Delagato*, *Decreto Delega5to*, *Decreto Conisliare* |
+| **L'abbreviazione** — `art.` e `artt.` | alcuni | Gli atti abbreviano piu' spesso di quanto scrivano per esteso |
 
-Non si scandagliano le 12.248 norme chiedendosi per ciascuna se sia caduta:
-l'informazione non sta nella norma morta, sta nell'atto che l'ha uccisa. Restano
-fuori, in ordine di frequenza:
-
-| Non coperto | Perché |
-|---|---|
-| **Forme illeggibili** — 408 commi su 1.728 | Bersagli impliciti, rinvii a «norme in contrasto», elenchi non strutturati |
-| **Partizioni sotto il comma** — «la lettera d), comma 1, dell'articolo 3» | Il grafo non modella lettere e punti: non c'è nodo da marcare |
-| **Abrogazione tacita** — una legge posteriore incompatibile con una anteriore, senza dirlo | Nessun metodo testuale può trovarla |
+Un falso allarme merita di stare nell'elenco quanto le trappole vere: quattro
+coppie sembravano sbagliate perche' la finestra di stampa mostrava la clausola
+**sbagliata** di un comma che ne conteneva due. Il campione va sempre letto
+sulla porzione che ha prodotto l'aggancio, non sull'inizio del testo.
 
 #### Il livello parziale: `Articolo.abrogato` e `Comma.abrogato`
 
@@ -216,11 +223,29 @@ un'abrogazione ma una novella — l'articolo resta, riscritto — e il divario f
 in *«…della Legge n.40/2014 e successive modifiche. 3 bis. E' abrogato…»*
 l'espressione agganciava un verbo che apparteneva alla frase seguente.
 
-**Il rischio non è l'arco sbagliato, è l'arco assente.** Con l'1,6% di
-copertura, l'assenza del marchio non dimostra nulla, ma un indice rado invita a
-leggerla come conferma di vigenza. Perciò il campo entra nel prompt come avviso
+**Il rischio non è l'arco sbagliato, è l'arco assente.** Il marchio copre il
+**2,9%** delle norme, e il **43,1%** delle clausole di abrogazione produce una
+marcatura: l'assenza non dimostra nulla, ma un indice rado invita a leggerla
+come conferma di vigenza. Perciò il campo entra nel prompt come avviso
 esclusivamente positivo: la presenza autorizza «è stata abrogata», l'assenza
 non autorizza «risulta vigente», e le istruzioni lo vietano espressamente.
+
+Il limite residuo è noto e non risolto: la regola si allenta quando l'agente
+trova prove indirette. Richiesto se la L. 47/2006 sia in vigore, ha risposto
+«sì» appoggiandosi al fatto di averne trovato novelle fino al 2023 — prova che
+l'atto era vivo nel 2023, non che non sia caduto dopo.
+
+#### Cosa `ABROGA` non copre, che è la parte più grande
+
+Non si scandagliano le 12.248 norme chiedendosi per ciascuna se sia caduta:
+l'informazione non sta nella norma morta, sta nell'atto che l'ha uccisa. Restano
+fuori, in ordine di frequenza:
+
+| Non coperto | Perché |
+|---|---|
+| **Forme illeggibili** — 408 commi su 1.728 | Bersagli impliciti, rinvii a «norme in contrasto», elenchi non strutturati |
+| **Partizioni sotto il comma** — «la lettera d), comma 1, dell'articolo 3» | Il grafo non modella lettere e punti: non c'è nodo da marcare |
+| **Abrogazione tacita** — una legge posteriore incompatibile con una anteriore, senza dirlo | Nessun metodo testuale può trovarla |
 
 ---
 
@@ -250,11 +275,30 @@ flowchart TD
 
     subgraph EMD["4. Semantic Indexing"]
         M --> N["07_embeddings.py"]
+        M --> N2["07b_embeddings_rubriche.py"]
         N --> O["Voyage AI (voyage-4 1024d)"]
-        O --> P2["c.embedding property sui nodi :Comma"]
+        N2 --> O
+        O --> P2["c.embedding sui :Comma"]
+        O --> P3["a.embedding sui :Articolo (rubrica)"]
         P2 --> M
+        P3 --> M
+    end
+
+    subgraph AB["5. Marcature di vigenza"]
+        M --> Q["08_abrogazioni.py"]
+        Q --> R["Clausole di abrogazione nei commi"]
+        Q --> S["Titoli marcati ABROGATO dall'archivio"]
+        R --> T["Archi ABROGA + abrogata/abrogato sui nodi"]
+        S --> T
+        T --> M
     end
 ```
+
+I passi 4 e 5 sono **idempotenti e rieseguibili**: il 07 e il 07b calcolano solo
+ciò che manca, l'08 azzera e riscrive da capo le proprie marcature. Vanno
+rilanciati dopo ogni caricamento — un comma senza embedding è quasi invisibile
+alla ricerca (§4.5), e un atto abrogato non marcato è indistinguibile da uno
+vigente.
 
 ---
 
@@ -300,7 +344,10 @@ vettoriale separato:
 
 ```
 Comma.embedding      1024 float per comma      es. L-101-2025/art-1/c-1
-180.932 commi        ~0,69 GB nell'istanza Aura
+181.248 commi        ~0,69 GB nell'istanza Aura
+
+Articolo.embedding   1024 float per rubrica     es. L-101-2025/art-1
+35.422 articoli      ~0,14 GB, vedi 5.1
 ```
 
 `07_embeddings.py` usa `from_existing_graph`: aggiunge la proprietà ai nodi
@@ -319,7 +366,7 @@ Due momenti, di costo incomparabile:
 
 | Momento | Volume | Costo | Frequenza |
 |---|---|---|---|
-| **Indicizzazione del corpus** | 17,8 M token per 180.932 commi | ~1,07 $ | una volta, poi solo per gli atti nuovi |
+| **Indicizzazione del corpus** | 17,8 M token per 181.248 commi | ~1,07 $ | una volta, poi solo per gli atti nuovi |
 | **Ogni interrogazione** | ~20 token (la domanda) | frazioni di millesimo | a ogni `cerca_testo` |
 
 L'ultima indicizzazione completa ha richiesto **97 minuti** per 128.613 commi.
@@ -333,7 +380,7 @@ modello non è multilingue e su testi italiani rende meno di `voyage-4`, che è
 generalista. È annotato anche in `07_embeddings.py`.
 
 **Un comma senza embedding è quasi invisibile.** Non è semplicemente «meno
-trovabile»: competendo solo sul ramo lessicale contro 180.000 altri commi, perde
+trovabile»: competendo solo sul ramo lessicale contro 181.000 altri commi, perde
 sistematicamente contro documenti più lunghi che ripetono le stesse parole.
 Verificato sul campo: prima dell'indicizzazione il Regolamento 10/2026 non usciva
 nei primi risultati **nemmeno interrogandolo con le sue stesse parole**. Dopo,
@@ -356,8 +403,12 @@ CREATE FULLTEXT INDEX testo_normativo FOR (n:Comma|Articolo) ON EACH [n.testo, n
   OPTIONS {indexConfig: {`fulltext.analyzer`: 'italian'}};
 CREATE FULLTEXT INDEX titoli_norme FOR (n:Norma) ON EACH [n.titolo];
 
--- Indice Vettoriale per ricerca semantica ibrida
-VECTOR INDEX commi_vettoriale FOR (c:Comma) ON c.embedding
+-- Indici Vettoriali per la ricerca semantica: uno sui commi, uno sulle
+-- rubriche degli articoli. Sono due perche' rispondono a domande diverse -
+-- vedi 5.1 - e la ricerca li interroga entrambi con UN SOLO embedding della
+-- domanda, per non pagare Voyage due volte.
+VECTOR INDEX commi_vettoriale    FOR (c:Comma)    ON c.embedding
+VECTOR INDEX rubriche_vettoriale FOR (a:Articolo) ON a.embedding
 -- configurazione effettiva in esercizio:
 --   vector.dimensions           1024
 --   vector.similarity_function  COSINE
@@ -368,10 +419,10 @@ VECTOR INDEX commi_vettoriale FOR (c:Comma) ON c.embedding
 --                                        trascurabile su 181.000 commi
 ```
 
-### 5.1 I due indici non coprono le stesse cose
+### 5.1 I tre indici non coprono le stesse cose
 
 E' un'asimmetria voluta, ma va conosciuta perche' condiziona chi legge i
-risultati:
+risultati. Il primo e' lessicale, gli altri due semantici:
 
 | | `testo_normativo` (Lucene) | `commi_vettoriale` | `rubriche_vettoriale` |
 |---|---|---|---|
@@ -424,3 +475,9 @@ l'indice l'aveva classificato per primo. Corretto con `OPTIONAL MATCH` e
    * Per le leggi storiche antecedenti al 2000 prive di commi numerati, il testo dell'articolo viene conservato in un comma implicito marcato con `commaImplicito = true`.
 3. **Gestione Multi-Label Idempotente:**
    * L'assegnazione delle etichette specializzate (`:LeggeQualificata`, `:LeggeCostituzionale`, `:DecretoLegge`) avviene dopo la creazione del nodo base `(:Norma {id: $id})` tramite istruzioni `SET`, evitando `ConstraintError` su nodi precedentemente creati come stub.
+4. **Decreti e loro ratifiche:**
+   * Un decreto viene ratificato entro tre mesi da un decreto di ratifica che ne riproduce il testo. In archivio sono due norme distinte con lo stesso contenuto, e la stessa clausola di abrogazione compare quindi due volte: gli archi sono corretti in entrambi e puntano allo stesso bersaglio. Non è duplicazione del corpus, è il funzionamento dell'ordinamento.
+5. **Id qualificati per collisione (`~`):**
+   * Alcune norme portano un id con suffisso, es. `L-42-2010~17017141`. Sono atti distinti che collidevano sulla chiave naturale; vanno trattati come qualsiasi altra norma.
+6. **Sotto-commi fusi:**
+   * Le partizioni «1 bis», «1 ter», «1 quater» finiscono in un solo nodo `:Comma` insieme al comma 1. È la ragione per cui una clausola che abroga «il comma 7» può non trovare il comma corrispondente, e in quel caso non si marca nulla.
