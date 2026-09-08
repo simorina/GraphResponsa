@@ -14,10 +14,10 @@ Stato: **pilota su 3 leggi**, con la pipeline pronta a scalare.
 
 ```
 (:Norma)-[:HA_ARTICOLO]->(:Articolo)-[:HA_COMMA]->(:Comma)
-(:Norma)-[:HA_ALLEGATO]->(:Allegato)
 (:Comma)-[:CITA]->(:Norma)
 (:Comma)-[:CITA_ARTICOLO]->(:Articolo)
 (:Norma)-[:CITA]->(:Norma)
+(:Norma)-[:ABROGA]->(:Norma)
 ```
 
 Tutti gli atti normativi (Leggi, Decreti, Decreti Delegati, Leggi Costituzionali, ecc.) sono entità **`:Norma`**, con un'etichetta secondaria specifica (`:Legge`, `:DecretoDelegato`, `:Decreto`, ecc.) e proprietà `tipo`.

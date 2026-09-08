@@ -56,7 +56,6 @@ export interface GraphStats {
   totaleNorme: number;
   articoli: number;
   commi: number;
-  allegati?: number;
   totaleNodi: number;
   totaleRelazioni: number;
 }

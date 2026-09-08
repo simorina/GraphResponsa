@@ -34,7 +34,6 @@ VINCOLI = [
     "CREATE CONSTRAINT norma_id IF NOT EXISTS FOR (n:Norma) REQUIRE n.id IS UNIQUE",
     "CREATE CONSTRAINT articolo_id IF NOT EXISTS FOR (a:Articolo) REQUIRE a.id IS UNIQUE",
     "CREATE CONSTRAINT comma_id IF NOT EXISTS FOR (c:Comma) REQUIRE c.id IS UNIQUE",
-    "CREATE CONSTRAINT allegato_id IF NOT EXISTS FOR (x:Allegato) REQUIRE x.id IS UNIQUE",
 ]
 
 # L'analizzatore italiano fa convergere "edilizio" ed "edilizia".
@@ -78,14 +77,6 @@ SET cm.numero = c.numero, cm.testo = c.testo, cm.ordine = c.ordine,
     cm.numerazioneAnomala = c.numerazioneAnomala,
     cm.commaImplicito = c.commaImplicito
 MERGE (art)-[:HA_COMMA]->(cm)
-"""
-
-Q_ALLEGATI = """
-UNWIND $allegati AS al
-MATCH (n:Norma {id: $normaId})
-MERGE (x:Allegato {id: al.id})
-SET x.nome = al.nome, x.bytes = al.bytes
-MERGE (n)-[:HA_ALLEGATO]->(x)
 """
 
 # Le citazioni creano stub solo per norme non gia' presenti.
@@ -249,10 +240,11 @@ def prepara(dati):
             "testo": c["testo"],
         })
 
-    allegati = [{"id": f"{nid}/all-{i}", "nome": al["nome"], "bytes": al["bytes"]}
-                for i, al in enumerate(dati.get("allegati", []))]
-
-    return articoli, citazioni, cit_preambolo, allegati
+    # Gli allegati non si caricano piu'. Erano 519 nodi con id, nome del file e
+    # dimensione, senza testo ne' embedding: nessuno strumento dell'agente li
+    # leggeva, e non contribuivano a nessuna risposta. Il loro contenuto resta
+    # raggiungibile dal PDF originale tramite /documenti/<id>.
+    return articoli, citazioni, cit_preambolo
 
 
 def run_con_retry(driver, db, query, params=None, max_tentativi=4):
@@ -328,7 +320,7 @@ def main(reset=False):
             scartati.append((nid, motivo))
             continue
 
-        articoli, citazioni, cit_preambolo, allegati = prepara(dati)
+        articoli, citazioni, cit_preambolo = prepara(dati)
         tutte_preambolo += cit_preambolo
         tutte_citazioni += citazioni
 
@@ -354,8 +346,6 @@ def main(reset=False):
         run_con_retry(driver, db, q_norma_specifica, norma_params)
         if articoli:
             run_con_retry(driver, db, Q_ARTICOLI, {"normaId": nid, "articoli": articoli})
-        if allegati:
-            run_con_retry(driver, db, Q_ALLEGATI, {"normaId": nid, "allegati": allegati})
 
         if idx % 25 == 0 or idx == len(file_json):
             print(f"  [{idx}/{len(file_json)}] caricate...")

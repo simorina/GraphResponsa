@@ -41,7 +41,6 @@ def estrai_metriche_grafo():
         
         tot_art = s.run("MATCH (a:Articolo) RETURN count(a) AS cnt").single()["cnt"]
         tot_commi = s.run("MATCH (c:Comma) RETURN count(c) AS cnt").single()["cnt"]
-        tot_all = s.run("MATCH (al:Allegato) RETURN count(al) AS cnt").single()["cnt"]
         
         # Relazioni
         rel_types = s.run("""
@@ -76,7 +75,6 @@ def estrai_metriche_grafo():
         "norme_tipo": norme_tipo,
         "tot_art": tot_art,
         "tot_commi": tot_commi,
-        "tot_all": tot_all,
         "rel_types": rel_types,
         "campione": campione
     }
@@ -104,7 +102,6 @@ def genera_snapshot():
         "Decreto": "#0ea5e9",          # Blu oceano
         "Articolo": "#34d399",         # Verde chiaro
         "Comma": "#64748b",            # Grigio ardesia
-        "Allegato": "#fbbf24",         # Giallo
     }
 
     fig = plt.figure(figsize=(20, 12), facecolor=BG_COLOR)
@@ -216,7 +213,6 @@ def genera_snapshot():
         ("Decreto Consiliare (:DC)", 532, "#a855f7", "Atti consiliari"),
         ("Decreto Reggenziale (:DR)", 435, "#10b981", "Atti promulgati dalla Reggenza"),
         ("Costituzionale & Qualificata", 55, "#f59e0b", "Dichiarazione Diritti e Riforme"),
-        ("Allegato (:Allegato)", dati["tot_all"], "#fbbf24", "Tabelle e allegati tecnici"),
     ]
     
     y_pos = 0.92
@@ -240,7 +236,6 @@ def genera_snapshot():
         ("HA_ARTICOLO", 68400, "#34d399", "-", "Collega Norma -> Articolo"),
         ("CITA (Preambolo/Atti)", 68347, "#f59e0b", "--", "Rinvii tra norme e preamboli"),
         ("CITA_ARTICOLO", 16538, "#ec4899", ":", "Citazioni puntuali su articolo"),
-        ("HA_ALLEGATO", 475, "#fbbf24", "-", "Collega Norma -> Allegato"),
     ]
     
     y_pos = 0.85

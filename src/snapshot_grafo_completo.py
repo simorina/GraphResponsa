@@ -80,17 +80,12 @@ def estrai_tutto_il_grafo():
                    coalesce(n.caricata, false) AS caricata
         """).data()
 
-        print("2/4 Articoli e allegati...")
+        print("2/4 Articoli...")
         articoli = s.run("""
             MATCH (n:Norma)-[:HA_ARTICOLO]->(a:Articolo)
             RETURN a.id AS id, n.id AS normaId, coalesce(a.ordine, 0) AS ordine
         """).data()
         
-        allegati = s.run("""
-            MATCH (n:Norma)-[:HA_ALLEGATO]->(al:Allegato)
-            RETURN al.id AS id, n.id AS normaId
-        """).data()
-
         print("3/4 Commi...")
         commi = s.run("""
             MATCH (a:Articolo)-[:HA_COMMA]->(c:Comma)
@@ -111,7 +106,6 @@ def estrai_tutto_il_grafo():
     return {
         "norme": norme,
         "articoli": articoli,
-        "allegati": allegati,
         "commi": commi,
         "citazioni": citazioni
     }
@@ -181,18 +175,6 @@ def calcola_layout_galassia(dati):
             colori[aid] = "#34d399"  # Verde Smeraldo chiaro
             categorie[aid] = "Articolo"
 
-    # 3. Posiziona gli Allegati
-    for al in dati["allegati"]:
-        alid = al["id"]
-        nid = al["normaId"]
-        if nid in pos:
-            nx, ny = pos[nid]
-            ax = nx + np.random.uniform(-0.03, 0.03)
-            ay = ny + np.random.uniform(-0.03, 0.03)
-            pos[alid] = (ax, ay)
-            colori[alid] = "#fbbf24"  # Giallo
-            categorie[alid] = "Allegato"
-
     # 4. Posiziona i Commi (Micro-orbite di 2° livello)
     for c in dati["commi"]:
         cid = c["id"]
@@ -226,7 +208,6 @@ def renderizza_snapshot_completo(dati, pos, colori):
     # 1. Costruzione segmenti archi
     linee_commi = []
     linee_articoli = []
-    linee_allegati = []
     linee_cita = []
     linee_cita_art = []
     
@@ -238,10 +219,6 @@ def renderizza_snapshot_completo(dati, pos, colori):
         if c["artId"] in pos and c["id"] in pos:
             linee_commi.append([pos[c["artId"]], pos[c["id"]]])
             
-    for al in dati["allegati"]:
-        if al["normaId"] in pos and al["id"] in pos:
-            linee_allegati.append([pos[al["normaId"]], pos[al["id"]]])
-            
     for cit in dati["citazioni"]:
         da = cit["daId"]
         verso = cit["versoId"]
@@ -251,7 +228,7 @@ def renderizza_snapshot_completo(dati, pos, colori):
             else:
                 linee_cita_art.append([pos[da], pos[verso]])
                 
-    print(f"Segmenti costruiti: {len(linee_commi):,d} HA_COMMA, {len(linee_articoli):,d} HA_ARTICOLO, {len(linee_cita):,d} CITA, {len(linee_cita_art):,d} CITA_ARTICOLO, {len(linee_allegati):,d} HA_ALLEGATO.")
+    print(f"Segmenti costruiti: {len(linee_commi):,d} HA_COMMA, {len(linee_articoli):,d} HA_ARTICOLO, {len(linee_cita):,d} CITA, {len(linee_cita_art):,d} CITA_ARTICOLO.")
     
     # 2. Setup Canvas Matplotlib (24 x 14 pollici ad altissima densita')
     fig = plt.figure(figsize=(24, 14), facecolor=BG_COLOR)
@@ -292,7 +269,7 @@ def renderizza_snapshot_completo(dati, pos, colori):
             all_s.append(0.6)
         elif col == "#34d399":    # Articolo
             all_s.append(2.5)
-        elif col in ("#f59e0b", "#fbbf24"):  # Costituzionale / Allegato
+        elif col == "#f59e0b":  # Costituzionale
             all_s.append(22.0)
         else:                     # Norma
             all_s.append(12.0)
@@ -351,7 +328,7 @@ def renderizza_snapshot_completo(dati, pos, colori):
     # mano significa che al primo caricamento la legenda comincia a mentire.
     import collections
     per_tipo = collections.Counter(n["tipo"] for n in dati["norme"])
-    n_commi, n_art, n_all = len(dati["commi"]), len(dati["articoli"]), len(dati["allegati"])
+    n_commi, n_art = len(dati["commi"]), len(dati["articoli"])
     n_nodi = len(pos)
 
     DESCRIZIONI = {
@@ -370,7 +347,6 @@ def renderizza_snapshot_completo(dati, pos, colori):
         "Statuto": "Corpi statutari storici",
         "Verbale": "Verbali",
         "NonDefinito": "Atti senza tipologia dichiarata",
-        "Allegato": "Tabelle tecniche e cartografie",
     }
 
     ax_legend.text(0.03, 0.96, f"CLASSI DEI NODI ({n_nodi:,d} totali)".replace(",", "."),
@@ -387,7 +363,6 @@ def renderizza_snapshot_completo(dati, pos, colori):
         if tipo in ("LeggeCostituzionale", "LeggeQualificata", "LeggeRevisioneCostituzionale"):
             continue
         node_entries.append((tipo, quante, SECTOR_MAP.get(tipo, SECTOR_MAP["Altro"])[2]))
-    node_entries.append(("Allegato", n_all, "#fbbf24"))
     if vertice:
         node_entries.append(("Costituzionali e Qualificate", vertice, "#f59e0b"))
 
@@ -416,7 +391,7 @@ def renderizza_snapshot_completo(dati, pos, colori):
 
     # Sezione 2: Archi
     n_cita, n_cita_art = len(linee_cita), len(linee_cita_art)
-    n_archi = len(linee_commi) + len(linee_articoli) + n_cita + n_cita_art + len(linee_allegati)
+    n_archi = len(linee_commi) + len(linee_articoli) + n_cita + n_cita_art
 
     ax_legend.text(0.03, 0.38, f"CLASSI DEGLI ARCHI ({n_archi:,d} totali)".replace(",", "."),
                    color="#f59e0b", fontsize=10.5, fontweight="bold", transform=ax_legend.transAxes)
@@ -426,7 +401,6 @@ def renderizza_snapshot_completo(dati, pos, colori):
         ("HA_ARTICOLO", len(linee_articoli), "#34d399", "—", "Norma -> Articolo"),
         ("CITA", n_cita, "#f59e0b", "--", "Rinvii fra norme, preambolo compreso"),
         ("CITA_ARTICOLO", n_cita_art, "#ec4899", "··", "Rinvio puntuale a un articolo"),
-        ("HA_ALLEGATO", len(linee_allegati), "#fbbf24", "—", "Norma -> Allegato"),
     ]
 
     y = 0.33

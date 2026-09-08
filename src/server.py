@@ -106,10 +106,8 @@ def stato():
             WITH conTesto, soloCitate, totaleNorme, count(a) AS articoli
             MATCH (c:Comma)
             WITH conTesto, soloCitate, totaleNorme, articoli, count(c) AS commi
-            OPTIONAL MATCH (al:Allegato)
-            WITH conTesto, soloCitate, totaleNorme, articoli, commi, count(al) AS allegati
-            RETURN conTesto, soloCitate, totaleNorme, articoli, commi, allegati,
-                   (totaleNorme + articoli + commi + allegati) AS totaleNodi
+            RETURN conTesto, soloCitate, totaleNorme, articoli, commi,
+                   (totaleNorme + articoli + commi) AS totaleNodi
         """)[0]
 
         rel = grafo().query("MATCH ()-[r]->() RETURN count(r) AS totaleRelazioni")[0]

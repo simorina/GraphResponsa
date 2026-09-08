@@ -3,7 +3,7 @@
 Grafo Neo4j della normativa della Repubblica di San Marino, costruito per essere
 interrogato da un agente in modalità Graph RAG.
 
-**Stato aggiornato:** **268.757 nodi**, **343.347 relazioni**, **11.134 norme con testo
+**Stato aggiornato:** **268.238 nodi**, **342.828 relazioni**, **11.134 norme con testo
 integrale** su 11.136 scaricabili dal portale, distribuite su 16 tipologie di atto:
 leggi, decreti in tutte le loro forme, regolamenti, notifiche, ordinanze, statuti,
 errata corrige e verbali. Tutti i 181.248 commi hanno un embedding, e 358 norme,
@@ -14,7 +14,7 @@ errata corrige e verbali. Tutti i 181.248 commi hanno un embedding, e 358 norme,
 ## 1. Modello Concettuale ed Entità
 
 Un corpus normativo ha tre strutture sovrapposte:
-1. **Struttura Gerarchica:** `Norma ➔ Articolo ➔ Comma` (e allegati). Consente l'ancoraggio preciso e la risalita dal frammento al contesto normativo.
+1. **Struttura Gerarchica:** `Norma ➔ Articolo ➔ Comma`. Consente l'ancoraggio preciso e la risalita dal frammento al contesto normativo.
 2. **Rete delle Citazioni e Rinvii:** collegamenti incrociati tra commi/norme ed altri atti richiamati (`CITA`, `CITA_ARTICOLO`).
 3. **Vigenza:** quali atti, articoli e commi sono ancora diritto vivo (`ABROGA`, `abrogata`, `abrogato`). È la struttura più difficile da ricostruire e la più incompleta, perché **l'archivio non è consolidato**: conserva gli atti come furono pubblicati, e un articolo soppresso resta scritto per esteso, indistinguibile da uno vigente.
 
@@ -24,7 +24,6 @@ Un corpus normativo ha tre strutture sovrapposte:
 erDiagram
     NORMA ||--o{ ARTICOLO : HA_ARTICOLO
     ARTICOLO ||--o{ COMMA : HA_COMMA
-    NORMA ||--o{ ALLEGATO : HA_ALLEGATO
     COMMA }o--o{ NORMA : CITA
     COMMA }o--o{ ARTICOLO : CITA_ARTICOLO
     NORMA }o--o{ NORMA : CITA
@@ -69,11 +68,6 @@ erDiagram
         stringArray abrogatoDa "Gli atti che l'hanno soppresso"
     }
 
-    ALLEGATO {
-        string id PK "es. L-87-2026/all-1"
-        string nome "Nome documento allegato"
-        int bytes "Dimensione in byte"
-    }
 ```
 
 ### 1.1 Cosa sono le "Rubriche" e perché sono fondamentali
@@ -101,8 +95,7 @@ Nel nostro Knowledge Graph, le rubriche svolgono due funzioni cruciali:
 | **`:Norma`** | **`12.248`** | Tutti gli atti normativi censiti: |
 | ↳ *con testo integrale (`caricata: true`)* | *`11.134`* | *Su 11.136 scaricabili dal portale, 16 tipologie* |
 | ↳ *stub citati (`caricata: false`)* | *`1.114`* | *Atti richiamati nei testi per tracciare i rinvii* |
-| **`:Allegato`** | **`519`** | Tabelle, cartografie e allegati normativi |
-| **TOTALE NODI** | **`268.757`** | |
+| **TOTALE NODI** | **`268.238`** | |
 
 ### Relazioni (Archi)
 
@@ -112,15 +105,21 @@ Nel nostro Knowledge Graph, le rubriche svolgono due funzioni cruciali:
 | **`HA_ARTICOLO`** | **`74.742`** | `Norma ➔ Articolo` | Contenimento strutturale |
 | **`CITA`** | **`69.662`** | `(Comma/Norma) ➔ Norma` | Rinvio normativo formale |
 | **`CITA_ARTICOLO`** | **`16.763`** | `Comma ➔ Articolo` | Rinvio puntuale ad articolo specifico risolto |
-| **`HA_ALLEGATO`** | **`519`** | `Norma ➔ Allegato` | Presenza di allegato tecnico |
 | **`ABROGA`** | **`413`** | `Norma ➔ Norma` | Abrogazione di un atto per intero, riconosciuta senza ambiguità |
-| **TOTALE ARCHI** | **`343.347`** | | |
+| **TOTALE ARCHI** | **`342.828`** | | |
 
 I `:Comma` erano 180.932 fino alla riparazione del parser: i **316 in più** sono
 il testo che si perdeva su 312 articoli, dove il buffer della rubrica non si
 chiudeva su `)` seguito da punteggiatura. Il conteggio dei nodi per etichetta
-somma a 281.005 e non a 268.757 perché ogni `:Norma` ne porta due — quella
+somma a 280.486 e non a 268.238 perché ogni `:Norma` ne porta due — quella
 generica e quella del tipo (`:Legge`, `:DecretoDelegato`, e così via).
+
+**I nodi `:Allegato` non ci sono più.** Erano 519 su 27 norme e portavano solo
+`id`, nome del file e dimensione: nessun testo, nessun embedding, e nessuno
+strumento dell'agente li leggeva. Non contribuivano ad alcuna risposta, e il
+contenuto degli allegati resta raggiungibile dal PDF originale via
+`/documenti/<id>`. L'elenco di cosa è stato rimosso è in
+`out/allegati_rimossi.json`.
 
 ### Marcature di vigenza
 
@@ -268,7 +267,7 @@ flowchart TD
     subgraph L["3. Knowledge Graph Loading"]
         F --> H["03_load.py"]
         H --> I["Vincoli e Indici di Unicità"]
-        H --> J["MERGE Nodi Norma, Articolo, Comma, Allegato"]
+        H --> J["MERGE Nodi Norma, Articolo, Comma"]
         H --> K["Chunked Ingestion Relazioni CITA / CITA_ARTICOLO"]
         H --> M[("Neo4j Aura Graph Database")]
     end
@@ -396,7 +395,6 @@ caricamento: è idempotente e calcola solo i commi che non ce l'hanno.
 CREATE CONSTRAINT norma_id    FOR (n:Norma)    REQUIRE n.id IS UNIQUE;
 CREATE CONSTRAINT articolo_id FOR (a:Articolo) REQUIRE a.id IS UNIQUE;
 CREATE CONSTRAINT comma_id    FOR (c:Comma)    REQUIRE c.id IS UNIQUE;
-CREATE CONSTRAINT allegato_id FOR (x:Allegato) REQUIRE x.id IS UNIQUE;
 
 -- Indici Full-Text per ricerca lessicale italiana
 CREATE FULLTEXT INDEX testo_normativo FOR (n:Comma|Articolo) ON EACH [n.testo, n.rubrica]
