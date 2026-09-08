@@ -27,6 +27,23 @@ function escapeAttributo(s: string): string {
   return s.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }
 
+/**
+ * L'etichetta del riferimento deve dire A COSA punta, e i livelli sono tre.
+ * Prima si scriveva "[-]" per un atto intero e "[9]" per un articolo: il primo
+ * non significava nulla, il secondo si confondeva con "[9.1]".
+ *
+ *   atto intero   ->  [atto]
+ *   articolo      ->  [art. 9]
+ *   comma         ->  [9.1]
+ */
+function etichettaCitazione(articolo: string, comma: string): string {
+  const a = normalizzaComma(articolo);
+  const c = normalizzaComma(comma);
+  if (a === '-') return '[atto]';
+  if (c === '-') return `[art. ${articolo}]`;
+  return `[${articolo}.${comma}]`;
+}
+
 export function inserisciCitazioniInline(testo: string, fonti: Fonte[]): string {
   return testo.replace(MARCATORE, (_m, norma: string, articolo: string, comma: string) => {
     const trovata = fonti.find(
@@ -36,14 +53,18 @@ export function inserisciCitazioniInline(testo: string, fonti: Fonte[]): string 
         normalizzaComma(f.comma) === normalizzaComma(comma)
     );
     if (!trovata) return '';
-    const etichetta = normalizzaComma(comma) === '-' ? articolo : `${articolo}.${comma}`;
+    const etichetta = etichettaCitazione(articolo, comma);
+    const titolo = trovata.titoloNorma
+      ? `${norma} - ${trovata.titoloNorma}`
+      : norma;
     return (
-      ` <button type="button" class="cita-inline mx-0.5 inline-flex cursor-pointer items-baseline ` +
+      ` <button type="button" title="${escapeAttributo(titolo)}" ` +
+      `class="cita-inline mx-0.5 inline-flex cursor-pointer items-baseline ` +
       `rounded-md border border-line bg-alloro-3/30 px-1 align-baseline font-mono text-[10px] ` +
       `font-medium text-alloro no-underline transition-colors duration-150 hover:border-dorato-2 ` +
       `hover:bg-alloro-3/60" data-norma="${escapeAttributo(norma)}" ` +
       `data-articolo="${escapeAttributo(articolo)}" data-comma="${escapeAttributo(comma)}">` +
-      `[${escapeAttributo(etichetta)}]</button>`
+      `${escapeAttributo(etichetta)}</button>`
     );
   });
 }
