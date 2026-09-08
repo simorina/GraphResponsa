@@ -95,6 +95,14 @@ Rispondi consultando esclusivamente il grafo della normativa attraverso gli stru
    Esempio: "...come previsto dalla L. 87/2026, art. 7, comma
    2{{cita:L-87-2026:7:2}}, che stabilisce..."
 
+   **Il marcatore vale solo per cio' che hai LETTO da uno strumento.** Alcuni
+   campi ti danno l'identificativo di un atto senza dartene il testo -
+   `abrogataDa`, `passoAbrogatoDa`, `ancheIn`, `novellataDa`: quello e' un
+   riferimento, non una fonte consultata. Nominalo pure in prosa - "abrogata
+   dalla L. 145/2022" - ma non metterci un marcatore, oppure aprilo prima con
+   leggi_articolo(). Un marcatore senza riscontro viene scartato in silenzio, e
+   chi legge vede una citazione in meno senza sapere perche'.
+
 3. **Se non trovi, dillo.** Se gli strumenti non restituiscono nulla di
    pertinente, dichiara che l'archivio non contiene la risposta. Non colmare il
    vuoto con conoscenza generale sul diritto italiano o di altri ordinamenti:
@@ -131,6 +139,13 @@ Rispondi consultando esclusivamente il grafo della normativa attraverso gli stru
    "la L. 34/2010 e' stata abrogata" - indica l'atto abrogante se il campo
    `abrogataDa` lo riporta, e cerca la disciplina che l'ha sostituita. Puoi
    citarlo solo per dire cosa prevedeva e che non vale piu'.
+
+   **L'atto abrogante nominalo SENZA marcatore**, a meno che tu non l'abbia
+   davvero aperto. `abrogataDa` ti da' un identificativo, non un testo letto:
+   scrivi "abrogata dalla L. 145/2022" e basta. Se vuoi citarlo per davvero,
+   prima aprilo con leggi_articolo() o cerca_testo() - allora il marcatore avra'
+   un riscontro. Un marcatore su un atto che non hai letto viene scartato in
+   silenzio e chi legge perde una citazione senza sapere perche'.
 
    **`passoAbrogato` colpisce piu' in piccolo e piu' spesso.** Dice che quel
    singolo articolo, o quel singolo comma, e' stato soppresso dentro un atto
@@ -449,6 +464,43 @@ def _fonti_da(nome_strumento, risultato):
                     "passoAbrogatoDa": (c.get("abrogatoDa")
                                         or risultato.get("passoAbrogatoDa") or []),
                 })
+    # Anche `trova_norma` e `struttura_norma` consultano davvero l'archivio, e
+    # finora non producevano fonti. La conseguenza non era solo una lista vuota
+    # in fondo: il frontend SCARTA i marcatori {{cita:...}} che non trovano
+    # riscontro fra le fonti - giustamente, un marcatore inventato non deve
+    # produrre un link - quindi su una domanda risolta con questi due strumenti
+    # sparivano anche le citazioni dentro il testo. La risposta restava giusta e
+    # sembrava non ancorata a nulla.
+    #
+    # Il bersaglio qui e' l'atto o l'articolo, non il comma: si usa "-" per le
+    # partizioni che mancano, la stessa convenzione che il modello gia' scrive
+    # nei marcatori ({{cita:L-106-2009:-:-}}) e che normalizzaComma() conosce.
+    elif nome_strumento == "trova_norma":
+        for r in risultato.get("risultati", []):
+            if not r.get("id"):
+                continue
+            fonti.append({
+                "norma": r.get("id"), "titoloNorma": r.get("titolo"),
+                "articolo": "-", "comma": "-",
+                "testo": r.get("titolo") or "",
+                "haDocumento": False,
+                "abrogata": bool(r.get("abrogata")),
+                "abrogataDa": r.get("abrogataDa") or [],
+            })
+    elif nome_strumento == "struttura_norma" and risultato.get("id"):
+        for a in risultato.get("articoli", []):
+            if not a.get("numero"):
+                continue
+            fonti.append({
+                "norma": risultato.get("id"),
+                "titoloNorma": risultato.get("titolo"),
+                "articolo": a.get("numero"), "rubrica": a.get("rubrica"),
+                "comma": "-",
+                # La struttura porta la rubrica, non il testo: e' cio' che
+                # l'agente ha davvero letto, e non si finge di piu'.
+                "testo": a.get("rubrica") or "",
+                "haDocumento": False,
+            })
     return fonti
 
 

@@ -13,6 +13,16 @@ function normalizzaComma(c: unknown): string {
   return c === null || c === undefined || c === '' ? '-' : String(c);
 }
 
+/**
+ * Il numero d'articolo si scrive in piu' modi: l'archivio memorizza "19 bis"
+ * con lo spazio, il modello scrive volentieri "19-bis". Sono lo stesso
+ * articolo, e confrontarli alla lettera faceva sparire una citazione buona.
+ */
+function normalizzaArticolo(a: unknown): string {
+  if (a === null || a === undefined || a === '') return '-';
+  return String(a).toLowerCase().replace(/[\s.\-–]+/g, '');
+}
+
 function escapeAttributo(s: string): string {
   return s.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }
@@ -22,7 +32,7 @@ export function inserisciCitazioniInline(testo: string, fonti: Fonte[]): string 
     const trovata = fonti.find(
       (f) =>
         String(f.norma) === norma &&
-        String(f.articolo) === articolo &&
+        normalizzaArticolo(f.articolo) === normalizzaArticolo(articolo) &&
         normalizzaComma(f.comma) === normalizzaComma(comma)
     );
     if (!trovata) return '';
@@ -45,7 +55,7 @@ export function trovaFonteDaDataset(dataset: DOMStringMap, fonti: Fonte[]): Font
   return fonti.find(
     (f) =>
       String(f.norma) === norma &&
-      String(f.articolo) === articolo &&
+      normalizzaArticolo(f.articolo) === normalizzaArticolo(articolo) &&
       normalizzaComma(f.comma) === normalizzaComma(comma)
   );
 }
