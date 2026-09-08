@@ -36,19 +36,23 @@ passo si legge intero e sensato, e nulla in esso avverte che non vale piu'.
 L'archivio conserva gli atti come furono pubblicati e non li riscrive - non e'
 un testo consolidato - quindi l'unico segnale possibile viene dalle clausole.
 
-Qui il bersaglio non si indovina: l'arco CITA_ARTICOLO esiste gia' nel grafo e
-lo indica, e resta da verificare che il numero scritto nel testo coincida con
-quello a cui l'arco punta. L'atto a cui l'arco punta dev'essere fra quelli che la frase nomina, e
-l'ambito del confronto e' la porzione agganciata: su un comma lungo che elenca
-molti atti, cercarli in tutto il testo lasciava passare un arco sbagliato.
+Il bersaglio si risolve dal testo. Il primo tentativo si appoggiava all'arco
+CITA_ARTICOLO gia' presente nel grafo, ma quello esiste per i riferimenti
+puntuali e non per gli elenchi: "sono abrogati gli articoli 1, 3, 11, 12 e 13
+della Legge n.97/1997" non produce un arco per ogni voce, e dipenderne costava
+124 articoli su 173.
 
-Si marcano 49 articoli e 26 commi. Il numero e' piccolo perche' solo 433 commi
-abroganti su 1.728 hanno un arco, e di quelli la maggioranza scende ancora piu'
-in basso - "la lettera d), comma 1, dell'articolo 3" - dove il grafo non arriva.
+Cio' che l'arco garantiva lo garantiscono quattro controlli in fila: il tipo
+dichiarato deve concordare col prefisso dell'id, l'atto deve risolvere a UNA
+sola norma, il bersaglio non puo' essere posteriore alla fonte, e la partizione
+nominata deve esistere davvero dentro quell'atto - se il testo dice "comma 7" e
+l'articolo ne ha sei, il riferimento e' stato letto male.
+
+Si marcano 118 articoli e 52 commi.
 
 ## Cosa NON copre
 
-  - le forme che il riconoscimento non sa leggere, 506 commi su 1.728;
+  - le forme che il riconoscimento non sa leggere, 408 commi su 1.728;
   - le partizioni sotto il comma: lettere, punti, capoversi, che il grafo non
     modella e che percio' non si possono marcare;
   - l'abrogazione TACITA, una legge posteriore incompatibile con una anteriore
@@ -57,7 +61,7 @@ in basso - "la lettera d), comma 1, dell'articolo 3" - dove il grafo non arriva.
 ## Il pericolo non e' l'arco sbagliato, e' l'arco assente
 
 La copertura e' del 2,9% delle norme,
-e il 36,7% dei commi abroganti produce una marcatura. Un indice cosi' rado induce a leggere il
+e il 43,1% dei commi abroganti produce una marcatura. Un indice cosi' rado induce a leggere il
 silenzio come conferma - "nessun arco, quindi e' in vigore" - e quel silenzio
 non dimostra niente. Per questo l'informazione entra nel prompt come avviso
 esclusivamente POSITIVO: la presenza dell'arco autorizza a dire "abrogata",
@@ -170,6 +174,32 @@ ARTICOLO_AVANTI = re.compile(
 # "Il comma 3 dell'articolo 3 della Legge n.92/2008 e' abrogato"
 COMMA = re.compile(r"\bi[l]?\s+comm[ai]\s+([\d\s,ebisterquan]{1,40}?)\s+"
                    r"dell'articolo\s+(\d+[^\s,;]*)[^;]{0,90}?(?:è|e'|sono)\s+abrogat", re.I)
+# ...e la stessa cosa col verbo davanti, che e' altrettanto comune.
+COMMA_AVANTI = re.compile(r"(?:è|e'|sono)\s+abrogat[aeio]\s+i[l]?\s+comm[ai]\s+"
+                          r"([\d\s,ebisterquan]{1,40}?)\s+dell'articolo\s+"
+                          r"(\d+[^\s,;]*)([^;]{0,70})", re.I)
+# "L'articolo 86, comma 2, della Legge n.92/2008 e' abrogato": stesso bersaglio
+# dei due sopra - un comma - ma nominato in ordine inverso, prima l'articolo.
+ART_COMMA = re.compile(r"\bl'articolo\s+(\d+[^\s,;]*)\s*,\s*comm[ai]\s+"
+                       r"([\d\s,ebisterquan]{1,30}?)\s*,?\s*([^;]{0,70}?)"
+                       r"(?:è|e'|sono)\s+abrogat", re.I)
+ART_COMMA_AVANTI = re.compile(r"(?:è|e'|sono)\s+abrogat[aeio]\s+l'articolo\s+"
+                              r"(\d+[^\s,;]*)\s*,\s*comm[ai]\s+"
+                              r"([\d\s,ebisterquan]{1,30}?)\s*,?\s*([^;]{0,70})", re.I)
+
+# Gli ELENCHI di articoli, che prima lasciavo fuori del tutto perche' fra
+# "articoli" e la fine del tratto si raccoglievano cifre nude - date, numeri
+# d'atto, capitoli di bilancio. Ora la lista e' delimitata da "del/della/dell'",
+# come per i commi, e soprattutto ogni bersaglio deve superare DUE controlli
+# sull'arco gia' presente nel grafo: il numero d'articolo dev'essere fra quelli
+# elencati, e l'atto a cui l'arco punta dev'essere fra quelli nominati nel
+# tratto. Con entrambi, raccogliere una cifra di troppo non produce un arco.
+LISTA = r"([\d\s,ebisterquan]{1,60}?)"
+ARTICOLI = re.compile(rf"sono\s+abrogat[ei]\s+(?:gli\s+)?articoli\s+{LISTA}"
+                      r"\s+(?:del|della|dell')([^;]{0,70})", re.I)
+ARTICOLI_INDIETRO = re.compile(rf"\bgli\s+articoli\s+{LISTA}"
+                               r"\s+(?:del|della|dell')([^;]{0,70}?)"
+                               r"\s+sono\s+abrogat[ei]", re.I)
 NUMERO = re.compile(r"\b(\d+(?:\s*(?:bis|ter|quater))?)\b", re.I)
 
 # Sotto l'articolo c'e' il comma, sotto il comma la lettera e il punto. Ogni
@@ -199,23 +229,33 @@ def _fermo(testo):
 
 
 def articoli_abrogati(testo):
-    """I numeri d'articolo colpiti PER INTERO. Quasi sempre nessuno."""
+    """I numeri d'articolo colpiti per intero, ognuno con gli atti nominati
+    accanto. Quasi sempre vuoto."""
     testo = testo.translate(APOSTROFI)
     if _fermo(testo):
-        return []
+        return {}
     fuori = {}
     for m in ARTICOLO.finditer(testo):
         if SOTTO_ARTICOLO.search(m.group(0)) or SPEZZA.search(m.group(0)):
             continue
         fuori.setdefault(m.group(1).strip(".,"), set()).update(
-            atti_nominati(m.group(0)))
+            atti_con_tipo(m.group(0)))
     for m in ARTICOLO_AVANTI.finditer(testo):
         # qui il verbo precede: il tratto da controllare e' quello DOPO il
         # numero, dove si annidano "dell'Allegato A" e ", comma 2,".
         if SOTTO_ARTICOLO.search(m.group(2)):
             continue
         fuori.setdefault(m.group(1).strip(".,"), set()).update(
-            atti_nominati(m.group(2)))
+            atti_con_tipo(m.group(2)))
+    # gli ELENCHI: la lista dei numeri sta fra "articoli" e "del/della", dove
+    # date e importi non entrano, e l'atto sta nel tratto che segue.
+    for espressione in (ARTICOLI, ARTICOLI_INDIETRO):
+        for m in espressione.finditer(testo):
+            if SOTTO_ARTICOLO.search(m.group(2)):
+                continue
+            atti = atti_con_tipo(m.group(2))
+            for n in NUMERO.finditer(m.group(1)):
+                fuori.setdefault(n.group(1), set()).update(atti)
     return fuori
 
 
@@ -235,14 +275,20 @@ def commi_abrogati(testo):
     if _fermo(testo):
         return []
     fuori = []
-    for m in COMMA.finditer(testo):
-        if SOTTO_COMMA.search(m.group(0)) or SPEZZA.search(m.group(0)):
-            continue
-        articolo = m.group(2).strip(".,")
-        atti = atti_nominati(m.group(0))
-        for n in NUMERO.finditer(m.group(1)):
-            if (n.group(1), articolo, atti) not in fuori:
-                fuori.append((n.group(1), articolo, atti))
+    # Quattro forme per lo stesso bersaglio, che cambiano solo l'ordine delle
+    # parole: il comma prima o dopo il verbo, l'articolo prima o dopo il comma.
+    #   0: il numero di comma   1: il numero d'articolo   2: dove cercare l'atto
+    forme = [(COMMA, 1, 2, 0), (COMMA_AVANTI, 1, 2, 3),
+             (ART_COMMA, 2, 1, 3), (ART_COMMA_AVANTI, 2, 1, 3)]
+    for espressione, gc, ga, gatto in forme:
+        for m in espressione.finditer(testo):
+            if SOTTO_COMMA.search(m.group(0)) or SPEZZA.search(m.group(0)):
+                continue
+            articolo = m.group(ga).strip(".,")
+            atti = atti_con_tipo(m.group(gatto))
+            for n in NUMERO.finditer(m.group(gc)):
+                if (n.group(1), articolo, atti) not in fuori:
+                    fuori.append((n.group(1), articolo, atti))
     return fuori
 
 
@@ -305,11 +351,19 @@ NOMINATO = re.compile(rf"\b{TIPO}[^;]{{0,50}}?{RIF}", re.I)
 
 def atti_nominati(testo):
     """Le coppie (numero, anno) degli atti che la frase nomina per esteso."""
+    return {(n, a) for n, a, _ in atti_con_tipo(testo)}
+
+
+def atti_con_tipo(testo):
+    """Come sopra, ma tenendo anche il tipo dichiarato: serve quando il
+    bersaglio si risolve senza passare da un arco, e il tipo e' allora l'unica
+    difesa contro un numero e un anno che collidono fra atti diversi."""
     fuori = set()
     for m in NOMINATO.finditer(testo.translate(APOSTROFI)):
-        g = m.groups()[1:]
+        tipo, g = m.group(1), m.groups()[1:]
         numero, anno = (g[0], g[1]) if g[0] else (g[3], g[2])
-        fuori.add((int(numero), int(anno)))
+        tipo = re.sub(r"\s*[-–]\s*", " ", " ".join(tipo.lower().split()))
+        fuori.add((int(numero), int(anno), tipo.replace("consigliare", "consiliare")))
     return fuori
 
 # Le prove girano prima di ogni esecuzione. Tre di queste forme hanno superato
@@ -470,7 +524,12 @@ PROVE_ARTICOLO = [
     ("È abrogata la Legge 27 ottobre 2004 n. 146.", 0),
     ("L'articolo 3 della Legge n.55/1994 è abrogato e sostituito dal seguente.", 0),
     ("L'articolo 14 del DD n.111/2021 è abrogato dall'entrata in vigore del presente.", 0),
-    ("Sono abrogati gli articoli 4 e 5 della Legge 19 aprile 2014 n.71.", 0),
+    # Gli elenchi ora si leggono: la lista e' delimitata, e ogni bersaglio deve
+    # superare i due controlli sull'arco.
+    ("Sono abrogati gli articoli 4 e 5 della Legge 19 aprile 2014 n.71.", 2),
+    ("Gli articoli 87 e 88 della Legge 17 giugno 2008 n. 92 sono abrogati.", 2),
+    ("Sono abrogati gli articoli 1, 3, 11, 12 e 13 della Legge 5 settembre "
+     "1997 n.97 e tutte le altre norme in contrasto.", 5),
     # La direzione opposta, che prima non veniva letta affatto.
     ("È abrogato l'articolo 1-bis del Decreto Delegato 18 luglio 2025 n.97.", 1),
     ("È abrogato l'articolo 8 della Legge 24 novembre 1887.", 1),
@@ -485,6 +544,10 @@ PROVE_COMMA = [
     ("La lettera d), comma 1, dell'articolo 3 del DD n.101/2019 è abrogata.", []),
     ("L'articolo 8 della Legge n.146/2004 è abrogato.", []),
     ("Il comma 3 dell'articolo 3 della Legge n.92/2008 è abrogato e sostituito.", []),
+    # il verbo davanti, e l'ordine articolo-comma: stesso bersaglio
+    ("È abrogato il comma 3 dell'articolo 43 della Legge n.110/1994.", [("3", "43")]),
+    ("L'articolo 86, comma 2, della Legge 17 giugno 2008 n. 92 è abrogato.", [("2", "86")]),
+    ("È abrogato l'articolo 86, comma 2, della Legge n.92/2008.", [("2", "86")]),
     # il divario non deve scavalcare una frase
     ("il comma 3 dell'articolo 24 della Legge n.40/2014 e successive modifiche. "
      "3 bis. E' abrogato quanto segue.", []),
@@ -558,74 +621,104 @@ def candidati(g):
 def parziali(g):
     """Articoli e commi soppressi dentro atti che per il resto restano vivi.
 
-    Si parte dai soli commi abroganti che hanno gia' un arco CITA_ARTICOLO: il
-    bersaglio e' indicato dal grafo, non dedotto dal testo, e resta da
-    verificare che il numero scritto coincida con quello a cui l'arco punta.
-    E' il controllo che rende sicuro tutto il resto - su 35 coppie d'articolo,
-    zero discordanze fra la frase e l'arco.
+    Il bersaglio si risolve dal testo, non dall'arco CITA_ARTICOLO. Dipendere
+    dall'arco costava 124 articoli su 173: gli archi esistono per i riferimenti
+    puntuali, ma un elenco - "sono abrogati gli articoli 1, 3, 11, 12 e 13
+    della Legge n.97/1997" - non ne produce uno per ogni voce.
+
+    Cio' che l'arco garantiva lo garantiscono ora quattro controlli in fila, e
+    ognuno deve passare: il tipo dichiarato deve concordare col prefisso
+    dell'id, l'atto deve risolvere a UNA sola norma, il bersaglio non puo'
+    essere posteriore alla fonte, e la partizione nominata deve esistere
+    davvero dentro quell'atto. Se il testo dice "comma 7" e l'articolo ne ha
+    sei, il riferimento e' stato letto male e non si scrive nulla.
     """
     righe = g.query("""
         MATCH (c:Comma)
         WHERE toLower(c.testo) CONTAINS 'sono abrogat'
-           OR toLower(c.testo) CONTAINS 'è abrogat'
+           OR toLower(c.testo) CONTAINS '\u00e8 abrogat'
            OR toLower(c.testo) CONTAINS "e' abrogat"
-           OR toLower(c.testo) CONTAINS 'e’ abrogat'
-        MATCH (c)-[:CITA_ARTICOLO]->(a:Articolo)<-[:HA_ARTICOLO]-(b:Norma)
+           OR toLower(c.testo) CONTAINS 'e\u2019 abrogat'
         MATCH (c)<-[:HA_COMMA]-(:Articolo)<-[:HA_ARTICOLO]-(f:Norma)
-        WITH c, f, collect(DISTINCT {norma: b.id, anno: b.anno, num: b.numero,
-                                     art: a.numero, artId: a.id}) AS bersagli
-        RETURN c.id AS comma, c.testo AS testo, f.id AS fonte,
-               f.anno AS anno, bersagli
+        RETURN c.id AS comma, c.testo AS testo, f.id AS fonte, f.anno AS anno
     """)
-    print(f"\n  commi abroganti con un arco CITA_ARTICOLO: {len(righe)}")
+    print(f"\n  commi abroganti nel corpus: {len(righe)}")
 
-    art, com, scarti = [], [], {"numero non corrisponde all'arco": 0,
-                                "verso invertito": 0, "comma inesistente": 0,
-                                "l'arco punta a un atto che la frase non nomina": 0}
+    art, com = [], []
+    scarti = {"tipo discordante": 0, "atto assente o ambiguo": 0,
+              "verso invertito": 0, "articolo inesistente": 0,
+              "comma inesistente": 0}
+    cache = {}
+
+    def norma(atto):
+        """L'atto nominato, se risolve a una sola norma del tipo dichiarato."""
+        numero, anno, tipo = atto
+        if atto in cache:
+            return cache[atto]
+        trovate = g.query("""
+            MATCH (n:Norma) WHERE n.numero = $n AND n.anno = $a
+            RETURN n.id AS id
+        """, {"n": numero, "a": anno})
+        esito = None
+        if len(trovate) != 1:
+            esito = ("atto assente o ambiguo", None)
+        else:
+            attesi = PREFISSO.get(tipo)
+            if attesi and trovate[0]["id"].split("-")[0] not in attesi:
+                esito = ("tipo discordante", None)
+            else:
+                esito = (None, trovate[0]["id"])
+        cache[atto] = esito
+        return esito
+
     for r in righe:
         testo = " ".join((r["testo"] or "").split())
         numeri = articoli_abrogati(testo)
         coppie = commi_abrogati(testo)
         if not numeri and not coppie:
             continue
-        # Verificare il solo numero d'articolo non basta. Misurato: "E'
-        # abrogato l'articolo 5 della legge 13 luglio 1962 n. 22" portava DUE
-        # archi, a L-22-1962 art.5 - giusto - e a L-13-1922 art.5, un arco
-        # sbagliato gia' presente nel grafo che il numero d'articolo da solo
-        # non smascherava. L'atto a cui l'arco punta dev'essere fra quelli che
-        # la frase nomina.
-        for b in r["bersagli"]:
-            numero = str(b["art"]).strip()
-            atto = (b["num"], b["anno"])
-            if (b["anno"] or 0) > (r["anno"] or 0):
-                scarti["verso invertito"] += 1
-                continue
-            if numero in numeri:
-                if numeri[numero] and atto not in numeri[numero]:
-                    scarti["l'arco punta a un atto che la frase non nomina"] += 1
-                else:
-                    art.append({"fonte": r["fonte"], "bersaglio": b["norma"],
-                                "artId": b["artId"], "art": numero, "testo": testo})
-            for numc, numa, atti in coppie:
-                if numa != numero:
+        for numero, atti in numeri.items():
+            for atto in atti:
+                motivo, bersaglio = norma(atto)
+                if motivo:
+                    scarti[motivo] += 1
                     continue
-                if atti and atto not in atti:
-                    scarti["l'arco punta a un atto che la frase non nomina"] += 1
+                if (atto[1] or 0) > (r["anno"] or 0):
+                    scarti["verso invertito"] += 1
                     continue
-                # il comma dev'esistere davvero dentro quell'articolo: se il
-                # testo nomina un comma 7 e l'articolo ne ha sei, il
-                # riferimento e' stato letto male e non si scrive nulla.
-                esiste = g.query("""
-                    MATCH (a:Articolo {id: $art})-[:HA_COMMA]->(cm:Comma)
+                trovato = g.query("""
+                    MATCH (n:Norma {id: $b})-[:HA_ARTICOLO]->(a:Articolo)
+                    WHERE trim(coalesce(a.numero, '')) = $num
+                    RETURN a.id AS id
+                """, {"b": bersaglio, "num": numero})
+                if len(trovato) != 1:
+                    scarti["articolo inesistente"] += 1
+                    continue
+                art.append({"fonte": r["fonte"], "bersaglio": bersaglio,
+                            "artId": trovato[0]["id"], "art": numero,
+                            "comma": r["comma"], "testo": testo})
+        for numc, numa, atti in coppie:
+            for atto in atti:
+                motivo, bersaglio = norma(atto)
+                if motivo:
+                    scarti[motivo] += 1
+                    continue
+                if (atto[1] or 0) > (r["anno"] or 0):
+                    scarti["verso invertito"] += 1
+                    continue
+                trovato = g.query("""
+                    MATCH (n:Norma {id: $b})-[:HA_ARTICOLO]->(a:Articolo)
+                    WHERE trim(coalesce(a.numero, '')) = $num
+                    MATCH (a)-[:HA_COMMA]->(cm:Comma)
                     WHERE replace(trim(coalesce(cm.numero, '')), ' ', '')
-                        = replace($n, ' ', '')
-                    RETURN cm.id AS id LIMIT 1
-                """, {"art": b["artId"], "n": numc})
-                if not esiste:
+                        = replace($c, ' ', '')
+                    RETURN cm.id AS id
+                """, {"b": bersaglio, "num": numa, "c": numc})
+                if len(trovato) != 1:
                     scarti["comma inesistente"] += 1
                     continue
-                com.append({"fonte": r["fonte"], "bersaglio": b["norma"],
-                            "commaId": esiste[0]["id"], "art": numero,
+                com.append({"fonte": r["fonte"], "bersaglio": bersaglio,
+                            "commaId": trovato[0]["id"], "art": numa,
                             "comma": numc, "testo": testo})
     for k, v in scarti.items():
         print(f"  scartati, {k:<32} {v:>5}")
