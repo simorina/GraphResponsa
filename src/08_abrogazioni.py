@@ -15,7 +15,7 @@ Si riconoscono percio' le sole forme che colpiscono un atto INTERO:
     "Sono abrogate la Legge n.97/1989 e la Legge n.99/1991"  (plurale)
 
 e si scarta tutto il resto: parti d'atto, decorrenze differite a date future,
-clausole di salvezza. Restano 111 norme.
+clausole di salvezza. Restano 110 norme.
 
 Non si scrive l'abrogazione di singoli ARTICOLI, che pure sarebbe misurabile
 (34 archi verificati su 24 articoli): il guadagno e' minore e la granularita' e'
@@ -27,7 +27,7 @@ L'archivio di Stato marca da se' gli atti caduti, premettendo "ABROGATO - " al
 titolo: 125 norme. E' una fonte redazionale, non una lettura nostra, e i due
 segnali sono in larga parte disgiunti - 9 norme in comune. Il titolo dice CHE un
 atto e' caduto, i commi dicono DA CHI: si tengono entrambi, il flag `abrogata`
-dall'unione e l'attribuzione `abrogataDa` dai soli commi. In tutto 227 norme.
+dall'unione e l'attribuzione `abrogataDa` dai soli commi. In tutto 226 norme.
 
 ## Cosa NON copre, ed e' la parte piu' grande
 
@@ -37,7 +37,7 @@ fuori, in ordine di frequenza:
 
   - l'abrogazione PARZIALE, un articolo o un comma soppressi dentro una legge
     che per il resto vive: e' il caso di gran lunga piu' frequente;
-  - le forme che il riconoscimento non sa leggere, 1.578 commi su 1.728;
+  - le forme che il riconoscimento non sa leggere, 1.579 commi su 1.728;
   - l'abrogazione TACITA, una legge posteriore incompatibile con una anteriore
     senza dirlo, che nessun metodo testuale puo' trovare.
 
@@ -113,7 +113,8 @@ PARTE = re.compile(r"(?:articol|comm[ai]|punt[oi]|letter[ae]|capovers|allegat)",
 # "Con l'entrata in vigore della presente legge" NON e' un differimento: e' la
 # decorrenza ordinaria dell'atto che abroga. Lo e' una data esplicita.
 DIFFERITA = re.compile(r"(a\s+decorrere\s+dal|con\s+decorrenza\s+dal\s+\d|"
-                       r"con\s+efficacia\s+dal|a\s+far\s+data|abrogat\w+\s+dal\s+\d)", re.I)
+                       r"con\s+efficacia\s+dal|a\s+far\s+data|a\s+partire\s+dal|"
+                       r"abrogat\w+\s+dal\s+\d)", re.I)
 # "fatti salvi gli effetti prodotti" tiene in vita una parte dell'atto.
 SALVEZZA = re.compile(r"(fatt[oi]\s+salv[oi]|fatt[ae]\s+salv[ae]|salvo\s+quanto|"
                       r"salv[oi]\s+gli\s+effetti)", re.I)
@@ -162,6 +163,10 @@ PROVE = [
     # lunga, e senza di esse questi due passavano per abrogazioni totali.
     ("Sono abrogati l'art. 54 della legge 12 agosto 1946 n. 43.", 0),
     ("Sono abrogati gli artt. 32, 33, 34 della Legge 16 dicembre 1976 n.76.", 0),
+    # Anche "a partire dal" e' un differimento, e mancava: l'esito era giusto
+    # solo perche' la data e' passata da quarant'anni. Un "a partire dal 2030"
+    # avrebbe marcato oggi come morta una legge ancora viva.
+    ("E' abrogata la Legge 17 settembre 1960 n. 26 a partire dal 1° gennaio 1983.", 0),
 ]
 
 # Le due grafie dell'apostrofo sono la stessa parola: si normalizzano prima di
@@ -310,6 +315,14 @@ def main():
         print("\n  Nulla scritto. Aggiungi --scrivi per applicare al grafo.")
         return
 
+    # Si cancellano PRIMA tutti gli archi, poi si riscrivono. Con il solo MERGE
+    # lo script non era idempotente: stringendo un filtro, l'arco che smetteva
+    # di essere riconosciuto restava nel grafo dalla volta prima. E' successo -
+    # L-32-1982 -> L-26-1960, scartato per la decorrenza differita al 1983,
+    # sopravviveva e lasciava la norma con `abrogataDa` valorizzato e
+    # `abrogata` no. Un indice di vigenza che non sa disfare le proprie
+    # affermazioni e' peggio che non averlo.
+    g.query("MATCH ()-[r:ABROGA]->() DELETE r")
     g.query("""
         UNWIND $archi AS a
         MATCH (f:Norma {id: a.fonte}), (b:Norma {id: a.bersaglio})
