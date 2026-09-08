@@ -103,33 +103,34 @@ Nel nostro Knowledge Graph, le rubriche svolgono due funzioni cruciali:
 | **`CITA`** | **`69.662`** | `(Comma/Norma) ➔ Norma` | Rinvio normativo formale |
 | **`CITA_ARTICOLO`** | **`16.763`** | `Comma ➔ Articolo` | Rinvio puntuale ad articolo specifico risolto |
 | **`HA_ALLEGATO`** | **`519`** | `Norma ➔ Allegato` | Presenza di allegato tecnico |
-| **`ABROGA`** | **`83`** | `Norma ➔ Norma` | Abrogazione di un atto per intero, riconosciuta senza ambiguità |
-| **TOTALE ARCHI** | **`342.701`** | | |
+| **`ABROGA`** | **`127`** | `Norma ➔ Norma` | Abrogazione di un atto per intero, riconosciuta senza ambiguità |
+| **TOTALE ARCHI** | **`342.745`** | | |
 
 #### `ABROGA`, e perché è così piccolo
 
 Nel corpus ci sono **1.728 commi** che contengono «è abrogato», «sono
-abrogati» o «e' abrogato», e se ne modellano 83. Non è una svista: la forma più comune abroga
+abrogati» o «e' abrogato», e se ne modellano 127. Non è una svista: la forma più comune abroga
 una **parte** — *«All'articolo 2 della Legge n.55/1994, il punto 8.0 è
 abrogato»* — e leggerla come abrogazione dell'articolo 2 dichiarerebbe morta
 una norma viva. In un archivio che deve dire a un cittadino se ha diritto a
 qualcosa, quello è l'errore peggiore disponibile: gli errori di omissione
 lasciano l'utente dov'era, questo gli nega un diritto che ha.
 
-Si riconosce perciò **una sola forma**, l'abrogazione di un atto intero
-(`È abrogata la Legge 27 ottobre 2004 n. 146`), scartando più bersagli, parti
-d'articolo, decorrenze differite a date future e clausole di salvezza. Il
+Si riconoscono perciò le sole forme che colpiscono un **atto intero** — `È
+abrogata la Legge 27 ottobre 2004 n. 146`, `La Legge n.146/2004 è abrogata`,
+`Sono abrogate la Legge n.97/1989 e la Legge n.99/1991` — scartando parti
+d'atto, decorrenze differite a date future e clausole di salvezza. Il
 riconoscimento porta le proprie prove in `src/08_abrogazioni.py`: se una
 fallisce, lo script esce senza scrivere.
 
 La marcatura effettiva non viene solo da lì. L'archivio di Stato segna da sé
 gli atti caduti premettendo `ABROGATO - ` al titolo — **125 norme** — e i due
-segnali sono in larga parte disgiunti, appena **7 in comune**: il titolo dice *che* un
-atto è caduto, i commi dicono *da chi*. L'unione marca **193 norme** con
-`Norma.abrogata`, e le 75 con attribuzione nota portano anche
+segnali sono in larga parte disgiunti, appena **9 in comune**: il titolo dice *che* un
+atto è caduto, i commi dicono *da chi*. L'unione marca **227 norme** con
+`Norma.abrogata`, e le 111 con attribuzione nota portano anche
 `Norma.abrogataDa`.
 
-Due trappole di lettura sono costate care. La prima è l'apostrofo: gli atti
+Tre trappole di lettura sono costate care. La prima è l'apostrofo: gli atti
 scrivono `E' abrogata` e `E’ abrogata` quanto `È abrogata`, e cercare la sola
 forma accentata perdeva **412 commi su 1.728** — fra cui la L-145/2022, che
 abroga la L-106/2009. Senza quella riga l'agente, richiesto della L-106/2009,
@@ -137,6 +138,30 @@ indicava come successore la L-107/2009: un atto anteriore, su un'altra materia.
 La seconda è il tipo dell'atto, che va confrontato col **prefisso dell'id** e
 non con `Norma.tipo`: quest'ultimo è scritto a mano e contiene *Decreto
 Delagato*, *Decreto Delega5to*, *Decreto Conisliare*.
+
+La terza è la **partizione in testa a un elenco**. Nel plurale la parola che
+delimita il bersaglio compare una volta sola e governa tutto ciò che segue:
+in *«Sono abrogate le disposizioni della Legge n.9/1960, della Legge
+n.24/1972»* la seconda legge ha davanti un innocuo `, della `, e guardare solo
+il tratto adiacente la marcava morta. Si scarta perciò l'elenco intero quando
+una parola di partizione precede il primo atto nominato — e si perde qualche
+bersaglio buono, come il decreto interamente abrogato in coda a *«Sono abrogati
+i Capi I e VII del Decreto n.122 e il Decreto Delegato n.146»*. Vale la pena:
+qui un falso positivo dichiara morta una legge viva. Nella stessa famiglia
+rientrano le abbreviazioni `art.` e `artt.`, che gli atti usano più spesso della
+forma per esteso.
+
+#### Cosa `ABROGA` non copre, che è la parte più grande
+
+Non si scandagliano le 12.248 norme chiedendosi per ciascuna se sia caduta:
+l'informazione non sta nella norma morta, sta nell'atto che l'ha uccisa. Restano
+fuori, in ordine di frequenza:
+
+| Non coperto | Perché |
+|---|---|
+| **Abrogazione parziale** — un articolo o un comma soppressi dentro una legge che per il resto vive | È il caso di gran lunga più frequente, e la granularità è dove il riconoscimento sbaglia |
+| **Forme illeggibili** — 1.578 commi su 1.728 | Bersagli impliciti, rinvii a «norme in contrasto», elenchi non strutturati |
+| **Abrogazione tacita** — una legge posteriore incompatibile con una anteriore, senza dirlo | Nessun metodo testuale può trovarla |
 
 **Il rischio non è l'arco sbagliato, è l'arco assente.** Con l'1,6% di
 copertura, l'assenza del marchio non dimostra nulla, ma un indice rado invita a
