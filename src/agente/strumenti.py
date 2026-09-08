@@ -130,6 +130,7 @@ RETURN node.testo AS text, score,
        {normaId: norma.id, normaTitolo: norma.titolo,
         anno: norma.anno,
         inVigoreDal: toString(norma.dataEntrataVigore),
+        dataAtto: toString(norma.data),
         articolo: art.numero, rubrica: art.rubrica,
         partizioneTitolo: art.titolo, partizioneCapo: art.capoRubrica,
         comma: CASE WHEN node:Comma THEN node.numero ELSE null END} AS metadata
@@ -195,6 +196,7 @@ def _full_text(query, limite, dal_anno=None):
         RETURN norma.id AS normaId, norma.titolo AS normaTitolo,
                norma.anno AS anno,
                toString(norma.dataEntrataVigore) AS inVigoreDal,
+               toString(norma.data) AS dataAtto,
                art.numero AS articolo, art.rubrica AS rubrica,
                art.titolo AS partizioneTitolo, art.capoRubrica AS partizioneCapo,
                CASE WHEN node:Comma THEN node.numero ELSE null END AS comma,
@@ -277,6 +279,7 @@ WHERE node.testo IS NOT NULL AND trim(node.testo) <> ''
   AND ($dal_anno IS NULL OR norma.anno >= $dal_anno)
 RETURN norma.id AS normaId, norma.titolo AS normaTitolo, norma.anno AS anno,
        toString(norma.dataEntrataVigore) AS inVigoreDal,
+       toString(norma.data) AS dataAtto,
        art.numero AS articolo, art.rubrica AS rubrica,
        art.titolo AS partizioneTitolo, art.capoRubrica AS partizioneCapo,
        node.numero AS comma, node.testo AS testo,
@@ -299,6 +302,7 @@ WHERE art.testo IS NOT NULL AND trim(art.testo) <> ''
   AND ($dal_anno IS NULL OR norma.anno >= $dal_anno)
 RETURN norma.id AS normaId, norma.titolo AS normaTitolo, norma.anno AS anno,
        toString(norma.dataEntrataVigore) AS inVigoreDal,
+       toString(norma.data) AS dataAtto,
        art.numero AS articolo, art.rubrica AS rubrica,
        art.titolo AS partizioneTitolo, art.capoRubrica AS partizioneCapo,
        null AS comma, art.testo AS testo,
@@ -530,6 +534,13 @@ def cerca_testo(query: str, limite: int = 8, dal_anno: int | None = None) -> dic
     Se un risultato ha `troncato: true` il testo mostrato e' tagliato: per il
     contenuto completo chiama leggi_articolo().
 
+    Ogni risultato porta due date, che non vanno confuse: `inVigoreDal` e' la
+    data in cui l'atto ha cominciato ad applicarsi, `dataAtto` quella in cui e'
+    stato emanato. Il portale pubblica la prima solo per un terzo degli atti;
+    la seconda c'e' quasi sempre. Quando `inVigoreDal` manca, usa `dataAtto`
+    per collocare l'atto nel tempo, ma non spacciarla per la data di entrata in
+    vigore.
+
     Il campo `passoAbrogato` dice che PROPRIO QUESTO articolo o comma e' stato
     soppresso, dentro un atto che per il resto resta in vigore. E' il caso piu'
     insidioso: il testo si legge intero e sensato, e nulla in esso avverte che
@@ -631,6 +642,7 @@ def leggi_articolo(norma_id: str, numero: str) -> dict:
         WITH n, a, c ORDER BY c.ordine
         RETURN n.id AS normaId, n.titolo AS normaTitolo,
                toString(n.dataEntrataVigore) AS inVigoreDal,
+               toString(n.data) AS dataAtto,
                a.numero AS articolo, a.rubrica AS rubrica,
                a.titolo AS partizioneTitolo, a.capoRubrica AS partizioneCapo,
                n.urlDocumento AS urlDocumento,
@@ -722,7 +734,8 @@ def struttura_norma(norma_id: str) -> dict:
         MATCH (n:Norma {id: $norma_id})
         RETURN n.id AS id, n.titolo AS titolo, n.tipo AS tipo,
                n.caricata AS testoDisponibile,
-               toString(n.dataEntrataVigore) AS inVigoreDal
+               toString(n.dataEntrataVigore) AS inVigoreDal,
+               toString(n.data) AS dataAtto
     """, {"norma_id": norma_id})
     if not testa:
         return {"errore": f"Norma '{norma_id}' non trovata. Usa trova_norma() per individuarla."}
@@ -767,6 +780,7 @@ def trova_norma(numero: int | None = None, anno: int | None = None,
             RETURN n.id AS id, n.tipo AS tipo, n.numero AS numero, n.anno AS anno,
                    n.titolo AS titolo, n.caricata AS testoDisponibile,
                    toString(n.dataEntrataVigore) AS inVigoreDal,
+                   toString(n.data) AS dataAtto,
                    n.urlScheda AS urlScheda, articoli,
                    n.abrogata AS abrogata, n.abrogataDa AS abrogataDa
             ORDER BY n.anno DESC LIMIT 10
@@ -781,6 +795,7 @@ def trova_norma(numero: int | None = None, anno: int | None = None,
                    node.anno AS anno, node.titolo AS titolo,
                    node.caricata AS testoDisponibile,
                    toString(node.dataEntrataVigore) AS inVigoreDal,
+                   toString(node.data) AS dataAtto,
                    node.urlScheda AS urlScheda, articoli,
                    node.abrogata AS abrogata, node.abrogataDa AS abrogataDa
             ORDER BY score DESC LIMIT 10
