@@ -541,7 +541,7 @@ def cerca_testo(query: str, limite: int = 8, dal_anno: int | None = None) -> dic
     e' stato abrogato tutto e non e' piu' diritto vigente, per quanto il
     testo si legga bene. Dillo in apertura, cita `abrogataDa` se c'e', e cerca
     la disciplina che l'ha sostituito. L'assenza del campo non prova nulla in
-    senso contrario: il marchio copre 226 norme su oltre dodicimila.
+    senso contrario: il marchio copre 279 norme su oltre dodicimila.
 
     Il campo `citatoDaAttiSuccessivi` e' il piu' importante che leggi. Elenca
     gli atti POSTERIORI che citano proprio quell'articolo, e in questo

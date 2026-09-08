@@ -103,13 +103,13 @@ Nel nostro Knowledge Graph, le rubriche svolgono due funzioni cruciali:
 | **`CITA`** | **`69.662`** | `(Comma/Norma) ➔ Norma` | Rinvio normativo formale |
 | **`CITA_ARTICOLO`** | **`16.763`** | `Comma ➔ Articolo` | Rinvio puntuale ad articolo specifico risolto |
 | **`HA_ALLEGATO`** | **`519`** | `Norma ➔ Allegato` | Presenza di allegato tecnico |
-| **`ABROGA`** | **`126`** | `Norma ➔ Norma` | Abrogazione di un atto per intero, riconosciuta senza ambiguità |
-| **TOTALE ARCHI** | **`342.744`** | | |
+| **`ABROGA`** | **`189`** | `Norma ➔ Norma` | Abrogazione di un atto per intero, riconosciuta senza ambiguità |
+| **TOTALE ARCHI** | **`342.807`** | | |
 
 #### `ABROGA`, e perché è così piccolo
 
 Nel corpus ci sono **1.728 commi** che contengono «è abrogato», «sono
-abrogati» o «e' abrogato», e se ne modellano 126. Non è una svista: la forma più comune abroga
+abrogati» o «e' abrogato», e se ne modellano 189. Non è una svista: la forma più comune abroga
 una **parte** — *«All'articolo 2 della Legge n.55/1994, il punto 8.0 è
 abrogato»* — e leggerla come abrogazione dell'articolo 2 dichiarerebbe morta
 una norma viva. In un archivio che deve dire a un cittadino se ha diritto a
@@ -126,8 +126,8 @@ fallisce, lo script esce senza scrivere.
 La marcatura effettiva non viene solo da lì. L'archivio di Stato segna da sé
 gli atti caduti premettendo `ABROGATO - ` al titolo — **125 norme** — e i due
 segnali sono in larga parte disgiunti, appena **9 in comune**: il titolo dice *che* un
-atto è caduto, i commi dicono *da chi*. L'unione marca **226 norme** con
-`Norma.abrogata`, e le 110 con attribuzione nota portano anche
+atto è caduto, i commi dicono *da chi*. L'unione marca **279 norme** con
+`Norma.abrogata`, e le 163 con attribuzione nota portano anche
 `Norma.abrogataDa`.
 
 Tre trappole di lettura sono costate care. La prima è l'apostrofo: gli atti
@@ -159,7 +159,7 @@ fuori, in ordine di frequenza:
 
 | Non coperto | Perché |
 |---|---|
-| **Forme illeggibili** — 1.579 commi su 1.728 | Bersagli impliciti, rinvii a «norme in contrasto», elenchi non strutturati |
+| **Forme illeggibili** — 719 commi su 1.728 | Bersagli impliciti, rinvii a «norme in contrasto», elenchi non strutturati |
 | **Partizioni sotto il comma** — «la lettera d), comma 1, dell'articolo 3» | Il grafo non modella lettere e punti: non c'è nodo da marcare |
 | **Abrogazione tacita** — una legge posteriore incompatibile con una anteriore, senza dirlo | Nessun metodo testuale può trovarla |
 
@@ -176,7 +176,7 @@ articoli, **uno solo** ha la rubrica `(Abrogato)`.
 Qui però il bersaglio non va indovinato: l'arco `CITA_ARTICOLO` esiste già e lo
 indica, e resta da verificare che il numero scritto coincida con quello a cui
 l'arco punta — su 35 coppie d'articolo, **zero discordanze**. Si marcano così
-**25 articoli** e **26 commi**, con `abrogato` e `abrogatoDa`, esposti al
+**49 articoli** e **26 commi**, con `abrogato` e `abrogatoDa`, esposti al
 modello come `passoAbrogato`.
 
 Il numero è piccolo perché solo **433 commi abroganti su 1.728** hanno un arco,

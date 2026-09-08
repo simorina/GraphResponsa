@@ -15,7 +15,7 @@ Si riconoscono percio' le sole forme che colpiscono un atto INTERO:
     "Sono abrogate la Legge n.97/1989 e la Legge n.99/1991"  (plurale)
 
 e si scarta tutto il resto: parti d'atto, decorrenze differite a date future,
-clausole di salvezza. Restano 110 norme.
+clausole di salvezza. Restano 163 norme.
 
 L'abrogazione di singoli articoli e commi si scrive a parte, piu' sotto: e' un
 bersaglio diverso e va marcata sul nodo Articolo o Comma, non sulla Norma.
@@ -26,7 +26,7 @@ L'archivio di Stato marca da se' gli atti caduti, premettendo "ABROGATO - " al
 titolo: 125 norme. E' una fonte redazionale, non una lettura nostra, e i due
 segnali sono in larga parte disgiunti - 9 norme in comune. Il titolo dice CHE un
 atto e' caduto, i commi dicono DA CHI: si tengono entrambi, il flag `abrogata`
-dall'unione e l'attribuzione `abrogataDa` dai soli commi. In tutto 226 norme.
+dall'unione e l'attribuzione `abrogataDa` dai soli commi. In tutto 279 norme.
 
 ## Il livello parziale: dentro atti che restano vivi
 
@@ -38,15 +38,17 @@ un testo consolidato - quindi l'unico segnale possibile viene dalle clausole.
 
 Qui il bersaglio non si indovina: l'arco CITA_ARTICOLO esiste gia' nel grafo e
 lo indica, e resta da verificare che il numero scritto nel testo coincida con
-quello a cui l'arco punta. Su 35 coppie d'articolo, zero discordanze.
+quello a cui l'arco punta. L'atto a cui l'arco punta dev'essere fra quelli che la frase nomina, e
+l'ambito del confronto e' la porzione agganciata: su un comma lungo che elenca
+molti atti, cercarli in tutto il testo lasciava passare un arco sbagliato.
 
-Si marcano 25 articoli e 26 commi. Il numero e' piccolo perche' solo 433 commi
+Si marcano 49 articoli e 26 commi. Il numero e' piccolo perche' solo 433 commi
 abroganti su 1.728 hanno un arco, e di quelli la maggioranza scende ancora piu'
 in basso - "la lettera d), comma 1, dell'articolo 3" - dove il grafo non arriva.
 
 ## Cosa NON copre
 
-  - le forme che il riconoscimento non sa leggere, 1.579 commi su 1.728;
+  - le forme che il riconoscimento non sa leggere, 719 commi su 1.728;
   - le partizioni sotto il comma: lettere, punti, capoversi, che il grafo non
     modella e che percio' non si possono marcare;
   - l'abrogazione TACITA, una legge posteriore incompatibile con una anteriore
@@ -54,7 +56,8 @@ in basso - "la lettera d), comma 1, dell'articolo 3" - dove il grafo non arriva.
 
 ## Il pericolo non e' l'arco sbagliato, e' l'arco assente
 
-La copertura e' dell'1,9% delle norme. Un indice cosi' rado induce a leggere il
+La copertura e' del 2,3% delle norme,
+e il 23,9% dei commi abroganti produce una marcatura. Un indice cosi' rado induce a leggere il
 silenzio come conferma - "nessun arco, quindi e' in vigore" - e quel silenzio
 non dimostra niente. Per questo l'informazione entra nel prompt come avviso
 esclusivamente POSITIVO: la presenza dell'arco autorizza a dire "abrogata",
@@ -78,7 +81,10 @@ if hasattr(sys.stdout, "reconfigure"):
 
 TIPO = (r"(legge|decreto\s+delegato|decreto\s*[-–]?\s*legge|"
         r"decreto\s+reggenziale|regolamento|decreto\s+consil\w+|decreto\s+consigl\w+)")
-RIF = r"(?:n\.?\s*(\d+)\s*/\s*(\d{4})|(\d{4})\s+n\.?\s*(\d+))"
+# La virgola fra l'anno e il numero e' comune quanto la sua assenza - "Legge 18
+# luglio 1979, n.46" accanto a "Legge 27 ottobre 2004 n. 146" - e pretendere la
+# sola forma senza virgola faceva perdere l'atto per intero.
+RIF = r"(?:n\.?\s*(\d+)\s*/\s*(\d{4})|(\d{4})\s*,?\s*n\.?\s*(\d+))"
 AVANTI = re.compile(
     rf"(?:è|e')\s+abrogat[ao]\s+(?:il|la|lo)?\s*{TIPO}[^;]{{0,60}}?{RIF}", re.I)
 INDIETRO = re.compile(
@@ -106,8 +112,26 @@ UNO = re.compile(rf"\b{TIPO}[^;,]{{0,40}}?{RIF}", re.I)
 # tre articoli e non la legge.
 PARTITIVO = re.compile(r"(disposizion|norm[ae]|titol[oi]|cap[oi]\b|capitol|sezion|"
                        r"parte|part[ie]\b|tabell|allegat|articol|comm[ai]|"
-                       r"letter[ae]|punt[oi]|capovers|\bartt?\b)", re.I)
+                       r"letter[ae]|punt[oi]|capovers|\bartt?\b|modificat)", re.I)
 LOOKBACK = 45
+
+# La clausola di esclusione rende PARZIALE un'abrogazione che si annuncia
+# totale, e segue il bersaglio invece di precederlo: "E' abrogata la Legge
+# n.126/2001 AD ESCLUSIONE DELL'ARTICOLO 6". L'articolo 6 resta vivo, e
+# marcare la legge come caduta lo ucciderebbe insieme al resto.
+# Si guarda percio' il tratto che SEGUE ogni atto agganciato, fermandosi al
+# primo punto e virgola: in un elenco l'esclusione appartiene alla sola voce
+# che la porta - "la Legge n.147; il Decreto n.62 ad esclusione dell'articolo
+# 7" lascia intatta la prima e colpisce in parte la seconda.
+ESCLUSIONE = re.compile(r"(ad?\s+esclusione|fatta\s+eccezione|eccezione\s+fatta|"
+                        r"eccettuat|tranne\s+)", re.I)
+LOOKAHEAD = 70
+
+
+def _escluso(testo, fine):
+    """C'e' una clausola di esclusione subito dopo l'atto agganciato?"""
+    coda = testo[fine:fine + LOOKAHEAD].split(";")[0]
+    return bool(ESCLUSIONE.search(coda))
 
 # ------------------------------------------------------------ dentro l'atto
 #
@@ -121,6 +145,14 @@ LOOKBACK = 45
 # il punto 3 e' abrogato", che modifica dentro. Il \b davanti a l' esclude gia'
 # "all'articolo" e "dell'articolo": fra le due l non c'e' confine di parola.
 ARTICOLO = re.compile(r"\bl'articol[oi]\s+(\d+[^\s;,]*)[^;]{0,90}?\b(?:è|e')\s+abrogat", re.I)
+# Per gli atti interi avevo costruito le due direzioni, per gli articoli una
+# sola: "e' abrogato l'articolo 1-bis del Decreto Delegato n.97/2025" - il
+# verbo prima e il bersaglio dopo - non veniva letta affatto, ed e' una forma
+# comune quanto l'altra. Qui il tratto che segue il numero va guardato lo
+# stesso, perche' "e' abrogato l'articolo 27 dell'ALLEGATO A alla Legge
+# n.188/2011" colpisce un articolo dell'allegato, che il grafo non modella.
+ARTICOLO_AVANTI = re.compile(
+    r"(?:è|e')\s+abrogat[ao]\s+l'articol[oi]\s+(\d+[^\s;,]*)([^;]{0,60})", re.I)
 # "Il comma 3 dell'articolo 3 della Legge n.92/2008 e' abrogato"
 COMMA = re.compile(r"\bi[l]?\s+comm[ai]\s+([\d\s,ebisterquan]{1,40}?)\s+"
                    r"dell'articolo\s+(\d+[^\s,;]*)[^;]{0,90}?(?:è|e'|sono)\s+abrogat", re.I)
@@ -157,12 +189,20 @@ def articoli_abrogati(testo):
     testo = testo.translate(APOSTROFI)
     if _fermo(testo):
         return []
-    fuori = []
+    fuori = {}
     for m in ARTICOLO.finditer(testo):
         if SOTTO_ARTICOLO.search(m.group(0)) or SPEZZA.search(m.group(0)):
             continue
-        fuori.append(m.group(1).strip(".,"))
-    return list(dict.fromkeys(fuori))
+        fuori.setdefault(m.group(1).strip(".,"), set()).update(
+            atti_nominati(m.group(0)))
+    for m in ARTICOLO_AVANTI.finditer(testo):
+        # qui il verbo precede: il tratto da controllare e' quello DOPO il
+        # numero, dove si annidano "dell'Allegato A" e ", comma 2,".
+        if SOTTO_ARTICOLO.search(m.group(2)):
+            continue
+        fuori.setdefault(m.group(1).strip(".,"), set()).update(
+            atti_nominati(m.group(2)))
+    return fuori
 
 
 def commi_abrogati(testo):
@@ -185,9 +225,10 @@ def commi_abrogati(testo):
         if SOTTO_COMMA.search(m.group(0)) or SPEZZA.search(m.group(0)):
             continue
         articolo = m.group(2).strip(".,")
+        atti = atti_nominati(m.group(0))
         for n in NUMERO.finditer(m.group(1)):
-            if (n.group(1), articolo) not in fuori:
-                fuori.append((n.group(1), articolo))
+            if (n.group(1), articolo, atti) not in fuori:
+                fuori.append((n.group(1), articolo, atti))
     return fuori
 
 
@@ -209,8 +250,26 @@ DIFFERITA = re.compile(r"(a\s+decorrere\s+dal|con\s+decorrenza\s+dal\s+\d|"
                        r"con\s+efficacia\s+dal|a\s+far\s+data|a\s+partire\s+dal|"
                        r"abrogat\w+\s+dal\s+\d)", re.I)
 # "fatti salvi gli effetti prodotti" tiene in vita una parte dell'atto.
+# "continuano ad avere applicazione" e' una salvezza travestita: il passo e'
+# abrogato ma resta ultrattivo, e dirlo morto e basta inganna chi legge.
 SALVEZZA = re.compile(r"(fatt[oi]\s+salv[oi]|fatt[ae]\s+salv[ae]|salvo\s+quanto|"
-                      r"salv[oi]\s+gli\s+effetti)", re.I)
+                      r"salv[oi]\s+gli\s+effetti|continuan?o?\s+ad?\s+"
+                      r"(?:avere\s+applicazione|applicarsi|trovare\s+applicazione))", re.I)
+
+
+# Tutti gli atti nominati nel testo, senza le guardie dell'abrogazione: serve
+# solo a sapere DI CHI parla la frase, per confrontarlo col bersaglio dell'arco.
+NOMINATO = re.compile(rf"\b{TIPO}[^;]{{0,50}}?{RIF}", re.I)
+
+
+def atti_nominati(testo):
+    """Le coppie (numero, anno) degli atti che la frase nomina per esteso."""
+    fuori = set()
+    for m in NOMINATO.finditer(testo.translate(APOSTROFI)):
+        g = m.groups()[1:]
+        numero, anno = (g[0], g[1]) if g[0] else (g[3], g[2])
+        fuori.add((int(numero), int(anno)))
+    return fuori
 
 # Le prove girano prima di ogni esecuzione. Tre di queste forme hanno superato
 # versioni precedenti del filtro e sarebbero finite nel grafo.
@@ -256,6 +315,25 @@ PROVE = [
     # lunga, e senza di esse questi due passavano per abrogazioni totali.
     ("Sono abrogati l'art. 54 della legge 12 agosto 1946 n. 43.", 0),
     ("Sono abrogati gli artt. 32, 33, 34 della Legge 16 dicembre 1976 n.76.", 0),
+    # La virgola fra anno e numero e' comune quanto la sua assenza.
+    ("È abrogata la Legge 18 luglio 1979, n.46.", 1),
+    # L'esclusione rende parziale un'abrogazione che si annuncia totale, e
+    # segue il bersaglio: senza guardarla, cinque leggi vive risultavano morte.
+    ("È abrogata la Legge 10 dicembre 2001 n. 126 ad esclusione dell'articolo 6.", 0),
+    ("Sono abrogati: la Legge 13 giugno 1990 n.68 e successive modifiche, "
+     "ad esclusione del suo articolo 4.", 0),
+    # ...ma in un elenco appartiene alla sola voce che la porta.
+    ("Sono abrogati: la Legge 29 settembre 2014 n.147; il Decreto Delegato "
+     "5 maggio 2015 n.62 ad esclusione dell'articolo 7.", 1),
+    # l'atto nominato come MODIFICANTE non e' un bersaglio, e' lo strumento
+    ("Sono abrogate la Legge 16 dicembre 1976, n.76 - modificata con Legge "
+     "28 gennaio 1982, n.14 - e tutte le norme in contrasto.", 1),
+    # PARTE va guardata sulla porzione agganciata, non su tutto il comma: qui
+    # "articolo" compare per tutt'altro motivo e l'abrogazione e' piena.
+    ("Resta ferma la disposizione transitoria dell'articolo 28, "
+     "è abrogata la Legge 21 ottobre 1988 n. 105.", 1),
+    # ...ma resta necessaria: qui il bersaglio vero e' il punto, non la legge.
+    ("All'articolo 2 della Legge n.55/1994, il punto 8.0 è abrogato.", 0),
     # Anche "a partire dal" e' un differimento, e mancava: l'esito era giusto
     # solo perche' la data e' passata da quarant'anni. Un "a partire dal 2030"
     # avrebbe marcato oggi come morta una legge ancora viva.
@@ -270,11 +348,23 @@ APOSTROFI = str.maketrans({"’": "'", "‘": "'", "ʼ": "'"})
 def bersagli(testo):
     """Gli atti interi che questo comma abroga senza ambiguita'. Quasi sempre zero."""
     testo = testo.translate(APOSTROFI)
-    if PARTE.search(testo) or DIFFERITA.search(testo) or SALVEZZA.search(testo):
+    if DIFFERITA.search(testo) or SALVEZZA.search(testo):
         return []
     trovate = []
     for espressione in (AVANTI, INDIETRO):
-        trovate.extend(espressione.finditer(testo))
+        for m in espressione.finditer(testo):
+            # PARTE si guarda sulla PORZIONE agganciata, non su tutto il comma.
+            # Serve ancora: INDIETRO abbraccia il tratto fra l'atto e il verbo,
+            # e in "la Legge n.55/1994, il punto 8.0 e' abrogato" quel tratto
+            # contiene il vero bersaglio, che e' il punto e non la legge.
+            # Ma applicarla all'intero comma rifiutava anche le abrogazioni
+            # piene che avevano la parola "articolo" altrove per tutt'altro
+            # motivo: "la disposizione transitoria dell'articolo 28, e'
+            # abrogata la Legge n.105/1988" e' un'abrogazione totale, e veniva
+            # scartata perche' trenta caratteri prima compariva "articolo".
+            if PARTE.search(m.group(0)) or _escluso(testo, m.end()):
+                continue
+            trovate.append(m)
     for coda in PLURALE.finditer(testo):
         elenco = coda.group(1)
         atti = list(UNO.finditer(elenco))
@@ -292,6 +382,8 @@ def bersagli(testo):
             continue
         for m in atti:
             if PARTITIVO.search(elenco[max(0, m.start() - LOOKBACK):m.start()]):
+                continue
+            if _escluso(elenco, m.end()):
                 continue
             trovate.append(m)
 
@@ -322,6 +414,12 @@ PROVE_ARTICOLO = [
     ("L'articolo 3 della Legge n.55/1994 è abrogato e sostituito dal seguente.", 0),
     ("L'articolo 14 del DD n.111/2021 è abrogato dall'entrata in vigore del presente.", 0),
     ("Sono abrogati gli articoli 4 e 5 della Legge 19 aprile 2014 n.71.", 0),
+    # La direzione opposta, che prima non veniva letta affatto.
+    ("È abrogato l'articolo 1-bis del Decreto Delegato 18 luglio 2025 n.97.", 1),
+    ("È abrogato l'articolo 8 della Legge 24 novembre 1887.", 1),
+    # ...ma l'articolo di un ALLEGATO non e' un articolo dell'atto.
+    ("È abrogato l'articolo 27 dell'Allegato A alla Legge n.188/2011.", 0),
+    ("È abrogato l'articolo 5, comma 2, della Legge n.188/2011.", 0),
 ]
 PROVE_COMMA = [
     ("Il comma 3 dell'articolo 3 della Legge n.92/2008 è abrogato.", [("3", "3")]),
@@ -340,7 +438,8 @@ def prova():
     esiti = [(t, str(atteso), str(len(bersagli(t)))) for t, atteso in PROVE]
     esiti += [(t, str(atteso), str(len(articoli_abrogati(t))))
               for t, atteso in PROVE_ARTICOLO]
-    esiti += [(t, str(atteso), str(commi_abrogati(t))) for t, atteso in PROVE_COMMA]
+    esiti += [(t, str(atteso), str([(c, a) for c, a, _ in commi_abrogati(t)]))
+              for t, atteso in PROVE_COMMA]
     for t, atteso, letto in esiti:
         print(f"    {'ok  ' if letto == atteso else 'NO  '} atteso={atteso} "
               f"letto={letto}  {t[:60]}")
@@ -416,7 +515,7 @@ def parziali(g):
            OR toLower(c.testo) CONTAINS 'e’ abrogat'
         MATCH (c)-[:CITA_ARTICOLO]->(a:Articolo)<-[:HA_ARTICOLO]-(b:Norma)
         MATCH (c)<-[:HA_COMMA]-(:Articolo)<-[:HA_ARTICOLO]-(f:Norma)
-        WITH c, f, collect(DISTINCT {norma: b.id, anno: b.anno,
+        WITH c, f, collect(DISTINCT {norma: b.id, anno: b.anno, num: b.numero,
                                      art: a.numero, artId: a.id}) AS bersagli
         RETURN c.id AS comma, c.testo AS testo, f.id AS fonte,
                f.anno AS anno, bersagli
@@ -424,23 +523,37 @@ def parziali(g):
     print(f"\n  commi abroganti con un arco CITA_ARTICOLO: {len(righe)}")
 
     art, com, scarti = [], [], {"numero non corrisponde all'arco": 0,
-                                "verso invertito": 0, "comma inesistente": 0}
+                                "verso invertito": 0, "comma inesistente": 0,
+                                "l'arco punta a un atto che la frase non nomina": 0}
     for r in righe:
         testo = " ".join((r["testo"] or "").split())
         numeri = articoli_abrogati(testo)
         coppie = commi_abrogati(testo)
         if not numeri and not coppie:
             continue
+        # Verificare il solo numero d'articolo non basta. Misurato: "E'
+        # abrogato l'articolo 5 della legge 13 luglio 1962 n. 22" portava DUE
+        # archi, a L-22-1962 art.5 - giusto - e a L-13-1922 art.5, un arco
+        # sbagliato gia' presente nel grafo che il numero d'articolo da solo
+        # non smascherava. L'atto a cui l'arco punta dev'essere fra quelli che
+        # la frase nomina.
         for b in r["bersagli"]:
             numero = str(b["art"]).strip()
+            atto = (b["num"], b["anno"])
             if (b["anno"] or 0) > (r["anno"] or 0):
                 scarti["verso invertito"] += 1
                 continue
             if numero in numeri:
-                art.append({"fonte": r["fonte"], "bersaglio": b["norma"],
-                            "artId": b["artId"], "art": numero, "testo": testo})
-            for numc, numa in coppie:
+                if numeri[numero] and atto not in numeri[numero]:
+                    scarti["l'arco punta a un atto che la frase non nomina"] += 1
+                else:
+                    art.append({"fonte": r["fonte"], "bersaglio": b["norma"],
+                                "artId": b["artId"], "art": numero, "testo": testo})
+            for numc, numa, atti in coppie:
                 if numa != numero:
+                    continue
+                if atti and atto not in atti:
+                    scarti["l'arco punta a un atto che la frase non nomina"] += 1
                     continue
                 # il comma dev'esistere davvero dentro quell'articolo: se il
                 # testo nomina un comma 7 e l'articolo ne ha sei, il
