@@ -86,25 +86,46 @@ Nel nostro Knowledge Graph, le rubriche svolgono due funzioni cruciali:
 
 | Entità / Label | Quantità | Ruolo nel Modello |
 |---|---|---|
-| **`:Comma`** | **`180.932`** | Unità atomica di testo, ricerca semantica e retrieval |
+| **`:Comma`** | **`181.248`** | Unità atomica di testo, ricerca semantica e retrieval |
 | **`:Articolo`** | **`74.742`** | Articoli con rubriche, capi e collocazione tematica |
 | **`:Norma`** | **`12.248`** | Tutti gli atti normativi censiti: |
 | ↳ *con testo integrale (`caricata: true`)* | *`11.134`* | *Su 11.136 scaricabili dal portale, 16 tipologie* |
 | ↳ *stub citati (`caricata: false`)* | *`1.114`* | *Atti richiamati nei testi per tracciare i rinvii* |
 | **`:Allegato`** | **`519`** | Tabelle, cartografie e allegati normativi |
-| **TOTALE NODI** | **`268.441`** | |
+| **TOTALE NODI** | **`268.757`** | |
 
 ### Relazioni (Archi)
 
 | Relazione | Quantità | Direzione | Significato |
 |---|---|---|---|
-| **`HA_COMMA`** | **`180.932`** | `Articolo ➔ Comma` | Contenimento strutturale |
+| **`HA_COMMA`** | **`181.248`** | `Articolo ➔ Comma` | Contenimento strutturale |
 | **`HA_ARTICOLO`** | **`74.742`** | `Norma ➔ Articolo` | Contenimento strutturale |
 | **`CITA`** | **`69.662`** | `(Comma/Norma) ➔ Norma` | Rinvio normativo formale |
 | **`CITA_ARTICOLO`** | **`16.763`** | `Comma ➔ Articolo` | Rinvio puntuale ad articolo specifico risolto |
 | **`HA_ALLEGATO`** | **`519`** | `Norma ➔ Allegato` | Presenza di allegato tecnico |
 | **`ABROGA`** | **`189`** | `Norma ➔ Norma` | Abrogazione di un atto per intero, riconosciuta senza ambiguità |
-| **TOTALE ARCHI** | **`342.807`** | | |
+| **TOTALE ARCHI** | **`343.123`** | | |
+
+I `:Comma` erano 180.932 fino alla riparazione del parser: i **316 in più** sono
+il testo che si perdeva su 312 articoli, dove il buffer della rubrica non si
+chiudeva su `)` seguito da punteggiatura. Il conteggio dei nodi per etichetta
+somma a 281.005 e non a 268.757 perché ogni `:Norma` ne porta due — quella
+generica e quella del tipo (`:Legge`, `:DecretoDelegato`, e così via).
+
+### Marcature di vigenza
+
+Non sono relazioni ma proprietà sui nodi, ed è una scelta: la lettura le trova
+sul nodo che ha già in mano, senza un `MATCH` in più su ogni ricerca.
+
+| Proprietà | Su | Quantità | Significato |
+|---|---|---:|---|
+| `Norma.abrogata` / `abrogataDa` | `:Norma` | **279** | L'atto è caduto per intero |
+| `Articolo.abrogato` / `abrogatoDa` | `:Articolo` | **49** | Articolo soppresso dentro un atto vivo |
+| `Comma.abrogato` / `abrogatoDa` | `:Comma` | **26** | Comma soppresso dentro un atto vivo |
+
+Le si ricalcola da zero a ogni esecuzione di `src/08_abrogazioni.py --scrivi`,
+archi `ABROGA` compresi: senza cancellarli prima, un arco che smette di essere
+riconosciuto sopravvive alla correzione del filtro che lo escludeva.
 
 #### `ABROGA`, e perché è così piccolo
 
