@@ -95,13 +95,21 @@ Rispondi consultando esclusivamente il grafo della normativa attraverso gli stru
    Esempio: "...come previsto dalla L. 87/2026, art. 7, comma
    2{{cita:L-87-2026:7:2}}, che stabilisce..."
 
-   **Il marcatore vale solo per cio' che hai LETTO da uno strumento.** Alcuni
-   campi ti danno l'identificativo di un atto senza dartene il testo -
-   `abrogataDa`, `passoAbrogatoDa`, `ancheIn`, `novellataDa`: quello e' un
-   riferimento, non una fonte consultata. Nominalo pure in prosa - "abrogata
-   dalla L. 145/2022" - ma non metterci un marcatore, oppure aprilo prima con
-   leggi_articolo(). Un marcatore senza riscontro viene scartato in silenzio, e
-   chi legge vede una citazione in meno senza sapere perche'.
+   **OGNI atto che nomini nella risposta deve avere il suo marcatore.** Se
+   nella prosa scrivi "L. 145/2022", "il Decreto Delegato 146/2023", "la Legge
+   sulle societa'", quel riferimento dev'essere cliccabile: senza marcatore
+   resta testo morto, e chi legge non puo' verificarlo ne' aprirne il PDF.
+
+   Il marcatore pero' vale solo per cio' che hai LETTO da uno strumento, e
+   alcuni campi ti danno un identificativo senza il testo - `abrogataDa`,
+   `passoAbrogatoDa`, `ancheIn`, `novellataDa`. Le due regole insieme dicono una
+   cosa sola: **se stai per nominare un atto che non hai ancora aperto, aprilo
+   prima**, con trova_norma() se ti basta identificarlo o con leggi_articolo()
+   se ne citi un passo. Una chiamata in piu' costa mezzo centesimo; una
+   citazione che non si puo' aprire costa la verificabilita' della risposta.
+
+   Se davvero non puoi aprirlo - non e' in archivio - allora dillo invece di
+   nominarlo e basta: "il testo della L. 59/1974 non e' in archivio".
 
 3. **Se non trovi, dillo.** Se gli strumenti non restituiscono nulla di
    pertinente, dichiara che l'archivio non contiene la risposta. Non colmare il
@@ -140,12 +148,12 @@ Rispondi consultando esclusivamente il grafo della normativa attraverso gli stru
    `abrogataDa` lo riporta, e cerca la disciplina che l'ha sostituita. Puoi
    citarlo solo per dire cosa prevedeva e che non vale piu'.
 
-   **L'atto abrogante nominalo SENZA marcatore**, a meno che tu non l'abbia
-   davvero aperto. `abrogataDa` ti da' un identificativo, non un testo letto:
-   scrivi "abrogata dalla L. 145/2022" e basta. Se vuoi citarlo per davvero,
-   prima aprilo con leggi_articolo() o cerca_testo() - allora il marcatore avra'
-   un riscontro. Un marcatore su un atto che non hai letto viene scartato in
-   silenzio e chi legge perde una citazione senza sapere perche'.
+   **L'atto abrogante va aperto, non solo nominato.** `abrogataDa` ti da' un
+   identificativo, non un testo: chiamaci trova_norma() prima di scriverlo, cosi'
+   la citazione diventa cliccabile e chi legge puo' arrivare all'atto che ha
+   sostituito quello caduto. E' il passo che rende utile l'avviso: dire "e'
+   abrogata" lascia l'utente a meta' strada, dire "e' abrogata dalla L. 145/2022"
+   con il riferimento aperto lo porta a destinazione.
 
    **`passoAbrogato` colpisce piu' in piccolo e piu' spesso.** Dice che quel
    singolo articolo, o quel singolo comma, e' stato soppresso dentro un atto
@@ -374,6 +382,80 @@ CITAZIONI = [
     re.compile(r"\b[A-Z]{1,3}-(\d{1,4})-((?:19|20)\d{2})\b"),
 ]
 
+MARCATORE = re.compile(r"\{\{cita:[^{}]*\}\}")
+
+
+def _ancora_gli_atti(testo, fonti):
+    """Rende cliccabile ogni atto nominato nella prosa, se la fonte esiste.
+
+    Chiedere al modello di non dimenticarsi un marcatore e' chiedergli di fare
+    contabilita', e la contabilita' si fa nel codice: misurato su quattro
+    domande, nominava da uno a due atti per risposta senza il marcatore, e chi
+    legge si trovava un riferimento che non si puo' aprire.
+
+    Si aggiunge il marcatore SOLO se fra le fonti c'e' davvero quell'atto. Se
+    non c'e', il riferimento resta testo semplice: e' la stessa garanzia che il
+    frontend applica scartando i marcatori senza riscontro, e vale la pena
+    ripeterla qui invece di allentarla.
+    """
+    if not fonti:
+        return testo
+    # Per ogni atto si tiene una fonte RAPPRESENTATIVA, non solo il suo id: il
+    # marcatore dev'essere (norma, articolo, comma) di una fonte davvero
+    # presente, altrimenti il frontend lo scarta. Si preferisce la fonte a
+    # livello d'atto - articolo "-" - perche' e' quella che corrisponde a un
+    # riferimento nominato in prosa senza articolo; se non c'e', va bene la
+    # prima, che porta comunque al pannello e al PDF dell'atto giusto.
+    per_atto = {}
+    for f in fonti:
+        pezzi = str(f.get("norma") or "").split("-")
+        if len(pezzi) < 3 or not pezzi[1].isdigit():
+            continue
+        chiave = (pezzi[1], pezzi[2].split("~")[0])
+        precedente = per_atto.get(chiave)
+        migliore = (precedente is None
+                    or (str(f.get("articolo")) == "-" and str(precedente[1]) != "-")
+                    or ("~" not in str(f["norma"]) and "~" in str(precedente[0])))
+        if migliore:
+            per_atto[chiave] = (f["norma"], f.get("articolo"), f.get("comma"))
+    if not per_atto:
+        return testo
+
+    # I marcatori gia' presenti si mascherano con spazi PRIMA di cercare: il
+    # riferimento vive anche dentro il marcatore - {{cita:L-145-2022:-:-}} - e
+    # senza mascherarlo se ne agganciava uno dentro l'altro. Gli spazi hanno la
+    # stessa lunghezza, cosi' le posizioni restano valide sul testo originale.
+    mascherato = MARCATORE.sub(lambda m: " " * len(m.group(0)), testo)
+
+    fuori, fine = [], 0
+    # si raccolgono tutte le occorrenze, poi si inseriscono da sinistra a destra
+    trovate = []
+    for i, espressione in enumerate(CITAZIONI):
+        for m in espressione.finditer(mascherato):
+            numero, anno = ((m.group(2), m.group(1)) if i == 2
+                            else (m.group(1), m.group(2)))
+            trovate.append((m.start(), m.end(), numero, anno))
+    for inizio, termine, numero, anno in sorted(trovate):
+        if inizio < fine:
+            continue                      # gia' coperta da un aggancio precedente
+        rif = per_atto.get((numero, anno))
+        if not rif:
+            continue                      # non fra le fonti: resta testo semplice
+        if testo[termine:termine + 2] == "{{":
+            continue                      # il modello l'ha gia' messo. Non si
+                                          # avanza `fine`: il testo saltato deve
+                                          # comunque finire nell'uscita, o la
+                                          # prosa davanti al marcatore sparisce.
+        norma, articolo, comma = rif
+        articolo = "-" if articolo in (None, "") else str(articolo)
+        comma = "-" if comma in (None, "") else str(comma)
+        fuori.append(testo[fine:termine]
+                     + f"{{{{cita:{norma}:{articolo}:{comma}}}}}")
+        fine = termine
+    fuori.append(testo[fine:])
+    return "".join(fuori)
+
+
 def _citazioni_non_verificate(testo, norme_viste):
     """Le norme citate nella risposta che nessuno strumento ha restituito.
 
@@ -483,7 +565,7 @@ def _fonti_da(nome_strumento, risultato):
                 "norma": r.get("id"), "titoloNorma": r.get("titolo"),
                 "articolo": "-", "comma": "-",
                 "testo": r.get("titolo") or "",
-                "haDocumento": False,
+                "haDocumento": bool(r.get("urlDocumento")),
                 "abrogata": bool(r.get("abrogata")),
                 "abrogataDa": r.get("abrogataDa") or [],
             })
@@ -499,7 +581,7 @@ def _fonti_da(nome_strumento, risultato):
                 # La struttura porta la rubrica, non il testo: e' cio' che
                 # l'agente ha davvero letto, e non si finge di piu'.
                 "testo": a.get("rubrica") or "",
-                "haDocumento": False,
+                "haDocumento": bool(risultato.get("urlDocumento")),
             })
     return fonti
 
@@ -628,7 +710,9 @@ def rispondi(domanda, conversazione=None):
         return
 
     if blocchi_testo:
-        yield {"tipo": "testo", "testo": SEPARATORE.join(blocchi_testo)}
+        yield {"tipo": "testo",
+               "testo": _ancora_gli_atti(SEPARATORE.join(blocchi_testo),
+                                         fonti_raccolte)}
 
     if fonti_raccolte:
         yield {"tipo": "fonti", "fonti": fonti_raccolte}

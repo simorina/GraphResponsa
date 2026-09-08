@@ -268,18 +268,47 @@ def conversazione(conversazione: str, utente: Utente = Depends(utente_corrente))
     if not archivio.appartiene(utente.id, conversazione):
         raise HTTPException(status_code=403, detail="Conversazione non tua.")
 
-    from agente.agente import agente
+    from agente.agente import _ancora_gli_atti, _fonti_da, agente
     stato = agente().get_state({"configurable": {"thread_id": conversazione}})
     messaggi = []
+    # Le fonti si ricostruiscono dai ToolMessage del checkpoint, esattamente
+    # come fa rispondi() dal vivo. Senza, il frontend scarta ogni marcatore -
+    # non ha modo di sapere se corrisponde a qualcosa - e ricaricando la pagina
+    # le citazioni sparivano dalla risposta, che restava giusta ma non piu'
+    # verificabile. Il testo non basta: la citazione e' testo PIU' fonte.
+    fonti, viste = [], set()
     for m in (stato.values or {}).get("messages", []):
-        ruolo = {"human": "user", "ai": "assistant"}.get(getattr(m, "type", ""), None)
+        tipo = getattr(m, "type", "")
+        if tipo == "tool":
+            esito = m.content
+            if isinstance(esito, str):
+                try:
+                    esito = json.loads(esito)
+                except (ValueError, TypeError):
+                    pass
+            for f in _fonti_da(getattr(m, "name", "") or "", esito):
+                chiave = (f["norma"], f["articolo"], f["comma"])
+                if chiave not in viste:
+                    viste.add(chiave)
+                    fonti.append(f)
+            continue
+        ruolo = {"human": "user", "ai": "assistant"}.get(tipo, None)
         if not ruolo:
             continue
         contenuto = m.content
         if isinstance(contenuto, list):
             contenuto = "".join(b.get("text", "") for b in contenuto
                                 if isinstance(b, dict) and b.get("type") == "text")
-        if contenuto:
+        if not contenuto:
+            continue
+        if ruolo == "assistant":
+            # Lo stesso ancoraggio del percorso dal vivo: il checkpoint
+            # conserva il testo grezzo del modello, non quello gia' ancorato.
+            messaggi.append({"role": ruolo,
+                             "content": _ancora_gli_atti(contenuto, fonti),
+                             "fonti": fonti})
+            fonti, viste = [], set()
+        else:
             messaggi.append({"role": ruolo, "content": contenuto})
     return {"conversazione": conversazione, "messaggi": messaggi}
 

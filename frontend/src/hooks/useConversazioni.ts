@@ -1,3 +1,4 @@
+import type { Fonte } from '../types';
 import { useCallback, useEffect, useState } from 'react';
 import { token } from '../auth/cognito';
 
@@ -73,5 +74,11 @@ export async function caricaConversazione(id: string) {
   });
   if (!r.ok) throw new Error(`Il server ha risposto ${r.status}.`);
   const d = await r.json();
-  return (d.messaggi ?? []) as { role: 'user' | 'assistant'; content: string }[];
+  // Le fonti arrivano insieme al testo: senza, il renderer scarta i marcatori
+  // e ricaricando la pagina le citazioni sparivano dalla risposta.
+  return (d.messaggi ?? []) as {
+    role: 'user' | 'assistant';
+    content: string;
+    fonti?: Fonte[];
+  }[];
 }

@@ -1,5 +1,5 @@
 import { useState, useRef } from 'react';
-import { Message } from '../types';
+import { Message, Fonte } from '../types';
 import { token } from '../auth/cognito';
 
 export function useChat() {
@@ -26,9 +26,9 @@ export function useChat() {
   };
 
   /** Riapre una consultazione passata: i messaggi arrivano dal checkpoint. */
-  const apriConversazione = (id: string, messaggi: {role:'user'|'assistant'; content:string}[]) => {
+  const apriConversazione = (id: string, messaggi: {role:'user'|'assistant'; content:string; fonti?: Fonte[]}[]) => {
     if (loading && abortControllerRef.current) abortControllerRef.current.abort();
-    setMessages(messaggi.map((m) => ({ ...m, isStreaming: false })));
+    setMessages(messaggi.map((m) => ({ ...m, fonti: m.fonti ?? [], isStreaming: false })));
     setConversazione(id);
     localStorage.setItem('gr_conv_id', id);
     const prima = messaggi.find((m) => m.role === 'user')?.content ?? 'Consultazione';

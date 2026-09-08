@@ -733,6 +733,7 @@ def struttura_norma(norma_id: str) -> dict:
     testa = grafo().query("""
         MATCH (n:Norma {id: $norma_id})
         RETURN n.id AS id, n.titolo AS titolo, n.tipo AS tipo,
+               n.urlDocumento AS urlDocumento,
                n.caricata AS testoDisponibile,
                toString(n.dataEntrataVigore) AS inVigoreDal,
                toString(n.data) AS dataAtto
@@ -781,7 +782,8 @@ def trova_norma(numero: int | None = None, anno: int | None = None,
                    n.titolo AS titolo, n.caricata AS testoDisponibile,
                    toString(n.dataEntrataVigore) AS inVigoreDal,
                    toString(n.data) AS dataAtto,
-                   n.urlScheda AS urlScheda, articoli,
+                   n.urlScheda AS urlScheda, n.urlDocumento AS urlDocumento,
+                   articoli,
                    n.abrogata AS abrogata, n.abrogataDa AS abrogataDa
             ORDER BY n.anno DESC LIMIT 10
         """, {"numero": int(numero), "anno": int(anno) if anno else None, "tipo": tipo})
@@ -796,7 +798,8 @@ def trova_norma(numero: int | None = None, anno: int | None = None,
                    node.caricata AS testoDisponibile,
                    toString(node.dataEntrataVigore) AS inVigoreDal,
                    toString(node.data) AS dataAtto,
-                   node.urlScheda AS urlScheda, articoli,
+                   node.urlScheda AS urlScheda, node.urlDocumento AS urlDocumento,
+                   articoli,
                    node.abrogata AS abrogata, node.abrogataDa AS abrogataDa
             ORDER BY score DESC LIMIT 10
         """, {"testo": _lucene(testo)})
