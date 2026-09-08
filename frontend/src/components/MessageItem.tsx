@@ -100,32 +100,6 @@ export const MessageItem: React.FC<MessageItemProps> = ({
           </div>
         )}
 
-        {fonti.length > 0 && (
-          <div className="mt-5 border-t border-line pt-3.5">
-            <div className="mb-2.5 text-[12.5px] font-medium text-ink-2">
-              Disposizioni citate <span className="font-mono text-ink-3">{fonti.length}</span>
-            </div>
-            <div className="flex flex-wrap gap-1.5">
-              {fonti.map((f, i) => (
-                <button
-                  key={`${f.norma}-${f.articolo}-${f.comma}-${i}`}
-                  onClick={() => onSelectSource(f)}
-                  title={f.titoloNorma || undefined}
-                  className="slide-in flex items-baseline gap-1.5 rounded-lg border border-line bg-canvas px-2.5 py-1 font-mono text-[11px] transition-all duration-200 ease-[cubic-bezier(0.16,1,0.3,1)] hover:-translate-y-px hover:border-dorato-2 hover:bg-alloro-3/40 active:translate-y-0"
-                  style={{ ['--i' as string]: Math.min(i, 12) }}
-                >
-                  <span className="text-ink-2">{f.norma}</span>
-                  <span className="text-alloro">
-                    {f.articolo}
-                    <span className="text-ink-3">.</span>
-                    {f.comma}
-                  </span>
-                </button>
-              ))}
-            </div>
-          </div>
-        )}
-
         {!message.isStreaming && message.content && (
           <div className="mt-3 flex flex-col items-start gap-1">
             <div className="flex items-center gap-1">
