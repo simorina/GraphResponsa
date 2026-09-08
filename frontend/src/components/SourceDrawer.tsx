@@ -54,8 +54,20 @@ export const SourceDrawer: React.FC<SourceDrawerProps> = ({ source, onClose }) =
         </div>
 
         <div className="min-h-0 flex-1 overflow-y-auto px-6 py-6">
-          {(source.abrogata || source.novellataDa?.length || source.ancheIn?.length) ? (
+          {(source.abrogata || source.passoAbrogato || source.novellataDa?.length || source.ancheIn?.length) ? (
             <div className="mb-5 flex flex-col gap-2">
+              {source.passoAbrogato ? (
+                <div className="rounded-md border border-rosso bg-rosso-2 px-3.5 py-2.5">
+                  <div className="mb-1 text-[11px] font-semibold text-rosso">
+                    Questo passo è stato abrogato
+                  </div>
+                  <div className="text-[12px] leading-relaxed text-ink-2">
+                    {source.passoAbrogatoDa?.length
+                      ? <>Soppresso da <span className="font-mono">{source.passoAbrogatoDa.join(' · ')}</span>. L'atto che lo contiene resta in vigore, questo passo no.</>
+                      : <>L'atto che lo contiene resta in vigore, questo passo no.</>}
+                  </div>
+                </div>
+              ) : null}
               {source.abrogata ? (
                 <div className="rounded-md border border-rosso bg-rosso-2 px-3.5 py-2.5">
                   <div className="mb-1 text-[11px] font-semibold text-rosso">

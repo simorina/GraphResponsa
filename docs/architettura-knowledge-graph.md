@@ -159,9 +159,33 @@ fuori, in ordine di frequenza:
 
 | Non coperto | Perché |
 |---|---|
-| **Abrogazione parziale** — un articolo o un comma soppressi dentro una legge che per il resto vive | È il caso di gran lunga più frequente, e la granularità è dove il riconoscimento sbaglia |
 | **Forme illeggibili** — 1.579 commi su 1.728 | Bersagli impliciti, rinvii a «norme in contrasto», elenchi non strutturati |
+| **Partizioni sotto il comma** — «la lettera d), comma 1, dell'articolo 3» | Il grafo non modella lettere e punti: non c'è nodo da marcare |
 | **Abrogazione tacita** — una legge posteriore incompatibile con una anteriore, senza dirlo | Nessun metodo testuale può trovarla |
+
+#### Il livello parziale: `Articolo.abrogato` e `Comma.abrogato`
+
+Un articolo o un comma soppressi dentro una legge che per il resto vige sono il
+caso più frequente e il più insidioso: l'atto risulta in vigore, il testo del
+passo si legge intero e sensato, e **nulla in esso avverte che non vale più**.
+L'archivio di Stato conserva gli atti come furono pubblicati e non li riscrive —
+non è un testo consolidato — quindi in un testo vigente quell'articolo direbbe
+«(Abrogato)», qui invece resta scritto per esteso. Verificato: su 74.742
+articoli, **uno solo** ha la rubrica `(Abrogato)`.
+
+Qui però il bersaglio non va indovinato: l'arco `CITA_ARTICOLO` esiste già e lo
+indica, e resta da verificare che il numero scritto coincida con quello a cui
+l'arco punta — su 35 coppie d'articolo, **zero discordanze**. Si marcano così
+**25 articoli** e **26 commi**, con `abrogato` e `abrogatoDa`, esposti al
+modello come `passoAbrogato`.
+
+Il numero è piccolo perché solo **433 commi abroganti su 1.728** hanno un arco,
+e di quelli la maggioranza scende ancora più in basso. Due trappole specifiche
+di questo livello: *«è abrogato **e sostituito** dal seguente»* non è
+un'abrogazione ma una novella — l'articolo resta, riscritto — e il divario fra
+«articolo N» e «è abrogato» non deve **scavalcare un confine di frase**, perché
+in *«…della Legge n.40/2014 e successive modifiche. 3 bis. E' abrogato…»*
+l'espressione agganciava un verbo che apparteneva alla frase seguente.
 
 **Il rischio non è l'arco sbagliato, è l'arco assente.** Con l'1,6% di
 copertura, l'assenza del marchio non dimostra nulla, ma un indice rado invita a

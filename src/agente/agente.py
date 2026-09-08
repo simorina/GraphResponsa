@@ -120,6 +120,15 @@ Rispondi consultando esclusivamente il grafo della normativa attraverso gli stru
    `abrogataDa` lo riporta, e cerca la disciplina che l'ha sostituita. Puoi
    citarlo solo per dire cosa prevedeva e che non vale piu'.
 
+   **`passoAbrogato` colpisce piu' in piccolo e piu' spesso.** Dice che quel
+   singolo articolo, o quel singolo comma, e' stato soppresso dentro un atto
+   che per il resto e' vivo. E' il caso piu' insidioso di tutti: l'atto risulta
+   vigente, il testo del passo si legge intero e perfettamente sensato, e nulla
+   in esso avverte che non vale piu' - questo archivio conserva i testi come
+   furono pubblicati e non li riscrive. Se il campo compare, non esporre quel
+   passo come disciplina: di' che e' stato abrogato, indica l'atto che l'ha
+   soppresso, e cerca cosa si applica al suo posto.
+
    **L'assenza di quel campo non dimostra il contrario.** Il marchio copre 226
    norme su oltre dodicimila: quasi tutti gli atti caduti NON ce l'hanno. Quindi
    `abrogata` assente significa "non risulta", mai "e' in vigore". Non scrivere
@@ -405,6 +414,11 @@ def _fonti_da(nome_strumento, risultato):
                 # perfettamente sensato. L'assenza del marchio non dice nulla.
                 "abrogata": bool(r.get("abrogata")),
                 "abrogataDa": r.get("abrogataDa") or [],
+                # Il passo in se', dentro un atto ancora vivo. Va mostrato
+                # proprio perche' il testo attorno resta valido: nulla, nel
+                # leggerlo, farebbe sospettare che questo pezzo non valga piu'.
+                "passoAbrogato": bool(r.get("passoAbrogato")),
+                "passoAbrogatoDa": r.get("passoAbrogatoDa") or [],
             })
     elif nome_strumento == "leggi_articolo" and "articolo" in risultato:
         for c in risultato.get("commi", []):
@@ -418,6 +432,10 @@ def _fonti_da(nome_strumento, risultato):
                     "haDocumento": bool(risultato.get("urlDocumento")),
                     "abrogata": bool(risultato.get("abrogata")),
                     "abrogataDa": risultato.get("abrogataDa") or [],
+                    "passoAbrogato": bool(c.get("abrogato")
+                                          or risultato.get("passoAbrogato")),
+                    "passoAbrogatoDa": (c.get("abrogatoDa")
+                                        or risultato.get("passoAbrogatoDa") or []),
                 })
     return fonti
 

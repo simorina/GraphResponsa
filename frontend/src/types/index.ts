@@ -10,6 +10,11 @@ export interface Fonte {
   abrogata?: boolean;
   /** Gli atti che l'hanno abrogato, quando il grafo li conosce. */
   abrogataDa?: string[];
+  /** Questo singolo articolo o comma e' stato soppresso, dentro un atto che
+   *  per il resto resta in vigore. Il testo si legge intero: l'archivio non
+   *  e' consolidato e non riscrive i passi caduti. */
+  passoAbrogato?: boolean;
+  passoAbrogatoDa?: string[];
   articolo: string | number;
   rubrica?: string;
   comma: string | number;

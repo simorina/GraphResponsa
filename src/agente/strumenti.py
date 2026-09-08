@@ -281,7 +281,9 @@ RETURN norma.id AS normaId, norma.titolo AS normaTitolo, norma.anno AS anno,
        art.titolo AS partizioneTitolo, art.capoRubrica AS partizioneCapo,
        node.numero AS comma, node.testo AS testo,
        norma.urlDocumento AS urlDocumento,
-       norma.abrogata AS abrogata, norma.abrogataDa AS abrogataDa
+       norma.abrogata AS abrogata, norma.abrogataDa AS abrogataDa,
+       coalesce(node.abrogato, art.abrogato) AS passoAbrogato,
+       coalesce(node.abrogatoDa, art.abrogatoDa) AS passoAbrogatoDa
 ORDER BY score DESC
 """
 
@@ -301,7 +303,8 @@ RETURN norma.id AS normaId, norma.titolo AS normaTitolo, norma.anno AS anno,
        art.titolo AS partizioneTitolo, art.capoRubrica AS partizioneCapo,
        null AS comma, art.testo AS testo,
        norma.urlDocumento AS urlDocumento,
-       norma.abrogata AS abrogata, norma.abrogataDa AS abrogataDa
+       norma.abrogata AS abrogata, norma.abrogataDa AS abrogataDa,
+       art.abrogato AS passoAbrogato, art.abrogatoDa AS passoAbrogatoDa
 ORDER BY score DESC
 """
 
@@ -527,8 +530,15 @@ def cerca_testo(query: str, limite: int = 8, dal_anno: int | None = None) -> dic
     Se un risultato ha `troncato: true` il testo mostrato e' tagliato: per il
     contenuto completo chiama leggi_articolo().
 
-    Il campo `abrogata` e' l'unico che vince su tutto: se e' true, quell'atto
-    e' stato abrogato per intero e non e' piu' diritto vigente, per quanto il
+    Il campo `passoAbrogato` dice che PROPRIO QUESTO articolo o comma e' stato
+    soppresso, dentro un atto che per il resto resta in vigore. E' il caso piu'
+    insidioso: il testo si legge intero e sensato, e nulla in esso avverte che
+    non vale piu', perche' questo archivio conserva gli atti come furono
+    pubblicati e non li riscrive. Non citarlo come disciplina: di' che e' stato
+    abrogato, indica `passoAbrogatoDa`, e cerca cosa si applica al suo posto.
+
+    Il campo `abrogata` riguarda invece l'atto INTERO: se e' true, quell'atto
+    e' stato abrogato tutto e non e' piu' diritto vigente, per quanto il
     testo si legga bene. Dillo in apertura, cita `abrogataDa` se c'e', e cerca
     la disciplina che l'ha sostituito. L'assenza del campo non prova nulla in
     senso contrario: il marchio copre 226 norme su oltre dodicimila.
@@ -602,7 +612,9 @@ def leggi_articolo(norma_id: str, numero: str) -> dict:
 
     Porta gli stessi marchi di vigenza di cerca_testo, e vanno letti prima di
     citare: `abrogata` (l'atto e' caduto per intero: non e' piu' vigente, e
-    l'assenza del campo non dimostra che lo sia), `citatoDaAttiSuccessivi` (un atto posteriore cita questo articolo,
+    l'assenza del campo non dimostra che lo sia), `passoAbrogato` sull'articolo
+    e `abrogato` sul singolo comma (quella partizione e' stata soppressa dentro
+    un atto ancora vivo), `citatoDaAttiSuccessivi` (un atto posteriore cita questo articolo,
     e qui citare significa quasi sempre modificare) e `versionePiuRecente` (un
     atto posteriore ha un articolo con la stessa rubrica, cioe' quasi sempre la
     stessa disposizione riscritta). Se uno dei due compare, la catena non
@@ -623,7 +635,9 @@ def leggi_articolo(norma_id: str, numero: str) -> dict:
                a.titolo AS partizioneTitolo, a.capoRubrica AS partizioneCapo,
                n.urlDocumento AS urlDocumento,
                n.abrogata AS abrogata, n.abrogataDa AS abrogataDa,
-               collect({numero: c.numero, testo: c.testo}) AS commi
+               a.abrogato AS passoAbrogato, a.abrogatoDa AS passoAbrogatoDa,
+               collect({numero: c.numero, testo: c.testo,
+                        abrogato: c.abrogato, abrogatoDa: c.abrogatoDa}) AS commi
     """, {"norma_id": norma_id, "numero": str(numero)})
     if not righe:
         # Un vicolo cieco costringe a indovinare, e indovinare costa un giro
