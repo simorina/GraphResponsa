@@ -17,9 +17,8 @@ Si riconoscono percio' le sole forme che colpiscono un atto INTERO:
 e si scarta tutto il resto: parti d'atto, decorrenze differite a date future,
 clausole di salvezza. Restano 110 norme.
 
-Non si scrive l'abrogazione di singoli ARTICOLI, che pure sarebbe misurabile
-(34 archi verificati su 24 articoli): il guadagno e' minore e la granularita' e'
-esattamente il punto in cui il riconoscimento sbaglia.
+L'abrogazione di singoli articoli e commi si scrive a parte, piu' sotto: e' un
+bersaglio diverso e va marcata sul nodo Articolo o Comma, non sulla Norma.
 
 ## La seconda fonte, indipendente dalla prima
 
