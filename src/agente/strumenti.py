@@ -878,7 +878,8 @@ def elenco_norme(tipo: str | None = None, anno: int | None = None, limite: int =
         OPTIONAL MATCH (n)-[:HA_ARTICOLO]->(a:Articolo)
         WITH n, count(a) AS articoli
         RETURN n.id AS id, n.tipo AS tipo, n.titolo AS titolo, n.anno AS anno,
-               n.caricata AS testoDisponibile, articoli
+               n.caricata AS testoDisponibile, articoli,
+               n.urlDocumento AS urlDocumento
         ORDER BY n.anno DESC, n.numero DESC
         LIMIT $limite
     """, {"anno": anno, "tipo": tipo, "limite": limite})
@@ -908,7 +909,8 @@ def citazioni_da(norma_id: str) -> dict:
         WITH t, collect(DISTINCT 'art.' + art.numero + ' c.' + cm.numero) AS punti, count(r) AS volte
         WHERE t IS NOT NULL
         RETURN t.id AS norma, t.tipo AS tipo, t.titolo AS titolo,
-               t.caricata AS testoDisponibile, volte, punti[..6] AS citataIn
+               t.caricata AS testoDisponibile, volte, punti[..6] AS citataIn,
+               t.urlDocumento AS urlDocumento
         ORDER BY volte DESC
     """, {"norma_id": norma_id})
     preambolo = grafo().query("""
@@ -932,7 +934,8 @@ def chi_cita(norma_id: str) -> dict:
     righe = grafo().query("""
         MATCH (src:Norma)-[:HA_ARTICOLO]->(art:Articolo)-[:HA_COMMA]->(cm:Comma)-[r:CITA]->(:Norma {id: $norma_id})
         WITH src, collect(DISTINCT 'art.' + art.numero) AS articoli, count(r) AS volte
-        RETURN src.id AS norma, src.titolo AS titolo, articoli[..6] AS articoli, volte
+        RETURN src.id AS norma, src.titolo AS titolo, articoli[..6] AS articoli, volte,
+               src.urlDocumento AS urlDocumento
         ORDER BY volte DESC LIMIT 20
     """, {"norma_id": norma_id})
     return {"citataDa": righe, "quante": len(righe)}

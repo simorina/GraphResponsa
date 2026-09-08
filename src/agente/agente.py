@@ -583,6 +583,26 @@ def _fonti_da(nome_strumento, risultato):
                 "testo": a.get("rubrica") or "",
                 "haDocumento": bool(risultato.get("urlDocumento")),
             })
+    # Gli strumenti di RETE - chi cita, chi e' citato, l'elenco - restituiscono
+    # riferimenti a livello d'atto, e finora non producevano fonti. Il costo si
+    # vedeva su una domanda tipica: "quali modifiche ha subito la L. 36/1958"
+    # elencava sei atti modificanti e nessuno era cliccabile, perche' nessuno
+    # era fra le fonti e l'ancoraggio - giustamente - non inventa.
+    elif nome_strumento in ("chi_cita", "citazioni_da", "elenco_norme"):
+        elenchi = ((risultato.get("citataDa") or [])
+                   + (risultato.get("dipendenze") or [])
+                   + (risultato.get("basePreambolo") or [])
+                   + (risultato.get("normeEstratte") or []))
+        for r in elenchi:
+            atto = r.get("norma") or r.get("id")
+            if not atto:
+                continue
+            fonti.append({
+                "norma": atto, "titoloNorma": r.get("titolo"),
+                "articolo": "-", "comma": "-",
+                "testo": r.get("titolo") or "",
+                "haDocumento": bool(r.get("urlDocumento")),
+            })
     return fonti
 
 
