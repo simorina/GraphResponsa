@@ -15,7 +15,7 @@ Si riconoscono percio' le sole forme che colpiscono un atto INTERO:
     "Sono abrogate la Legge n.97/1989 e la Legge n.99/1991"  (plurale)
 
 e si scarta tutto il resto: parti d'atto, decorrenze differite a date future,
-clausole di salvezza. Restano 163 norme.
+clausole di salvezza. Restano 321 norme.
 
 L'abrogazione di singoli articoli e commi si scrive a parte, piu' sotto: e' un
 bersaglio diverso e va marcata sul nodo Articolo o Comma, non sulla Norma.
@@ -24,9 +24,9 @@ bersaglio diverso e va marcata sul nodo Articolo o Comma, non sulla Norma.
 
 L'archivio di Stato marca da se' gli atti caduti, premettendo "ABROGATO - " al
 titolo: 125 norme. E' una fonte redazionale, non una lettura nostra, e i due
-segnali sono in larga parte disgiunti - 9 norme in comune. Il titolo dice CHE un
+segnali si sovrappongono per 88 norme. Il titolo dice CHE un
 atto e' caduto, i commi dicono DA CHI: si tengono entrambi, il flag `abrogata`
-dall'unione e l'attribuzione `abrogataDa` dai soli commi. In tutto 279 norme.
+dall'unione e l'attribuzione `abrogataDa` dai soli commi. In tutto 358 norme.
 
 ## Il livello parziale: dentro atti che restano vivi
 
@@ -48,7 +48,7 @@ in basso - "la lettera d), comma 1, dell'articolo 3" - dove il grafo non arriva.
 
 ## Cosa NON copre
 
-  - le forme che il riconoscimento non sa leggere, 719 commi su 1.728;
+  - le forme che il riconoscimento non sa leggere, 506 commi su 1.728;
   - le partizioni sotto il comma: lettere, punti, capoversi, che il grafo non
     modella e che percio' non si possono marcare;
   - l'abrogazione TACITA, una legge posteriore incompatibile con una anteriore
@@ -56,8 +56,8 @@ in basso - "la lettera d), comma 1, dell'articolo 3" - dove il grafo non arriva.
 
 ## Il pericolo non e' l'arco sbagliato, e' l'arco assente
 
-La copertura e' del 2,3% delle norme,
-e il 23,9% dei commi abroganti produce una marcatura. Un indice cosi' rado induce a leggere il
+La copertura e' del 2,9% delle norme,
+e il 36,7% dei commi abroganti produce una marcatura. Un indice cosi' rado induce a leggere il
 silenzio come conferma - "nessun arco, quindi e' in vigore" - e quel silenzio
 non dimostra niente. Per questo l'informazione entra nel prompt come avviso
 esclusivamente POSITIVO: la presenza dell'arco autorizza a dire "abrogata",
@@ -79,8 +79,13 @@ sys.path.insert(0, str(ROOT / "src"))
 if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8", line_buffering=True)
 
+# "decreto" nudo va per ultimo: l'alternanza sceglie il primo ramo che aggancia,
+# e messo prima ruberebbe la corrispondenza a "decreto delegato". Gli atti lo
+# usano spesso senza qualificarlo - "il Decreto 12 maggio 1999 n.59" - e
+# misurato sul corpus 73 di questi 87 riferimenti risolvono a un solo atto D-.
 TIPO = (r"(legge|decreto\s+delegato|decreto\s*[-–]?\s*legge|"
-        r"decreto\s+reggenziale|regolamento|decreto\s+consil\w+|decreto\s+consigl\w+)")
+        r"decreto\s+reggenziale|regolamento|decreto\s+consil\w+|"
+        r"decreto\s+consigl\w+|decreto)")
 # La virgola fra l'anno e il numero e' comune quanto la sua assenza - "Legge 18
 # luglio 1979, n.46" accanto a "Legge 27 ottobre 2004 n. 146" - e pretendere la
 # sola forma senza virgola faceva perdere l'atto per intero.
@@ -123,15 +128,24 @@ LOOKBACK = 45
 # primo punto e virgola: in un elenco l'esclusione appartiene alla sola voce
 # che la porta - "la Legge n.147; il Decreto n.62 ad esclusione dell'articolo
 # 7" lascia intatta la prima e colpisce in parte la seconda.
-ESCLUSIONE = re.compile(r"(ad?\s+esclusione|fatta\s+eccezione|eccezione\s+fatta|"
-                        r"eccettuat|tranne\s+)", re.I)
+ESCLUSIONE = re.compile(r"(ad?\s+esclusione|ad?\s+eccezione|fatta\s+eccezione|"
+                        r"eccezione\s+fatta|eccettuat|tranne\s+)", re.I)
 LOOKAHEAD = 70
 
 
+# "e' abrogato E COSI' SOSTITUITO: <nuovo testo>" non uccide l'atto: lo
+# riscrive sul posto, e continua a esistere col contenuto nuovo. Diverso da
+# "e' abrogato e sostituito dal presente Decreto", dove a sostituirlo e' un
+# altro atto e il vecchio muore davvero.
+# Si cerca la sola coda "e cosi' sostituito", perche' la parola "abrogato" cade
+# PRIMA del punto in cui il riconoscimento finisce e non entra nella finestra.
+RISCRITTURA = re.compile(r"\be\s+cos[iì]\s+sostituit", re.I)
+
+
 def _escluso(testo, fine):
-    """C'e' una clausola di esclusione subito dopo l'atto agganciato?"""
+    """Dopo l'atto agganciato c'e' qualcosa che nega l'abrogazione piena?"""
     coda = testo[fine:fine + LOOKAHEAD].split(";")[0]
-    return bool(ESCLUSIONE.search(coda))
+    return bool(ESCLUSIONE.search(coda) or RISCRITTURA.search(coda))
 
 # ------------------------------------------------------------ dentro l'atto
 #
@@ -180,7 +194,7 @@ SPEZZA = re.compile(r"\.\s+(?:[A-ZÈÉ]|\d+\s*(?:bis|ter|quater)?\s*\.)")
 
 def _fermo(testo):
     """Vale per ogni livello: qui non si abroga, si differisce o si riscrive."""
-    return bool(DIFFERITA.search(testo) or SALVEZZA.search(testo)
+    return bool(DIFFERITA.search(testo) or _salvezza_blocca(testo)
                 or SOSTITUZIONE.search(testo) or DIFFERITA_EVENTO.search(testo))
 
 
@@ -240,7 +254,8 @@ def commi_abrogati(testo):
 # decreto con lo stesso numero e lo stesso anno.
 PREFISSO = {"legge": {"L"}, "decreto delegato": {"DD"},
             "decreto legge": {"DL", "EC"}, "decreto reggenziale": {"D"},
-            "regolamento": {"R"}, "decreto consiliare": {"DC", "DD"}}
+            "regolamento": {"R"}, "decreto consiliare": {"DC", "DD"},
+            "decreto": {"D", "DR"}}
 
 # Se compare una partizione, il bersaglio e' quella e non l'atto.
 PARTE = re.compile(r"(?:articol|comm[ai]|punt[oi]|letter[ae]|capovers|allegat)", re.I)
@@ -250,11 +265,37 @@ DIFFERITA = re.compile(r"(a\s+decorrere\s+dal|con\s+decorrenza\s+dal\s+\d|"
                        r"con\s+efficacia\s+dal|a\s+far\s+data|a\s+partire\s+dal|"
                        r"abrogat\w+\s+dal\s+\d)", re.I)
 # "fatti salvi gli effetti prodotti" tiene in vita una parte dell'atto.
-# "continuano ad avere applicazione" e' una salvezza travestita: il passo e'
-# abrogato ma resta ultrattivo, e dirlo morto e basta inganna chi legge.
+# Non tutte le clausole di salvezza impediscono la marcatura, e trattarle allo
+# stesso modo era l'errore piu' costoso del riconoscimento: da solo teneva
+# fuori 117 abrogazioni piene.
+#
+#   "E' abrogato il Decreto Delegato n.199/2024. SONO FATTI SALVI GLI ATTI E
+#    GLI EFFETTI conformemente posti in essere."
+#
+# Qui il decreto e' morto, e restano validi soltanto gli atti gia' compiuti
+# sotto la sua vigenza: la marcatura e' corretta. Misurato sul corpus, e' la
+# forma dominante - "fatti salvi gli atti e gli effetti" 86 volte, "gli effetti
+# ed atti" 33, "gli effetti e gli" 25, "gli effetti prodotti" 24.
+#
+# Blocca invece la salvezza che tiene in vita una DISPOSIZIONE - "fatto salvo
+# quanto previsto all'articolo #" - perche' li' una parte dell'atto sopravvive
+# davvero. Sono una ventina di casi.
 SALVEZZA = re.compile(r"(fatt[oi]\s+salv[oi]|fatt[ae]\s+salv[ae]|salvo\s+quanto|"
                       r"salv[oi]\s+gli\s+effetti|continuan?o?\s+ad?\s+"
                       r"(?:avere\s+applicazione|applicarsi|trovare\s+applicazione))", re.I)
+# Cio' che viene fatto salvo: se sono atti, effetti o validita', l'atto e'
+# comunque caduto. La distinzione si legge nelle parole subito dopo.
+SALVA_EFFETTI = re.compile(r"^\W*(?:salv[oi]\s+)?(?:gli\s+|la\s+|le\s+|i\s+)?"
+                           r"(?:atti|effetti|validit|efficacia|quanto\s+gia)", re.I)
+CODA_SALVEZZA = 46
+
+
+def _salvezza_blocca(testo):
+    """C'e' una salvezza che tiene in vita una PARTE dell'atto?"""
+    for m in SALVEZZA.finditer(testo):
+        if not SALVA_EFFETTI.search(testo[m.end():m.end() + CODA_SALVEZZA]):
+            return True
+    return False
 
 
 # Tutti gli atti nominati nel testo, senza le guardie dell'abrogazione: serve
@@ -281,8 +322,16 @@ PROVE = [
     ("All’articolo 2 della Legge n.55/1994, il punto 8.0 è abrogato.", 0),
     ("Sono abrogate tutte le norme incompatibili con il presente decreto.", 0),
     ("È abrogata la Legge n.146/2004 a decorrere dal 1° gennaio 2015.", 0),
-    ("È abrogato il DD 12 settembre 2019 n.139, fatti salvi gli effetti prodotti.", 0),
-    ("Fatti salvi gli effetti, la Legge 8 giugno 1963 n. 35 è abrogata.", 0),
+    # La salvezza degli EFFETTI non impedisce la marcatura: l'atto e' morto e
+    # restano validi solo gli atti gia' compiuti sotto la sua vigenza. E' la
+    # forma dominante nel corpus, e trattarla come le altre ne teneva fuori 117.
+    ("È abrogato il Decreto Delegato 12 settembre 2019 n.139, fatti salvi gli "
+     "effetti prodotti.", 1),
+    ("È abrogato il Decreto Delegato 13 dicembre 2024 n.199. Sono fatti salvi "
+     "gli atti e gli effetti conformemente posti in essere.", 1),
+    # La salvezza di una DISPOSIZIONE invece si': una parte dell'atto sopravvive.
+    ("È abrogata la Legge 27 ottobre 2004 n. 146, fatto salvo quanto previsto "
+     "all'articolo 3.", 0),
     # L'italiano degli atti scrive "e' abrogata" tanto quanto "è abrogata", e
     # l'apostrofo e' spesso quello tipografico. Ignorarlo faceva perdere 412
     # commi su 1.728 - fra cui la L-145/2022, che abroga la L-106/2009: senza
@@ -320,6 +369,14 @@ PROVE = [
     # L'esclusione rende parziale un'abrogazione che si annuncia totale, e
     # segue il bersaglio: senza guardarla, cinque leggi vive risultavano morte.
     ("È abrogata la Legge 10 dicembre 2001 n. 126 ad esclusione dell'articolo 6.", 0),
+    ("È abrogato il Decreto 19 maggio 1998 n.69, ad eccezione dell'Allegato 1.", 0),
+    # "decreto" senza qualificazione: 73 riferimenti su 87 risolvono a un solo D-
+    ("È abrogato il Decreto 12 maggio 1999 n.59.", 1),
+    # riscritto sul posto, non ucciso
+    ("Il Decreto 4 febbraio 1998 n.20 è abrogato e così sostituito: “Non sono "
+     "dovuti i pagamenti”.", 0),
+    # ...ma sostituito da un ALTRO atto, il vecchio muore davvero
+    ("Il Decreto 22 marzo 1976 n. 7 è abrogato e sostituito dal presente Decreto.", 1),
     ("Sono abrogati: la Legge 13 giugno 1990 n.68 e successive modifiche, "
      "ad esclusione del suo articolo 4.", 0),
     # ...ma in un elenco appartiene alla sola voce che la porta.
@@ -348,7 +405,7 @@ APOSTROFI = str.maketrans({"’": "'", "‘": "'", "ʼ": "'"})
 def bersagli(testo):
     """Gli atti interi che questo comma abroga senza ambiguita'. Quasi sempre zero."""
     testo = testo.translate(APOSTROFI)
-    if DIFFERITA.search(testo) or SALVEZZA.search(testo):
+    if DIFFERITA.search(testo) or _salvezza_blocca(testo):
         return []
     trovate = []
     for espressione in (AVANTI, INDIETRO):

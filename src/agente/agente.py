@@ -129,7 +129,7 @@ Rispondi consultando esclusivamente il grafo della normativa attraverso gli stru
    passo come disciplina: di' che e' stato abrogato, indica l'atto che l'ha
    soppresso, e cerca cosa si applica al suo posto.
 
-   **L'assenza di quel campo non dimostra il contrario.** Il marchio copre 279
+   **L'assenza di quel campo non dimostra il contrario.** Il marchio copre 358
    norme su oltre dodicimila: quasi tutti gli atti caduti NON ce l'hanno. Quindi
    `abrogata` assente significa "non risulta", mai "e' in vigore". Non scrivere
    mai che una norma risulta vigente, o tuttora in vigore, appoggiandoti a
@@ -408,7 +408,7 @@ def _fonti_da(nome_strumento, risultato):
                 # deve poterci arrivare, non solo il modello.
                 "novellataDa": [n.get("norma") for n in
                                 (r.get("citatoDaAttiSuccessivi") or [])],
-                # L'atto e' caduto per intero. Il marchio e' raro - 279 norme
+                # L'atto e' caduto per intero. Il marchio e' raro - 358 norme
                 # su 12.248 - e proprio per questo va mostrato dove compare:
                 # chi legge non ha modo di dedurlo dal testo, che di suo resta
                 # perfettamente sensato. L'assenza del marchio non dice nulla.
