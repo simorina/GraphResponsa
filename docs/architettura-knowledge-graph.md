@@ -3,10 +3,11 @@
 Grafo Neo4j della normativa della Repubblica di San Marino, costruito per essere
 interrogato da un agente in modalità Graph RAG.
 
-**Stato aggiornato:** **268.441 nodi**, **342.618 relazioni**, **11.134 norme con testo
+**Stato aggiornato:** **268.757 nodi**, **343.347 relazioni**, **11.134 norme con testo
 integrale** su 11.136 scaricabili dal portale, distribuite su 16 tipologie di atto:
 leggi, decreti in tutte le loro forme, regolamenti, notifiche, ordinanze, statuti,
-errata corrige e verbali. Tutti i 180.932 commi hanno un embedding.
+errata corrige e verbali. Tutti i 181.248 commi hanno un embedding, e 358 norme,
+118 articoli e 52 commi portano una marcatura di abrogazione.
 
 ---
 
@@ -120,8 +121,8 @@ sul nodo che ha già in mano, senza un `MATCH` in più su ogni ricerca.
 | Proprietà | Su | Quantità | Significato |
 |---|---|---:|---|
 | `Norma.abrogata` / `abrogataDa` | `:Norma` | **358** | L'atto è caduto per intero |
-| `Articolo.abrogato` / `abrogatoDa` | `:Articolo` | **49** | Articolo soppresso dentro un atto vivo |
-| `Comma.abrogato` / `abrogatoDa` | `:Comma` | **26** | Comma soppresso dentro un atto vivo |
+| `Articolo.abrogato` / `abrogatoDa` | `:Articolo` | **118** | Articolo soppresso dentro un atto vivo |
+| `Comma.abrogato` / `abrogatoDa` | `:Comma` | **52** | Comma soppresso dentro un atto vivo |
 
 Le si ricalcola da zero a ogni esecuzione di `src/08_abrogazioni.py --scrivi`,
 archi `ABROGA` compresi: senza cancellarli prima, un arco che smette di essere
@@ -180,7 +181,7 @@ fuori, in ordine di frequenza:
 
 | Non coperto | Perché |
 |---|---|
-| **Forme illeggibili** — 506 commi su 1.728 | Bersagli impliciti, rinvii a «norme in contrasto», elenchi non strutturati |
+| **Forme illeggibili** — 408 commi su 1.728 | Bersagli impliciti, rinvii a «norme in contrasto», elenchi non strutturati |
 | **Partizioni sotto il comma** — «la lettera d), comma 1, dell'articolo 3» | Il grafo non modella lettere e punti: non c'è nodo da marcare |
 | **Abrogazione tacita** — una legge posteriore incompatibile con una anteriore, senza dirlo | Nessun metodo testuale può trovarla |
 
@@ -194,15 +195,22 @@ non è un testo consolidato — quindi in un testo vigente quell'articolo direbb
 «(Abrogato)», qui invece resta scritto per esteso. Verificato: su 74.742
 articoli, **uno solo** ha la rubrica `(Abrogato)`.
 
-Qui però il bersaglio non va indovinato: l'arco `CITA_ARTICOLO` esiste già e lo
-indica, e resta da verificare che il numero scritto coincida con quello a cui
-l'arco punta — su 35 coppie d'articolo, **zero discordanze**. Si marcano così
-**49 articoli** e **26 commi**, con `abrogato` e `abrogatoDa`, esposti al
-modello come `passoAbrogato`.
+Il bersaglio si risolve dal testo. Il primo tentativo si appoggiava all'arco
+`CITA_ARTICOLO` già presente nel grafo, ma quello esiste per i riferimenti
+puntuali e **non per ogni voce di un elenco**: *«sono abrogati gli articoli 1,
+3, 11, 12 e 13 della Legge n.97/1997»* non ne produce uno per voce, e
+dipenderne costava **124 articoli su 173**.
 
-Il numero è piccolo perché solo **433 commi abroganti su 1.728** hanno un arco,
-e di quelli la maggioranza scende ancora più in basso. Due trappole specifiche
-di questo livello: *«è abrogato **e sostituito** dal seguente»* non è
+Ciò che l'arco garantiva lo garantiscono quattro controlli in fila: tipo
+concorde col prefisso dell'id, atto che risolve a **una** sola norma, bersaglio
+non posteriore alla fonte, e partizione che esiste davvero dentro quell'atto —
+se il testo dice «comma 7» e l'articolo ne ha sei, il riferimento è stato letto
+male. Si marcano così **118 articoli** e **52 commi**, con `abrogato` e
+`abrogatoDa`, esposti al modello come `passoAbrogato`.
+
+Il numero resta limitato perché la maggioranza delle clausole scende ancora più
+in basso, sotto il livello che il grafo modella. Due trappole specifiche di
+questo livello: *«è abrogato **e sostituito** dal seguente»* non è
 un'abrogazione ma una novella — l'articolo resta, riscritto — e il divario fra
 «articolo N» e «è abrogato» non deve **scavalcare un confine di frase**, perché
 in *«…della Legge n.40/2014 e successive modifiche. 3 bis. E' abrogato…»*
