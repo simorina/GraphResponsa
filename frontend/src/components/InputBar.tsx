@@ -56,7 +56,13 @@ export const InputBar: React.FC<InputBarProps> = ({
             e.preventDefault();
             if (!loading) onSubmit();
           }}
-          className="rounded-[26px] border border-line-2 bg-canvas shadow-[0_10px_30px_-14px_rgba(16,33,45,0.20)] transition-colors duration-200 focus-within:border-azzurro-2"
+          /* Il contorno di focus sta QUI e non sul textarea: un outline segue la
+             forma dell'elemento che riceve il focus, e il textarea non e'
+             arrotondato - l'arrotondamento e' di questo contenitore. Il
+             risultato era un rettangolo dentro una scatola smussata.
+             L'indicatore non si toglie, si sposta: chi naviga da tastiera deve
+             continuare a vedere dov'e'. */
+          className="rounded-[26px] border border-line-2 bg-canvas shadow-[0_10px_30px_-14px_rgba(16,33,45,0.20)] transition-colors duration-200 focus-within:border-azzurro-2 focus-within:ring-2 focus-within:ring-azzurro-3"
         >
           <textarea
             ref={areaRef}
@@ -65,7 +71,7 @@ export const InputBar: React.FC<InputBarProps> = ({
             onKeyDown={onKeyDown}
             rows={1}
             placeholder="Poni un quesito sulla normativa sammarinese…"
-            className="max-h-52 w-full resize-none bg-transparent px-5 pb-1.5 pt-4 text-[15px] leading-relaxed text-ink placeholder-ink-3 focus:outline-none"
+            className="max-h-52 w-full resize-none bg-transparent px-5 pb-1.5 pt-4 text-[15px] leading-relaxed text-ink placeholder-ink-3 focus:outline-none focus-visible:outline-none"
             style={{ minHeight: '48px' }}
           />
 
