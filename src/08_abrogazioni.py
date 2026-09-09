@@ -58,6 +58,24 @@ Si marcano 118 articoli e 52 commi.
   - l'abrogazione TACITA, una legge posteriore incompatibile con una anteriore
     senza dirlo, che nessun metodo testuale puo' trovare.
 
+## I commi ordinali: il muro non e' il riconoscimento, e' il parser
+
+La famiglia piu' grande fra le clausole non lette - 116 casi - scrive il comma
+in lettere: "il SECONDO ed il TERZO comma dell'art. 13", "l'articolo 43, SECONDO
+comma". Riconoscerla e' facile e si e' provato a farlo: quattro espressioni per
+l'ordine rovesciato delle parole (l'ordinale precede "comma", non lo segue) e
+una tabella primo..decimo.
+
+Ha prodotto ZERO copertura, ed e' stato tolto. Il motivo sta a monte: per le
+leggi antiche il parser mette l'intero articolo in UN SOLO comma implicito
+numerato "1" - sono 46.800 commi impliciti su 181.248 - quindi il "secondo
+comma" dell'articolo 13 della L-22/1974 non esiste come nodo, e non c'e' nulla
+da marcare. Misurato: su 16 riferimenti estratti, uno solo risolveva.
+
+Serve prima che il parser divida i commi delle leggi antiche. Finche' non lo fa,
+qualunque lavoro su questa famiglia e' sprecato, e vale la pena saperlo per non
+rifarlo.
+
 ## Il pericolo non e' l'arco sbagliato, e' l'arco assente
 
 La copertura e' del 2,9% delle norme,

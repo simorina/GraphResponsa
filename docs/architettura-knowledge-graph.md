@@ -261,6 +261,17 @@ fuori, in ordine di frequenza:
 | **Partizioni sotto il comma** — «la lettera d), comma 1, dell'articolo 3» | Il grafo non modella lettere e punti: non c'è nodo da marcare |
 | **Abrogazione tacita** — una legge posteriore incompatibile con una anteriore, senza dirlo | Nessun metodo testuale può trovarla |
 
+I **commi ordinali** meritano una riga a parte, perché sembrano recuperabili e
+non lo sono. La famiglia più grande fra le clausole non lette — 116 casi —
+scrive il comma in lettere: *«il **secondo** ed il **terzo** comma dell'art.
+13»*. Riconoscerla è facile, ed è stato provato. Ha prodotto **zero copertura**:
+per le leggi antiche il parser mette l'intero articolo in **un solo comma
+implicito** numerato «1» — 46.800 commi impliciti su 181.248 — quindi il
+«secondo comma» non esiste come nodo e non c'è nulla da marcare. Su 16
+riferimenti estratti, uno solo risolveva. **Il muro è il parser, non il
+riconoscimento**, e finché non divide i commi delle leggi antiche qualunque
+lavoro su questa famiglia è sprecato.
+
 ---
 
 ## 3. Pipeline di Acquisizione e Caricamento
