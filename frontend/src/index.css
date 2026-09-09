@@ -80,7 +80,16 @@ body {
 }
 ::-webkit-scrollbar-thumb:hover { background: var(--color-ink-3); background-clip: padding-box; }
 
-:focus-visible { outline: 2px solid var(--color-azzurro); outline-offset: 2px; }
+/* Dentro @layer base, non fuori. Tailwind v4 mette le utilita' in
+   @layer utilities, e una regola NON stratificata batte qualunque regola
+   stratificata a prescindere dalla specificita': fuori dal livello, questa
+   vinceva su ogni `focus:outline-none` e non c'era modo di spegnerla dove
+   serviva. Si vedeva sull'area di scrittura: l'outline segue la forma
+   dell'elemento che riceve il focus, il textarea non e' arrotondato, e usciva
+   un rettangolo dentro una scatola smussata. */
+@layer base {
+  :focus-visible { outline: 2px solid var(--color-azzurro); outline-offset: 2px; }
+}
 
 /* Grana di carta: fissa, non ridipinge lo scroll */
 .grain::after {
