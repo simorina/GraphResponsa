@@ -7,7 +7,7 @@ interrogato da un agente in modalità Graph RAG.
 integrale** su 11.136 scaricabili dal portale, distribuite su 16 tipologie di atto:
 leggi, decreti in tutte le loro forme, regolamenti, notifiche, ordinanze, statuti,
 errata corrige e verbali. Tutti i 181.248 commi hanno un embedding, e 358 norme,
-140 articoli e 52 commi portano una marcatura di abrogazione.
+129 articoli e 53 commi portano una marcatura di abrogazione.
 
 ---
 
@@ -90,23 +90,23 @@ Nel nostro Knowledge Graph, le rubriche svolgono due funzioni cruciali:
 
 | Entità / Label | Quantità | Ruolo nel Modello |
 |---|---|---|
-| **`:Comma`** | **`182.264`** | Unità atomica di testo, ricerca semantica e retrieval |
-| **`:Articolo`** | **`74.886`** | Articoli con rubriche, capi e collocazione tematica |
-| **`:Norma`** | **`12.248`** | Tutti gli atti normativi censiti: |
+| **`:Comma`** | **`180.747`** | Unità atomica di testo, ricerca semantica e retrieval |
+| **`:Articolo`** | **`74.078`** | Articoli con rubriche, capi e collocazione tematica |
+| **`:Norma`** | **`12.225`** | Tutti gli atti normativi censiti: |
 | ↳ *con testo integrale (`caricata: true`)* | *`11.134`* | *Su 11.136 scaricabili dal portale, 16 tipologie* |
 | ↳ *stub citati (`caricata: false`)* | *`1.114`* | *Atti richiamati nei testi per tracciare i rinvii* |
-| **TOTALE NODI** | **`269.398`** | |
+| **TOTALE NODI** | **`267.050`** | |
 
 ### Relazioni (Archi)
 
 | Relazione | Quantità | Direzione | Significato |
 |---|---|---|---|
-| **`HA_COMMA`** | **`182.264`** | `Articolo ➔ Comma` | Contenimento strutturale |
-| **`HA_ARTICOLO`** | **`74.886`** | `Norma ➔ Articolo` | Contenimento strutturale |
-| **`CITA`** | **`69.662`** | `(Comma/Norma) ➔ Norma` | Rinvio normativo formale |
-| **`CITA_ARTICOLO`** | **`24.493`** | `Comma ➔ Articolo` | Rinvio puntuale ad articolo specifico risolto |
-| **`ABROGA`** | **`413`** | `Norma ➔ Norma` | Abrogazione di un atto per intero, riconosciuta senza ambiguità |
-| **TOTALE ARCHI** | **`351.718`** | | |
+| **`HA_COMMA`** | **`180.747`** | `Articolo ➔ Comma` | Contenimento strutturale |
+| **`HA_ARTICOLO`** | **`74.078`** | `Norma ➔ Articolo` | Contenimento strutturale |
+| **`CITA`** | **`69.450`** | `(Comma/Norma) ➔ Norma` | Rinvio normativo formale |
+| **`CITA_ARTICOLO`** | **`24.171`** | `Comma ➔ Articolo` | Rinvio puntuale ad articolo specifico risolto |
+| **`ABROGA`** | **`412`** | `Norma ➔ Norma` | Abrogazione di un atto per intero, riconosciuta senza ambiguità |
+| **TOTALE ARCHI** | **`348.858`** | | |
 
 `CITA_ARTICOLO` era fermo a 16.763 finche' `RE_BERSAGLIO`, nel parser,
 pretendeva che il numero d'articolo fosse **adiacente** al nome dell'atto. Nel
@@ -146,7 +146,7 @@ novella entranti — mentre cinquant'anni di modifiche non comparivano.
 `src/10_codice_penale.py` integra il **testo coordinato** pubblicato dal
 Consiglio Grande e Generale (`data/coordinati/codice-penale.pdf`, aggiornato al
 27 febbraio 2026). Il Codice ha ora **480 articoli**, **916 commi** con i
-capoversi al loro posto, **478 rubriche** e **303 archi di novella** entranti (le due schede comprese).
+capoversi al loro posto, **478 rubriche** e **214 archi di novella** entranti.
 
 Come si legge il PDF, in breve:
 
@@ -190,6 +190,33 @@ dalla `L-101/2003` e abrogato dalla `L-59/2025`: `_bersagli_abrogati()` in
 
 Vale per **un atto su 7.800**: i commi impliciti scendono da 46.800 a 46.392.
 Il metodo però è riusabile su qualunque altro testo coordinato.
+
+### Lo stesso atto sotto due schede
+
+Il portale pubblica alcuni atti **due volte**, con due pagine di scheda e due
+URL di documento. Il caricamento non puo' saperlo e li tiene entrambi,
+qualificando il secondo col proprio `schedaId` (`L-17-1974~17011720`): l'atto
+finisce nel grafo in duplice copia, compete con se stesso nel recupero e le
+risposte ne nominano l'id qualificato invece di quello canonico.
+
+`src/11_doppioni.py` li toglie. Ne ha rimossi **23** (808 articoli, 1.517
+commi, 2.348 nodi), tutti privi di citazioni in entrata: le citazioni
+risolvono sempre all'id canonico, ed e' quello che si tiene.
+
+**Il separatore `~` non significa doppione.** Segnala una collisione su
+(tipo, numero, anno), e le 135 famiglie rimaste sono atti davvero distinti:
+i decreti ottocenteschi senza numero (`D-0-1910` sono 21 decreti diversi del
+1910), le errata corrige che numero non ne hanno (`EC-None-2024` sono 19
+correzioni ad atti diversi). Cancellarle sarebbe perdere normativa, e il
+riconoscimento pretende percio' testo identico di almeno 400 caratteri, stesso
+numero di articoli e titoli conciliabili.
+
+**35 gruppi restano come guasto aperto**, ed e' peggio di un doppione: hanno lo
+stesso testo e titoli inconciliabili - `L-0-1910` si intitola "dei cadaveri" e
+ha 97 articoli identici a quelli di "sulle scuole elementari". Sono atti
+diversi a uno dei quali e' stato caricato il testo dell'altro: le schede hanno
+URL distinti ma il PDF che se ne scarica e' lo stesso file byte per byte, e il
+guasto sta a monte del caricamento. Lo script li elenca a ogni esecuzione.
 
 ### Marcature di vigenza
 
@@ -281,7 +308,7 @@ Ciò che l'arco garantiva lo garantiscono quattro controlli in fila: tipo
 concorde col prefisso dell'id, atto che risolve a **una** sola norma, bersaglio
 non posteriore alla fonte, e partizione che esiste davvero dentro quell'atto —
 se il testo dice «comma 7» e l'articolo ne ha sei, il riferimento è stato letto
-male. Si marcano così **140 articoli** e **52 commi**, con `abrogato` e
+male. Si marcano così **129 articoli** e **53 commi**, con `abrogato` e
 `abrogatoDa`, esposti al modello come `passoAbrogato`.
 
 Il numero resta limitato perché la maggioranza delle clausole scende ancora più
