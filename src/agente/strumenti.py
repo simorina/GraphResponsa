@@ -440,6 +440,50 @@ def _novelle(righe):
     return righe
 
 
+def _bersagli_abrogati(righe):
+    """Annota i risultati che introducono o modificano un passo ABROGATO.
+
+    Un atto che inserisce un articolo in un codice ne riporta il testo per
+    intero: la L-101/2003 contiene tutto l'art. 282-bis del Codice Penale. La
+    ricerca lo trova li', e da li' il testo si legge intero e sensato - ma
+    quell'articolo e' stato abrogato dalla L-59/2025, e la marcatura sta sul
+    nodo del Codice, non su quello dell'atto che lo introdusse.
+
+    Misurato sul caso reale: alla domanda "il maltrattamento di animali e'
+    ancora punito dall'art. 282-bis?" l'agente rispondeva di si', leggendo
+    l'atto del 2003 e senza mai aprire l'articolo del Codice.
+
+    L'arco CITA_ARTICOLO che collega i due esiste gia'. Si segue e si guarda
+    se il bersaglio e' marcato: e' un segnale POSITIVO come tutti gli altri di
+    vigenza - la sua presenza autorizza a dire "abrogato", la sua assenza non
+    autorizza a dire "vigente".
+    """
+    chiavi = [{"n": r["normaId"], "a": str(r.get("articolo"))}
+              for r in righe if r.get("normaId") and r.get("articolo")]
+    if not chiavi:
+        return righe
+    try:
+        trovate = grafo().query("""
+            UNWIND $chiavi AS k
+            MATCH (n:Norma {id: k.n})-[:HA_ARTICOLO]->(a:Articolo {numero: k.a})
+            MATCH (a)-[:HA_COMMA]->(:Comma)-[:CITA_ARTICOLO]->(b:Articolo)
+            WHERE b.abrogato
+            MATCH (bn:Norma)-[:HA_ARTICOLO]->(b)
+            WITH k, collect(DISTINCT {norma: bn.id, titolo: bn.titolo,
+                                      articolo: b.numero,
+                                      abrogatoDa: b.abrogatoDa})[..3] AS caduti
+            RETURN k.n AS norma, k.a AS articolo, caduti
+        """, {"chiavi": chiavi})
+    except Exception:
+        return righe
+    mappa = {(t["norma"], t["articolo"]): t["caduti"] for t in trovate}
+    for r in righe:
+        caduti = mappa.get((r.get("normaId"), str(r.get("articolo"))))
+        if caduti:
+            r["passiIntrodottiOraAbrogati"] = caduti
+    return righe
+
+
 def _piu_recenti(righe):
     """Marca i risultati che hanno un omologo piu' recente nella stessa lista.
 
@@ -606,7 +650,7 @@ def cerca_testo(query: str, limite: int = 8, dal_anno: int | None = None) -> dic
             righe = _fondi([(semantici, PESO_SEMANTICO), (lessicali, PESO_LESSICALE)], limite)
             modo = "ibrida"
     if righe:
-        righe = _piu_recenti(_novelle(righe))
+        righe = _piu_recenti(_bersagli_abrogati(_novelle(righe)))
 
     if not righe:
         return {"risultati": [], "quanti": 0, "ricerca": modo,
@@ -677,8 +721,10 @@ def leggi_articolo(norma_id: str, numero: str) -> dict:
     riga["testo"] = " ".join(c.get("testo") or "" for c in riga.get("commi") or [])
     riga["normaId"] = riga.get("normaId")
     _novelle([riga])
-    if riga.get("citatoDaAttiSuccessivi"):
-        righe[0]["citatoDaAttiSuccessivi"] = riga["citatoDaAttiSuccessivi"]
+    _bersagli_abrogati([riga])
+    for marchio in ("citatoDaAttiSuccessivi", "passiIntrodottiOraAbrogati"):
+        if riga.get(marchio):
+            righe[0][marchio] = riga[marchio]
 
     rub = (righe[0].get("rubrica") or "").strip()
     if len(rub) > 12:

@@ -4,7 +4,7 @@ Agente conversazionale avanzato che risponde a quesiti sulla normativa della Rep
 
 **Stato aggiornato:** operativo su **11.134 atti con testo integrale** (16 tipologie:
 leggi, decreti, regolamenti, notifiche, ordinanze, statuti, errata corrige, verbali),
-**268.818 nodi** e **350.835 relazioni**. In produzione su AWS dietro CloudFront, con
+**269.398 nodi** e **351.718 relazioni**. In produzione su AWS dietro CloudFront, con
 identita' Cognito e conversazioni persistenti su DynamoDB.
 
 ---

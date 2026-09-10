@@ -48,8 +48,9 @@ sola norma, il bersaglio non puo' essere posteriore alla fonte, e la partizione
 nominata deve esistere davvero dentro quell'atto - se il testo dice "comma 7" e
 l'articolo ne ha sei, il riferimento e' stato letto male.
 
-Si marcano 129 articoli e 52 commi: 118 dedotti dalle clausole degli atti,
-11 letti dal testo coordinato del Codice Penale (vedi da_testi_coordinati).
+Si marcano 140 articoli e 52 commi: 118 dedotti dalle clausole degli atti,
+22 letti dal testo coordinato del Codice Penale, che l'archivio tiene sotto due
+schede distinte (vedi da_testi_coordinati).
 
 ## Cosa NON copre
 

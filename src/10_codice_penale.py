@@ -46,7 +46,7 @@ from dotenv import load_dotenv
 from langchain_neo4j import Neo4jGraph
 
 sys.path.insert(0, str(Path(__file__).parent))
-from comune import norma_id  # noqa: E402
+from comune import SEPARATORE_COLLISIONE, norma_id  # noqa: E402
 
 RADICE = Path(__file__).resolve().parent.parent
 PDF_DEFAULT = RADICE / "data" / "coordinati" / "codice-penale.pdf"
@@ -494,9 +494,6 @@ def main():
         sys.exit(f"PDF non trovato: {pdf}")
 
     articoli, note, aggiornato = leggi(pdf)
-    for i, a in enumerate(articoli, 1):
-        a["id"] = f"{NORMA}/art-{a['numero']}"
-        a["ordine"] = i
     print(f"\n  {pdf.name} - {FONTE}, aggiornato al {aggiornato}")
     print(f"  articoli {len(articoli)} | con rubrica "
           f"{sum(bool(a['rubrica']) for a in articoli)} | abrogati "
@@ -507,6 +504,17 @@ def main():
           f"{sum(len(a['modifiche']) for a in articoli)}")
 
     g = grafo()
+    # Il portale ha due schede per il Codice Penale, e il caricamento le tiene
+    # entrambe qualificando la seconda con il proprio schedaId. Sono lo stesso
+    # atto: aggiornarne una sola lascerebbe l'altra ferma al 1974, e l'agente
+    # ne troverebbe due versioni in disaccordo - come e' successo.
+    gemelli = [r["id"] for r in g.query(
+        "MATCH (n:Norma) WHERE n.id = $n OR n.id STARTS WITH $p RETURN n.id AS id",
+        {"n": NORMA, "p": NORMA + SEPARATORE_COLLISIONE})]
+    if len(gemelli) > 1:
+        print(f"  lo stesso atto e' in archivio con {len(gemelli)} schede: "
+              f"{', '.join(gemelli)}")
+
     presenti = {chiave(r["n"]): r for r in g.query(
         "MATCH (:Norma {id: $n})-[:HA_ARTICOLO]->(a:Articolo) "
         "RETURN a.numero AS n, a.id AS id", {"n": NORMA})}
@@ -518,9 +526,16 @@ def main():
 
     # Gli atti modificanti si risolvono sugli id del grafo: quelli assenti
     # sono citazioni che non si possono agganciare, e vanno detti.
+    # L'atto che ha INTRODOTTO un articolo conta quanto quelli che l'hanno
+    # modificato, e conta di piu' di quanto sembri: l'atto introduttivo ne
+    # riporta il testo per intero, quindi la ricerca lo trova li' e da li' il
+    # testo si legge intero e sensato. Se poi l'articolo e' stato abrogato, la
+    # marcatura sta sul nodo del Codice e senza questo arco non c'e' modo di
+    # arrivarci - misurato: l'agente dava per vigente l'art. 282-bis leggendo
+    # la L-101/2003 che lo introdusse, senza mai aprire l'articolo del Codice.
     atti = {}
     for a in articoli:
-        for m in a["modifiche"]:
+        for m in a["modifiche"] + ([a["origine"]] if a["origine"] else []):
             atti.setdefault(id_atto(m), []).append((a, m))
     noti = {r["id"] for r in g.query(
         "UNWIND $ids AS id MATCH (n:Norma {id: id}) RETURN n.id AS id",
@@ -531,8 +546,7 @@ def main():
     if assenti:
         print("   assenti: " + ", ".join(assenti))
 
-    evidenze = [{"articolo": a["numero"], "articoloId": a["id"],
-                 "fonti": abroganti(a)}
+    evidenze = [{"articolo": a["numero"], "fonti": abroganti(a)}
                 for a in articoli if a["abrogato"]]
     senza = [e["articolo"] for e in evidenze if not e["fonti"]]
     print(f"\n  articoli marcati [ABROGATO] {len(evidenze)} | con l'atto "
@@ -544,32 +558,38 @@ def main():
         print("\n  Nulla scritto. Aggiungi --scrivi per applicare al grafo.")
         return
 
-    lotti = [articoli[i:i + 200] for i in range(0, len(articoli), 200)]
-    for lotto in lotti:
-        for a in lotto:
-            a["commiId"] = [f"{a['id']}/c-{k}" for k in range(1, len(a["commi"]) + 1)]
-        g.query(Q_ARTICOLI, {"norma": NORMA, "fonte": FONTE,
-                             "aggiornato": aggiornato,
-                             "articoli": [{k: a[k] for k in
-                                           ("id", "numero", "rubrica", "testo", "ordine")}
-                                          for a in lotto]})
-        g.query(Q_PULISCI_COMMI, {"articoli": [{"id": a["id"], "commiId": a["commiId"]}
-                                               for a in lotto]})
-        g.query(Q_COMMI, {"commi": [
-            {"articoloId": a["id"], "id": cid, "numero": str(k), "ordine": k,
-             "testo": testo}
-            for a in lotto
-            for k, (cid, testo) in enumerate(zip(a["commiId"], a["commi"]), 1)]})
-    print(f"\n  scritti {len(articoli)} articoli e "
-          f"{sum(len(a['commi']) for a in articoli)} commi")
-
-    novelle = [{"atto": aid, "articolo": m["articolo"], "bersaglio": a["id"],
-                "numeroBersaglio": re.match(r"\d+", a["numero"]).group(0)}
-               for aid, coppie in atti.items() if aid in noti
-               for a, m in coppie if m["articolo"]]
     prima = g.query("MATCH ()-[r:CITA_ARTICOLO]->(:Articolo) "
                     "WHERE r IS NOT NULL RETURN count(r) AS n")[0]["n"]
-    g.query(Q_PULISCI_NOVELLE, {"norma": NORMA, "origine": FONTE})
+    novelle = []
+    for scheda in gemelli:
+        for i, a in enumerate(articoli, 1):
+            a["id"] = f"{scheda}/art-{a['numero']}"
+            a["ordine"] = i
+            a["commiId"] = [f"{a['id']}/c-{k}" for k in range(1, len(a["commi"]) + 1)]
+        for i in range(0, len(articoli), 200):
+            lotto = articoli[i:i + 200]
+            g.query(Q_ARTICOLI, {"norma": scheda, "fonte": FONTE,
+                                 "aggiornato": aggiornato,
+                                 "articoli": [{k: a[k] for k in
+                                               ("id", "numero", "rubrica", "testo", "ordine")}
+                                              for a in lotto]})
+            g.query(Q_PULISCI_COMMI, {"articoli": [{"id": a["id"], "commiId": a["commiId"]}
+                                                   for a in lotto]})
+            g.query(Q_COMMI, {"commi": [
+                {"articoloId": a["id"], "id": cid, "numero": str(k), "ordine": k,
+                 "testo": testo}
+                for a in lotto
+                for k, (cid, testo) in enumerate(zip(a["commiId"], a["commi"]), 1)]})
+        novelle += [{"atto": aid, "articolo": m["articolo"],
+                     "bersaglio": f"{scheda}/art-{a['numero']}",
+                     "numeroBersaglio": re.match(r"\d+", a["numero"]).group(0)}
+                    for aid, coppie in atti.items() if aid in noti
+                    for a, m in coppie if m["articolo"]]
+        g.query(Q_PULISCI_NOVELLE, {"norma": scheda, "origine": FONTE})
+    print(f"\n  scritti {len(articoli)} articoli e "
+          f"{sum(len(a['commi']) for a in articoli)} commi"
+          + ("" if len(gemelli) == 1 else f" su ciascuna delle {len(gemelli)} schede"))
+
     for i in range(0, len(novelle), 200):
         g.query(Q_NOVELLE, {"novelle": novelle[i:i + 200], "origine": FONTE})
     dopo = g.query("MATCH ()-[r:CITA_ARTICOLO]->(:Articolo) "
@@ -580,9 +600,11 @@ def main():
     EVIDENZE.parent.mkdir(parents=True, exist_ok=True)
     EVIDENZE.write_text(json.dumps(
         {"norma": NORMA, "fonte": FONTE, "aggiornatoAl": aggiornato,
-         "articoli": evidenze}, ensure_ascii=False, indent=1), encoding="utf-8")
+         "articoli": [{**e, "articoloId": f"{scheda}/art-{e['articolo']}"}
+                      for scheda in gemelli for e in evidenze]},
+        ensure_ascii=False, indent=1), encoding="utf-8")
     print(f"  evidenze di abrogazione in {EVIDENZE.relative_to(RADICE)}"
-          f" ({len(evidenze)} articoli)")
+          f" ({len(evidenze) * len(gemelli)} articoli)")
     print("\n  Ora: 08_abrogazioni.py --scrivi (marca gli abrogati),"
           " poi 07_embeddings.py (i commi nuovi non hanno vettore).")
 
