@@ -7,7 +7,7 @@ interrogato da un agente in modalità Graph RAG.
 integrale** su 11.136 scaricabili dal portale, distribuite su 16 tipologie di atto:
 leggi, decreti in tutte le loro forme, regolamenti, notifiche, ordinanze, statuti,
 errata corrige e verbali. Tutti i 181.248 commi hanno un embedding, e 358 norme,
-118 articoli e 52 commi portano una marcatura di abrogazione.
+129 articoli e 52 commi portano una marcatura di abrogazione.
 
 ---
 
@@ -90,23 +90,23 @@ Nel nostro Knowledge Graph, le rubriche svolgono due funzioni cruciali:
 
 | Entità / Label | Quantità | Ruolo nel Modello |
 |---|---|---|
-| **`:Comma`** | **`181.248`** | Unità atomica di testo, ricerca semantica e retrieval |
-| **`:Articolo`** | **`74.742`** | Articoli con rubriche, capi e collocazione tematica |
+| **`:Comma`** | **`181.756`** | Unità atomica di testo, ricerca semantica e retrieval |
+| **`:Articolo`** | **`74.814`** | Articoli con rubriche, capi e collocazione tematica |
 | **`:Norma`** | **`12.248`** | Tutti gli atti normativi censiti: |
 | ↳ *con testo integrale (`caricata: true`)* | *`11.134`* | *Su 11.136 scaricabili dal portale, 16 tipologie* |
 | ↳ *stub citati (`caricata: false`)* | *`1.114`* | *Atti richiamati nei testi per tracciare i rinvii* |
-| **TOTALE NODI** | **`268.238`** | |
+| **TOTALE NODI** | **`268.818`** | |
 
 ### Relazioni (Archi)
 
 | Relazione | Quantità | Direzione | Significato |
 |---|---|---|---|
-| **`HA_COMMA`** | **`181.248`** | `Articolo ➔ Comma` | Contenimento strutturale |
-| **`HA_ARTICOLO`** | **`74.742`** | `Norma ➔ Articolo` | Contenimento strutturale |
+| **`HA_COMMA`** | **`181.756`** | `Articolo ➔ Comma` | Contenimento strutturale |
+| **`HA_ARTICOLO`** | **`74.814`** | `Norma ➔ Articolo` | Contenimento strutturale |
 | **`CITA`** | **`69.662`** | `(Comma/Norma) ➔ Norma` | Rinvio normativo formale |
-| **`CITA_ARTICOLO`** | **`24.004`** | `Comma ➔ Articolo` | Rinvio puntuale ad articolo specifico risolto |
+| **`CITA_ARTICOLO`** | **`24.190`** | `Comma ➔ Articolo` | Rinvio puntuale ad articolo specifico risolto |
 | **`ABROGA`** | **`413`** | `Norma ➔ Norma` | Abrogazione di un atto per intero, riconosciuta senza ambiguità |
-| **TOTALE ARCHI** | **`350.069`** | | |
+| **TOTALE ARCHI** | **`350.835`** | | |
 
 `CITA_ARTICOLO` era fermo a 16.763 finche' `RE_BERSAGLIO`, nel parser,
 pretendeva che il numero d'articolo fosse **adiacente** al nome dell'atto. Nel
@@ -135,6 +135,48 @@ strumento dell'agente li leggeva. Non contribuivano ad alcuna risposta, e il
 contenuto degli allegati resta raggiungibile dal PDF originale via
 `/documenti/<id>`. L'elenco di cosa è stato rimosso è in
 `out/allegati_rimossi.json`.
+
+### Il testo coordinato: un atto che il grafo tiene aggiornato
+
+L'archivio pubblica ogni atto **nella forma in cui è nato** e non lo riscrive
+mai. Per il Codice Penale questo significava tenerne la versione del 1974 —
+408 articoli, 408 commi tutti impliciti, **due** rubriche, quattro archi di
+novella entranti — mentre cinquant'anni di modifiche non comparivano.
+
+`src/10_codice_penale.py` integra il **testo coordinato** pubblicato dal
+Consiglio Grande e Generale (`data/coordinati/codice-penale.pdf`, aggiornato al
+27 febbraio 2026). Il Codice ha ora **480 articoli**, **916 commi** con i
+capoversi al loro posto, **478 rubriche** e **190 archi di novella** entranti.
+
+Come si legge il PDF, in breve:
+
+  - **corpo e note si separano per dimensione del carattere** (11-12pt contro
+    8pt), non per posizione nella pagina. Il richiamo di nota è uno span di
+    sole cifre più piccolo *sulla stessa riga*, e va staccato: senza,
+    `Art. 153` con la nota 43 diventa `Art. 15343`;
+  - **i capoversi si riconoscono dal rientro** (x≈92 contro x≈57), corretto
+    dalla punteggiatura di chi precede — negli articoli recenti anche le voci
+    di un elenco rientrano, e l'elenco appartiene al comma che lo introduce;
+  - le note portano, sotto *«Modifiche legislative»*, **l'atto e l'articolo**
+    di ogni novella: è il dato che il parser dal testo degli atti modificanti
+    non sa ricavare.
+
+Il testo del 1974 resta in **`Articolo.testoOriginario`** per i 408 articoli
+che lo avevano; `Articolo.fonteTesto` e `Articolo.testoAggiornatoAl` dicono da
+dove viene il testo vigente e a quando è aggiornato.
+
+Due vincoli di proprietà, entrambi per non rompere l'idempotenza altrui:
+
+  - **le marcature di vigenza non si scrivono qui.** `08_abrogazioni.py` le
+    azzera e riscrive a ogni esecuzione; questo script deposita le evidenze in
+    `data/derivato/abrogazioni_*.json` e `08` le legge insieme alle proprie;
+  - **gli archi di novella portano `origine`** e vengono cancellati e riscritti
+    a ogni giro, così una modifica che smette di essere riconosciuta non lascia
+    dietro di sé l'arco della volta prima. Gli archi che il parser ricava dal
+    testo degli atti non hanno quella marca e restano dove sono.
+
+Vale per **un atto su 7.800**: i commi impliciti scendono da 46.800 a 46.392.
+Il metodo però è riusabile su qualunque altro testo coordinato.
 
 ### Marcature di vigenza
 
@@ -226,7 +268,7 @@ Ciò che l'arco garantiva lo garantiscono quattro controlli in fila: tipo
 concorde col prefisso dell'id, atto che risolve a **una** sola norma, bersaglio
 non posteriore alla fonte, e partizione che esiste davvero dentro quell'atto —
 se il testo dice «comma 7» e l'articolo ne ha sei, il riferimento è stato letto
-male. Si marcano così **118 articoli** e **52 commi**, con `abrogato` e
+male. Si marcano così **129 articoli** e **52 commi**, con `abrogato` e
 `abrogatoDa`, esposti al modello come `passoAbrogato`.
 
 Il numero resta limitato perché la maggioranza delle clausole scende ancora più

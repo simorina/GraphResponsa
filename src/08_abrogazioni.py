@@ -48,7 +48,8 @@ sola norma, il bersaglio non puo' essere posteriore alla fonte, e la partizione
 nominata deve esistere davvero dentro quell'atto - se il testo dice "comma 7" e
 l'articolo ne ha sei, il riferimento e' stato letto male.
 
-Si marcano 118 articoli e 52 commi.
+Si marcano 129 articoli e 52 commi: 118 dedotti dalle clausole degli atti,
+11 letti dal testo coordinato del Codice Penale (vedi da_testi_coordinati).
 
 ## Cosa NON copre
 
@@ -89,6 +90,7 @@ l'assenza non autorizza a dire "vigente".
     .venv/Scripts/python.exe src/08_abrogazioni.py --scrivi  # scrive nel grafo
 """
 
+import json
 import re
 import sys
 from pathlib import Path
@@ -740,7 +742,46 @@ def parziali(g):
                             "comma": numc, "testo": testo})
     for k, v in scarti.items():
         print(f"  scartati, {k:<32} {v:>5}")
+    art += da_testi_coordinati(g)
     return art, com
+
+
+# I testi coordinati dicono quali articoli sono caduti senza che lo si debba
+# dedurre dal testo degli atti abroganti: la marcatura [ABROGATO] e' esplicita.
+# Le evidenze le estrae 10_codice_penale.py; qui si leggono soltanto, perche'
+# le marcature di vigenza le scrive questo script e nessun altro - azzerandole
+# a ogni esecuzione per restare idempotente, e cancellando quindi qualunque
+# marcatura fosse stata scritta altrove.
+COORDINATI = Path(__file__).resolve().parent.parent / "data" / "derivato"
+
+
+def da_testi_coordinati(g):
+    fuori = []
+    for percorso in sorted(COORDINATI.glob("abrogazioni_*.json")):
+        dati = json.loads(percorso.read_text(encoding="utf-8"))
+        esistono = {r["id"] for r in g.query(
+            "UNWIND $ids AS id MATCH (a:Articolo {id: id}) RETURN a.id AS id",
+            {"ids": [x["articoloId"] for x in dati["articoli"]]})}
+        senza, ignoti = 0, 0
+        for x in dati["articoli"]:
+            if x["articoloId"] not in esistono:
+                ignoti += 1
+                continue
+            if not x["fonti"]:
+                # L'articolo e' caduto ma il coordinato non dice per mano di
+                # chi. Si marca lo stesso: l'abrogazione e' un fatto, la fonte
+                # un dettaglio che si puo' non avere.
+                senza += 1
+            for fonte in x["fonti"] or [None]:
+                fuori.append({"fonte": fonte, "bersaglio": dati["norma"],
+                              "artId": x["articoloId"], "art": x["articolo"],
+                              "comma": None,
+                              "testo": f"[ABROGATO] nel {dati['fonte']}, "
+                                       f"aggiornato al {dati['aggiornatoAl']}"})
+        print(f"  dal testo coordinato di {dati['norma']}: "
+              f"{len(dati['articoli']) - ignoti} articoli"
+              f" ({senza} senza atto abrogante dichiarato)")
+    return fuori
 
 
 def main():
@@ -776,7 +817,7 @@ def main():
     print(f"  ABROGATE IN TUTTO:         {len(tutte):>4}")
 
     art, com = parziali(g)
-    art_unici = {(a["fonte"], a["artId"]): a for a in art}
+    art_unici = {(a["fonte"] or "", a["artId"]): a for a in art}
     com_unici = {(c["fonte"], c["commaId"]): c for c in com}
     print(f"\n  ARTICOLI soppressi dentro atti vivi: "
           f"{len({a['artId'] for a in art})} "
@@ -785,6 +826,7 @@ def main():
           f"{len({c['commaId'] for c in com})} "
           f"(in {len({c['bersaglio'] for c in com})} norme)\n")
     for (f, _), a in sorted(art_unici.items()):
+        f = f or "(non dichiarato)"
         print(f"    art  {f:<14} -> {a['bersaglio']:<13} art.{a['art']:<8} {a['testo'][:70]}")
     for (f, _), c in sorted(com_unici.items()):
         print(f"    com  {f:<14} -> {c['bersaglio']:<13} art.{c['art']} c.{c['comma']:<5} {c['testo'][:66]}")
@@ -837,7 +879,8 @@ def main():
     g.query("""
         UNWIND $art AS x MATCH (a:Articolo {id: x.id})
         SET a.abrogato = true, a.abrogatoDa = x.fonti
-    """, {"art": [{"id": i, "fonti": sorted({a["fonte"] for a in art if a["artId"] == i})}
+    """, {"art": [{"id": i, "fonti": sorted({a["fonte"] for a in art
+                                            if a["artId"] == i and a["fonte"]})}
                   for i in {a["artId"] for a in art}]})
     g.query("""
         UNWIND $com AS x MATCH (c:Comma {id: x.id})
