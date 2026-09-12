@@ -20,9 +20,11 @@ import os
 import re
 from pathlib import Path
 
+import certifi
 from dotenv import load_dotenv
 from langchain_core.tools import tool
 from langchain_neo4j import Neo4jGraph
+from neo4j import TrustCustomCAs
 
 ROOT = Path(__file__).resolve().parent.parent.parent
 load_dotenv(ROOT / ".env")
@@ -49,17 +51,33 @@ logging.getLogger("neo4j.notifications").setLevel(logging.ERROR)
 
 
 def grafo() -> Neo4jGraph:
-    """Connessione condivisa, aperta alla prima richiesta."""
+    """Connessione condivisa, aperta alla prima richiesta.
+
+    Lo schema neo4j+s:// forza le impostazioni di cifratura nell'URI e non
+    lascia scegliere l'origine dei certificati fidati: su alcune macchine
+    Windows lo store radice di sistema che Python legge di default e' vuoto o
+    incompleto (osservato: 36 CA soltanto), e la verifica del certificato di
+    Aura fallisce con "self signed certificate in certificate chain" pur non
+    esserci nessuna intercettazione di rete in corso - riprodotto identico su
+    reti diverse. Passando invece per neo4j:// con la cifratura abilitata a
+    mano e le CA di certifi (le stesse che usa gia' `requests` in questo
+    progetto), la verifica funziona indipendentemente da cosa Windows ha
+    installato nel suo certificate store.
+    """
     global _grafo
     if _grafo is None:
         _grafo = Neo4jGraph(
-            url=os.environ["NEO4J_URI"],
+            url=os.environ["NEO4J_URI"].replace("neo4j+s://", "neo4j://"),
             username=os.environ["NEO4J_USERNAME"],
             password=os.environ["NEO4J_PASSWORD"],
             database=os.environ.get("NEO4J_DATABASE", "neo4j"),
             # Lo schema non serve: non generiamo Cypher dal modello, e
             # ricavarlo a ogni avvio costa un giro di query inutile.
             refresh_schema=False,
+            driver_config={
+                "encrypted": True,
+                "trusted_certificates": TrustCustomCAs(certifi.where()),
+            },
         )
     return _grafo
 
@@ -156,10 +174,10 @@ def ricerca_vettoriale():
                 model=MODELLO_EMBEDDING,
                 api_key=os.environ["VOYAGE_API_KEY"],
             ),
-            url=os.environ["NEO4J_URI"],
-            username=os.environ["NEO4J_USERNAME"],
-            password=os.environ["NEO4J_PASSWORD"],
-            database=os.environ.get("NEO4J_DATABASE", "neo4j"),
+            # Riusa la connessione di grafo() (stesse credenziali, stesso
+            # aggiramento del certificate store di sistema) invece di
+            # aprirne una seconda con url/username/password diretti.
+            graph=grafo(),
             index_name=INDICE_VETTORIALE,
             # NON "hybrid": la fusione dell'integrazione normalizza ogni ramo
             # sul proprio massimo e poi prende il maggiore, cosi' il primo

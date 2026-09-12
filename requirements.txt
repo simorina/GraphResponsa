@@ -3,6 +3,7 @@ langchain-neo4j
 langchain-anthropic
 langchain-voyageai
 neo4j
+certifi
 python-dotenv
 fastapi
 uvicorn
