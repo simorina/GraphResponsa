@@ -179,6 +179,12 @@ Rispondi consultando esclusivamente il grafo della normativa attraverso gli stru
    aperto e' un errore, anche quando il testo sembra completo e sensato:
    sembrera' sempre completo e sensato, e sara' scaduto.
 
+   Dentro quel campo, `riscrive: true` distingue l'atto che ha RISCRITTO la
+   disposizione da quello che la richiama di passaggio. Gli atti che
+   riscrivono vengono per primi: sono quelli da aprire, e l'anno non e' il
+   criterio - una legge del 2025 che sostituisce un comma conta piu' di una
+   del 2026 che vi rimanda.
+
    Vale lo stesso per `versionePiuRecente`: dice che fra i risultati ce n'e'
    un altro con la stessa rubrica e un anno maggiore, cioe' quasi sempre la
    stessa disposizione riscritta. **Fra due atti sulla stessa materia, esponi

@@ -390,6 +390,21 @@ def _rerank(query, righe, limite):
     return [righe[x.index] for x in esito.results]
 
 
+# Le formule con cui un atto riscrive un altro: "e' cosi' sostituito", "sono
+# abrogati", "e' aggiunto il seguente articolo". Distinguono la novella vera
+# dal semplice rimando - "i soggetti in possesso dei requisiti di cui
+# all'articolo 3" cita l'articolo senza toccarlo - e l'apostrofo va in una
+# classe di caratteri perche' gli atti usano ' e ’ indifferentemente.
+#
+# NON si usa \b davanti a "è": in Java - il motore che sta dietro a `=~` di
+# Cypher - \w e' ASCII, quindi fra uno spazio e una vocale accentata NON c'e'
+# confine di parola e l'espressione non agganciava mai nulla. Misurato: "e'
+# cosi' sostituito" dava riscrive=false. Il confine si scrive a mano.
+RISCRITTURA = (r"(?is).*(?:^|[\s,;:.(«\"])(?:è|e['’]|sono|viene|vengono)\s+"
+               r"(?:cos[ìi]['’]?\s+)?"
+               r"(?:sostituit|modificat|abrogat|aggiunt|inserit|soppress)\w*.*")
+
+
 def _novelle(righe):
     """Annota quali risultati sono citati da atti SUCCESSIVI.
 
@@ -417,12 +432,23 @@ def _novelle(righe):
             MATCH (c:Comma)-[:CITA_ARTICOLO]->(a)
             MATCH (dopo:Norma)-[:HA_ARTICOLO]->(artDopo:Articolo)-[:HA_COMMA]->(c)
             WHERE dopo.anno > n.anno
-            WITH k, dopo, artDopo, c ORDER BY dopo.anno DESC
-            WITH k, collect({norma: dopo.id, anno: dopo.anno,
-                             articolo: artDopo.numero, comma: c.numero,
-                             testo: c.testo})[..2] AS novelle
+            // Un comma che RISCRIVE la disposizione vale piu' di uno che la
+            // richiama di passaggio, e va detto al modello.
+            WITH k, dopo, artDopo, c,
+                 CASE WHEN c.testo =~ $riscrittura THEN true ELSE false END AS riscrive
+            ORDER BY riscrive DESC
+            // Un comma per ATTO, non i primi due commi in assoluto: un atto
+            // recente con due rimandi si prendeva tutti i posti e l'atto che
+            // l'articolo lo aveva riscritto restava fuori. Misurato sull'art.
+            // 3 della L-44/2015: comparivano due commi della L-87/2026 che vi
+            // rimandano, e non la L-64/2025 che ne ha sostituito le lettere.
+            WITH k, dopo, collect({norma: dopo.id, anno: dopo.anno,
+                                   articolo: artDopo.numero, comma: c.numero,
+                                   testo: c.testo, riscrive: riscrive})[0] AS voce
+            ORDER BY voce.riscrive DESC, voce.anno DESC
+            WITH k, collect(voce)[..3] AS novelle
             RETURN k.n AS norma, k.a AS articolo, novelle
-        """, {"chiavi": chiavi})
+        """, {"chiavi": chiavi, "riscrittura": RISCRITTURA})
     except Exception:
         return righe
     mappa = {(t["norma"], t["articolo"]): t["novelle"] for t in trovate}
