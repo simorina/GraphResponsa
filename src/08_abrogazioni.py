@@ -51,9 +51,28 @@ l'articolo ne ha sei, il riferimento e' stato letto male.
 Si marcano 129 articoli e 53 commi: 118 dedotti dalle clausole degli atti,
 11 letti dal testo coordinato del Codice Penale (vedi da_testi_coordinati).
 
+## La decorrenza differita non e' un rifiuto in blocco
+
+Il primo filtro scartava OGNI clausola con un termine differito, futuro o
+passato. Il timore era giusto - "e' abrogata la Legge n.26/1960 a partire dal
+1 gennaio 2030" non autorizza a marcarla morta oggi - ma la risposta non era
+scartare anche le date venute: il 1 gennaio 1983 e' passato da quarant'anni,
+l'abrogazione ha avuto effetto, e tacerlo era anch'esso un errore.
+
+Ora la data si confronta (decorrenza_non_maturata). Dove il termine non si
+legge - "dal sessantesimo giorno", "dalla data di cui al comma 1", che da qui
+non si vede - la clausola resta scartata: vale l'asimmetria, nel dubbio si
+tace. Sono 25 clausole recuperate a livello d'atto e 6 a livello di articolo.
+
+Una conseguenza va detta: il riconoscimento dipende ora dalla data di oggi, e
+lo stesso testo produce archi diversi in anni diversi. E' corretto - la vigenza
+e' una proprieta' del tempo, non del testo - ed e' un'altra ragione per
+cancellare e riscrivere invece di accumulare.
+
 ## Cosa NON copre
 
-  - le forme che il riconoscimento non sa leggere, 408 commi su 1.728;
+  - le forme che il riconoscimento non sa leggere, 335 commi su 1.485 misurati
+    sui JSON del parser (erano 360 prima del recupero delle decorrenze);
   - le partizioni sotto il comma: lettere, punti, capoversi, che il grafo non
     modella e che percio' non si possono marcare;
   - l'abrogazione TACITA, una legge posteriore incompatibile con una anteriore
@@ -90,6 +109,7 @@ l'assenza non autorizza a dire "vigente".
     .venv/Scripts/python.exe src/08_abrogazioni.py --scrivi  # scrive nel grafo
 """
 
+import datetime
 import json
 import re
 import sys
@@ -113,7 +133,31 @@ TIPO = (r"(legge|decreto\s+delegato|decreto\s*[-–]?\s*legge|"
 # La virgola fra l'anno e il numero e' comune quanto la sua assenza - "Legge 18
 # luglio 1979, n.46" accanto a "Legge 27 ottobre 2004 n. 146" - e pretendere la
 # sola forma senza virgola faceva perdere l'atto per intero.
-RIF = r"(?:n\.?\s*(\d+)\s*/\s*(\d{4})|(\d{4})\s*,?\s*n\.?\s*(\d+))"
+# Il terzo ramo e' l'ordine rovesciato, numero prima della data: "la legge per
+# le societa' n.45 del 21 dicembre 1942 e' abrogata". Sono 14 clausole che i
+# primi due rami non vedevano affatto, perche' pretendono l'anno accanto al
+# numero e qui in mezzo c'e' il giorno e il mese.
+_MESI_RE = ("gennaio|febbraio|marzo|aprile|maggio|giugno|luglio|agosto"
+            "|settembre|ottobre|novembre|dicembre")
+RIF = (r"(?:n\.?\s*(\d+)\s*/\s*(\d{4})"
+       r"|(\d{4})\s*,?\s*n\.?\s*(\d+)"
+       r"|n\.?\s*(\d+)\s+del\s+\d{1,2}\s+(?:" + _MESI_RE + r")\s+(\d{4}))")
+
+
+def estremi(gruppi):
+    """(numero, anno) dal ramo di RIF che ha agganciato.
+
+    I rami sono tre e ognuno mette numero e anno in posizioni diverse: tenere
+    lo smistamento in un posto solo evita che aggiungendone un quarto si
+    debbano ritrovare tutti i punti che li leggono.
+    """
+    if gruppi[0]:
+        return int(gruppi[0]), int(gruppi[1])
+    if gruppi[3]:
+        return int(gruppi[3]), int(gruppi[2])
+    return int(gruppi[4]), int(gruppi[5])
+
+
 AVANTI = re.compile(
     rf"(?:è|e')\s+abrogat[ao]\s+(?:il|la|lo)?\s*{TIPO}[^;]{{0,60}}?{RIF}", re.I)
 INDIETRO = re.compile(
@@ -244,7 +288,7 @@ SPEZZA = re.compile(r"\.\s+(?:[A-ZÈÉ]|\d+\s*(?:bis|ter|quater)?\s*\.)")
 
 def _fermo(testo):
     """Vale per ogni livello: qui non si abroga, si differisce o si riscrive."""
-    return bool(DIFFERITA.search(testo) or _salvezza_blocca(testo)
+    return bool(decorrenza_non_maturata(testo) or _salvezza_blocca(testo)
                 or SOSTITUZIONE.search(testo) or DIFFERITA_EVENTO.search(testo))
 
 
@@ -327,9 +371,82 @@ PREFISSO = {"legge": {"L"}, "decreto delegato": {"DD"},
 PARTE = re.compile(r"(?:articol|comm[ai]|punt[oi]|letter[ae]|capovers|allegat)", re.I)
 # "Con l'entrata in vigore della presente legge" NON e' un differimento: e' la
 # decorrenza ordinaria dell'atto che abroga. Lo e' una data esplicita.
+# "Dalla data di cui al comma 1 e' abrogato il Regolamento..." e' un
+# differimento come gli altri, e prima non veniva visto perche' DIFFERITA
+# pretende "a decorrere" o una cifra dopo "dal". Il termine sta in un comma che
+# da qui non si legge, quindi resta scartato: in un decreto del 2025 quel comma
+# puo' fissare una data ancora da venire.
 DIFFERITA = re.compile(r"(a\s+decorrere\s+dal|con\s+decorrenza\s+dal\s+\d|"
                        r"con\s+efficacia\s+dal|a\s+far\s+data|a\s+partire\s+dal|"
-                       r"abrogat\w+\s+dal\s+\d)", re.I)
+                       r"abrogat\w+\s+dal\s+\d|"
+                       r"dalla\s+data\s+di\s+cui\s+al\s+comma)", re.I)
+
+MESI = {"gennaio": 1, "febbraio": 2, "marzo": 3, "aprile": 4, "maggio": 5,
+        "giugno": 6, "luglio": 7, "agosto": 8, "settembre": 9, "ottobre": 10,
+        "novembre": 11, "dicembre": 12}
+_DECORRE = (r"(?:a\s+decorrere\s+dal|con\s+decorrenza\s+dal|con\s+efficacia\s+dal"
+            r"|a\s+far\s+data\s+dal|a\s+partire\s+dal|abrogat\w+\s+dal)")
+DECORRENZA_DATA = re.compile(
+    _DECORRE + r"\s*(\d{1,2})[°º]?\s+(" + "|".join(MESI) + r")\s+(\d{4})", re.I)
+# La data non e' completa ma l'anno basta a dire se il termine e' passato.
+# Il tratto deve fermarsi PRIMA che compaia un atto: "a decorrere dalla stessa
+# data e' abrogato il Decreto 27 dicembre 1985 n.165" non dichiara il 1985 come
+# decorrenza, quello e' l'anno del bersaglio, e leggerlo come termine faceva
+# tornare il conto per puro caso.
+DECORRENZA_ANNO = re.compile(
+    _DECORRE + r"(?:(?!legge|decreto|regolamento)[^.;]){0,24}?\b(\d{4})\b", re.I)
+# "a decorrere dalla stessa data", "dalla medesima data": il termine e' quello
+# appena enunciato nello stesso comma, cioe' la decorrenza ordinaria dell'atto
+# che abroga - e quell'atto e' pubblicato, sta in archivio, quindi la data e'
+# venuta e l'abrogazione ha avuto effetto. Sono i decreti tariffari, che si
+# sostituiscono l'uno all'altro con questa formula: 21 clausole.
+#
+# "dalla data di cui al comma 1" NON entra qui, pur essendo anch'esso un rinvio
+# interno: e' un rimando in avanti a un comma che questa funzione non vede, e
+# in un decreto del 2025 quel comma puo' fissare un termine ancora da venire.
+# Costa tre clausole e toglie tre marcature possibilmente false. Vale la regola
+# asimmetrica: nel dubbio si tace.
+DECORRENZA_INTERNA = re.compile(
+    r"(?:a\s+decorrere|con\s+decorrenza|con\s+efficacia|a\s+partire)\s+"
+    r"dall[ao]?\s*(?:stessa|medesima)\s+data", re.I)
+
+
+def decorrenza_non_maturata(testo, oggi=None):
+    """Se la clausola differisce l'abrogazione a un termine NON ancora venuto.
+
+    Il primo filtro scartava ogni decorrenza differita, futura o passata, e
+    questo costava 43 abrogazioni piene: "E' abrogata, a decorrere dal 1°
+    gennaio 1985, la Legge n.12/1943" differisce a una data che e' passata da
+    quarant'anni, quindi l'abrogazione ha avuto effetto e va detta.
+
+    La data non si indovina: dove non si legge, la clausola resta scartata.
+    Marcare morta una legge il cui termine non e' ancora venuto e' l'errore
+    che questo archivio non puo' permettersi, e l'asimmetria vale anche qui -
+    nel dubbio si tace.
+
+    Dipende dalla data di oggi, e questo e' corretto: la vigenza e' una
+    proprieta' del tempo, non del testo. Rieseguito l'anno prossimo, lo script
+    marchera' cio' che nel frattempo e' maturato.
+    """
+    if not DIFFERITA.search(testo):
+        return False
+    oggi = oggi or datetime.date.today()
+    m = DECORRENZA_DATA.search(testo)
+    if m:
+        try:
+            quando = datetime.date(int(m.group(3)), MESI[m.group(2).lower()],
+                                   int(m.group(1)))
+        except ValueError:
+            return True
+        return quando > oggi
+    if DECORRENZA_INTERNA.search(testo):
+        return False
+    m = DECORRENZA_ANNO.search(testo)
+    if m:
+        # Solo l'anno: si e' maturato se l'anno e' finito, cosi' un termine
+        # dentro l'anno corrente non viene dato per venuto.
+        return int(m.group(1)) >= oggi.year
+    return True                       # differita, ma il termine non si legge
 # "fatti salvi gli effetti prodotti" tiene in vita una parte dell'atto.
 # Non tutte le clausole di salvezza impediscono la marcatura, e trattarle allo
 # stesso modo era l'errore piu' costoso del riconoscimento: da solo teneva
@@ -381,7 +498,7 @@ def atti_con_tipo(testo):
     fuori = set()
     for m in NOMINATO.finditer(testo.translate(APOSTROFI)):
         tipo, g = m.group(1), m.groups()[1:]
-        numero, anno = (g[0], g[1]) if g[0] else (g[3], g[2])
+        numero, anno = estremi(g)
         tipo = re.sub(r"\s*[-–]\s*", " ", " ".join(tipo.lower().split()))
         fuori.add((int(numero), int(anno), tipo.replace("consigliare", "consiliare")))
     return fuori
@@ -395,7 +512,26 @@ PROVE = [
     ("È abrogato l'articolo 8 della Legge n.146/2004.", 0),
     ("All’articolo 2 della Legge n.55/1994, il punto 8.0 è abrogato.", 0),
     ("Sono abrogate tutte le norme incompatibili con il presente decreto.", 0),
-    ("È abrogata la Legge n.146/2004 a decorrere dal 1° gennaio 2015.", 0),
+    # La decorrenza differita non e' piu' un rifiuto in blocco: conta se il
+    # termine e' venuto. Il 1° gennaio 2015 e' passato, quindi l'abrogazione
+    # ha avuto effetto e va detta; il 2099 no, e tacere e' l'unica risposta
+    # giusta. Scartarle entrambe costava 43 abrogazioni piene.
+    ("È abrogata la Legge n.146/2004 a decorrere dal 1° gennaio 2015.", 1),
+    ("È abrogata la Legge n.146/2004 a decorrere dal 1° gennaio 2099.", 0),
+    # Termine illeggibile: resta scartata. Nel dubbio si tace, come sempre.
+    ("È abrogata la Legge n.146/2004 a decorrere dal sessantesimo giorno.", 0),
+    # Il rinvio a una data scritta altrove nello STESSO atto che abroga: quello
+    # e' pubblicato, quindi il termine e' venuto. Qui il 1985 e' l'anno del
+    # bersaglio, non della decorrenza, e leggerlo come termine faceva tornare
+    # il conto per caso.
+    ("A decorrere dalla stessa data è abrogato il Decreto 27 dicembre 1985 n. 165.", 1),
+    # Il rimando in avanti a un comma che qui non si vede resta scartato: in un
+    # atto recente quel comma puo' fissare un termine ancora da venire.
+    ("Dalla data di cui al comma 1 è abrogato il Decreto 18 gennaio 2017 n.8.", 0),
+    # Numero prima della data: il terzo ramo di RIF. Senza, la clausola non
+    # veniva vista affatto.
+    ("La legge sulle società n.45 del 21 dicembre 1942 è abrogata.", 1),
+    ("È abrogato il decreto n.57 del 26 aprile 1995.", 1),
     # La salvezza degli EFFETTI non impedisce la marcatura: l'atto e' morto e
     # restano validi solo gli atti gia' compiuti sotto la sua vigenza. E' la
     # forma dominante nel corpus, e trattarla come le altre ne teneva fuori 117.
@@ -465,10 +601,13 @@ PROVE = [
      "è abrogata la Legge 21 ottobre 1988 n. 105.", 1),
     # ...ma resta necessaria: qui il bersaglio vero e' il punto, non la legge.
     ("All'articolo 2 della Legge n.55/1994, il punto 8.0 è abrogato.", 0),
-    # Anche "a partire dal" e' un differimento, e mancava: l'esito era giusto
-    # solo perche' la data e' passata da quarant'anni. Un "a partire dal 2030"
-    # avrebbe marcato oggi come morta una legge ancora viva.
-    ("E' abrogata la Legge 17 settembre 1960 n. 26 a partire dal 1° gennaio 1983.", 0),
+    # "a partire dal" e' un differimento, e il timore scritto qui prima era
+    # giusto: un "a partire dal 2030" marcherebbe oggi come morta una legge
+    # ancora viva. La risposta pero' non era scartare anche le date passate -
+    # il 1° gennaio 1983 e' venuto da quarant'anni, l'abrogazione ha avuto
+    # effetto, e tacerlo era anch'esso un errore. Ora si confronta la data.
+    ("E' abrogata la Legge 17 settembre 1960 n. 26 a partire dal 1° gennaio 1983.", 1),
+    ("E' abrogata la Legge 17 settembre 1960 n. 26 a partire dal 1° gennaio 2030.", 0),
 ]
 
 # Le due grafie dell'apostrofo sono la stessa parola: si normalizzano prima di
@@ -479,7 +618,7 @@ APOSTROFI = str.maketrans({"’": "'", "‘": "'", "ʼ": "'"})
 def bersagli(testo):
     """Gli atti interi che questo comma abroga senza ambiguita'. Quasi sempre zero."""
     testo = testo.translate(APOSTROFI)
-    if DIFFERITA.search(testo) or _salvezza_blocca(testo):
+    if decorrenza_non_maturata(testo) or _salvezza_blocca(testo):
         return []
     trovate = []
     for espressione in (AVANTI, INDIETRO):
@@ -521,7 +660,7 @@ def bersagli(testo):
     fuori = []
     for m in trovate:
         tipo, g = m.group(1), m.groups()[1:]
-        numero, anno = (g[0], g[1]) if g[0] else (g[3], g[2])
+        numero, anno = estremi(g)
         # Il tipo si normalizza qui: "Decreto - Legge" e "decreto legge" sono
         # la stessa cosa, e la grafia varia atto per atto.
         tipo = re.sub(r"\s*[-–]\s*", " ", " ".join(tipo.lower().split()))
@@ -540,7 +679,10 @@ PROVE_ARTICOLO = [
     ("Il comma 3 dell'articolo 3 della Legge n.92/2008 è abrogato.", 0),
     ("All'articolo 2 della Legge n.55/1994, il punto 8.0 è abrogato.", 0),
     ("La lettera d), comma 1, dell'articolo 3 del DD n.101/2019 è abrogata.", 0),
-    ("L'articolo 6 della Legge 30 marzo 1993 n. 53 è abrogato dal 1° gennaio 2015.", 0),
+    # Il differimento vale anche al livello dell'articolo, e con lo stesso
+    # criterio: il 2015 e' passato, il 2030 no.
+    ("L'articolo 6 della Legge 30 marzo 1993 n. 53 è abrogato dal 1° gennaio 2015.", 1),
+    ("L'articolo 6 della Legge 30 marzo 1993 n. 53 è abrogato dal 1° gennaio 2030.", 0),
     ("È abrogata la Legge 27 ottobre 2004 n. 146.", 0),
     ("L'articolo 3 della Legge n.55/1994 è abrogato e sostituito dal seguente.", 0),
     ("L'articolo 14 del DD n.111/2021 è abrogato dall'entrata in vigore del presente.", 0),
@@ -842,10 +984,15 @@ def main():
     # Si cancellano PRIMA tutti gli archi, poi si riscrivono. Con il solo MERGE
     # lo script non era idempotente: stringendo un filtro, l'arco che smetteva
     # di essere riconosciuto restava nel grafo dalla volta prima. E' successo -
-    # L-32-1982 -> L-26-1960, scartato per la decorrenza differita al 1983,
-    # sopravviveva e lasciava la norma con `abrogataDa` valorizzato e
+    # L-32-1982 -> L-26-1960, allora scartato per la decorrenza differita al
+    # 1983, sopravviveva e lasciava la norma con `abrogataDa` valorizzato e
     # `abrogata` no. Un indice di vigenza che non sa disfare le proprie
     # affermazioni e' peggio che non averlo.
+    #
+    # (Quell'arco oggi si riconosce: il 1983 e' passato. Ma la ragione per
+    # cancellare prima di riscrivere vale ancora, e ora anche al contrario -
+    # il confronto con la data di oggi fa MATURARE archi col tempo, quindi il
+    # grafo cambia da un'esecuzione all'altra a testo invariato.)
     g.query("MATCH ()-[r:ABROGA]->() DELETE r")
     g.query("""
         UNWIND $archi AS a
