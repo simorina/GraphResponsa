@@ -37,15 +37,38 @@ INDICE_VETTORIALE = "commi_vettoriale"
 INDICE_KEYWORD = "testo_normativo"   # il full-text gia' esistente
 LOTTO = 16                           # commi per richiesta: tiene sotto i limiti
                                      # di un account senza metodo di pagamento
+# Quanti giri prima di arrendersi su un errore di rete. Ogni giro riparte dai
+# commi ancora senza vettore, quindi ritentare non costa lavoro rifatto.
+TENTATIVI = 6
 
 
-def conta(driver, db):
-    with driver.session(database=db) as s:
-        return s.run("""
-            MATCH (c:Comma)
-            RETURN count(c) AS totali,
-                   sum(CASE WHEN c.embedding IS NOT NULL THEN 1 ELSE 0 END) AS con_embedding
-        """).single().data()
+CONTEGGIO = """
+    MATCH (c:Comma)
+    RETURN count(c) AS totali,
+           sum(CASE WHEN c.embedding IS NOT NULL THEN 1 ELSE 0 END) AS con_embedding
+"""
+
+
+def conta(uri, auth, db):
+    """Apre e chiude la propria connessione, per non dipendere da un driver guasto.
+
+    Contava attraverso un driver condiviso, e quando la corsa moriva per una
+    connessione caduta il gestore dell'errore chiamava proprio questa funzione
+    per dire a che punto era arrivata: la chiamata rilanciava sul driver
+    ormai defunto, e il ritentativo non partiva nemmeno. Un guasto della rete
+    finiva cosi' per uccidere il meccanismo che doveva ripararlo.
+    """
+    with GraphDatabase.driver(uri, auth=auth) as d:
+        with d.session(database=db) as s:
+            return s.run(CONTEGGIO).single().data()
+
+
+def conta_o_niente(uri, auth, db):
+    """Il conteggio per i messaggi, che non deve mai far fallire chi lo chiama."""
+    try:
+        return conta(uri, auth, db)["con_embedding"]
+    except Exception:
+        return None
 
 
 def main():
@@ -58,12 +81,11 @@ def main():
     password = os.environ["NEO4J_PASSWORD"]
     db = os.environ.get("NEO4J_DATABASE", "neo4j")
 
-    driver = GraphDatabase.driver(uri, auth=(utente, password))
-    prima = conta(driver, db)
+    auth = (utente, password)
+    prima = conta(uri, auth, db)
     print(f"Commi nel grafo: {prima['totali']}, gia' con embedding: {prima['con_embedding']}")
     if prima["con_embedding"] >= prima["totali"]:
         print("Tutti i commi hanno gia' un embedding. Niente da fare.")
-        driver.close()
         return
 
     print(f"Calcolo gli embedding mancanti con {MODELLO_EMBEDDING}...")
@@ -80,32 +102,51 @@ def main():
 
     # from_existing_graph legge i nodi :Comma, calcola l'embedding del campo
     # `testo` e lo salva su ogni nodo. Crea anche l'indice vettoriale.
-    try:
-        Neo4jVector.from_existing_graph(
-            embedding=embedding,
-            url=uri, username=utente, password=password, database=db,
-            node_label="Comma",
-            text_node_properties=["testo"],
-            embedding_node_property="embedding",
-            index_name=INDICE_VETTORIALE,
-            keyword_index_name=INDICE_KEYWORD,
-            search_type="hybrid",
-        )
-    except Exception as e:
-        if "rate limit" in str(e).lower() or "RateLimit" in type(e).__name__:
-            fatti = conta(driver, db)["con_embedding"]
-            driver.close()
-            raise SystemExit(
-                f"\nVoyage ha applicato un limite di velocita'. "
-                f"Indicizzati finora: {fatti}/{prima['totali']}.\n"
-                f"Registra un metodo di pagamento su dashboard.voyageai.com "
-                f"(i token restano gratuiti, salgono solo i limiti), attendi "
-                f"qualche minuto e rilancia: riprende da dove si e' fermato."
-            ) from e
-        raise
+    #
+    # Sulla corsa intera - 171.165 commi, oltre due ore - una connessione che
+    # cade e' quasi certa, e succedeva da entrambi i lati: "RemoteDisconnected"
+    # da Voyage al 51%, "SessionExpired" da Neo4j al 74%. Il lavoro fatto non
+    # si perde mai (i vettori sono gia' sui nodi e ogni giro riparte da quelli
+    # che ne sono privi), ma bisognava accorgersene e rilanciare a mano. Ora ci
+    # riprova da se', e ritentare non ricalcola nulla.
+    for tentativo in range(1, TENTATIVI + 1):
+        try:
+            Neo4jVector.from_existing_graph(
+                embedding=embedding,
+                url=uri, username=utente, password=password, database=db,
+                node_label="Comma",
+                text_node_properties=["testo"],
+                embedding_node_property="embedding",
+                index_name=INDICE_VETTORIALE,
+                keyword_index_name=INDICE_KEYWORD,
+                search_type="hybrid",
+            )
+            break
+        except Exception as e:
+            if "rate limit" in str(e).lower() or "RateLimit" in type(e).__name__:
+                raise SystemExit(
+                    f"\nVoyage ha applicato un limite di velocita'. "
+                    f"Indicizzati finora: {conta_o_niente(uri, auth, db)}"
+                    f"/{prima['totali']}.\n"
+                    f"Registra un metodo di pagamento su dashboard.voyageai.com "
+                    f"(i token restano gratuiti, salgono solo i limiti), attendi "
+                    f"qualche minuto e rilancia: riprende da dove si e' fermato."
+                ) from e
+            fatti = conta_o_niente(uri, auth, db)
+            if tentativo == TENTATIVI:
+                raise SystemExit(
+                    f"\nInterrotto dopo {TENTATIVI} tentativi: "
+                    f"{type(e).__name__}: {e}\n"
+                    f"Indicizzati finora: {fatti}/{prima['totali']}. "
+                    f"Rilanciare riprende da qui."
+                ) from e
+            attesa = 15 * tentativo
+            print(f"  {type(e).__name__} a {fatti}/{prima['totali']}: "
+                  f"riprovo fra {attesa}s (tentativo {tentativo}/{TENTATIVI})",
+                  flush=True)
+            time.sleep(attesa)
 
-    dopo = conta(driver, db)
-    driver.close()
+    dopo = conta(uri, auth, db)
     nuovi = dopo["con_embedding"] - prima["con_embedding"]
     print(f"Fatto in {time.time() - inizio:.0f}s: {nuovi} nuovi embedding, "
           f"{dopo['con_embedding']}/{dopo['totali']} commi indicizzati.")
