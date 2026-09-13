@@ -3,11 +3,11 @@
 Grafo Neo4j della normativa della Repubblica di San Marino, costruito per essere
 interrogato da un agente in modalità Graph RAG.
 
-**Stato aggiornato:** **268.238 nodi**, **350.069 relazioni**, **11.134 norme con testo
+**Stato aggiornato:** **254.152 nodi**, **320.582 relazioni**, **11.052 norme con testo
 integrale** su 11.136 scaricabili dal portale, distribuite su 16 tipologie di atto:
 leggi, decreti in tutte le loro forme, regolamenti, notifiche, ordinanze, statuti,
-errata corrige e verbali. Tutti i 181.248 commi hanno un embedding, e 358 norme,
-128 articoli e 50 commi portano una marcatura di abrogazione.
+errata corrige e verbali. Tutti i 171.165 commi hanno un embedding, e 424 norme,
+172 articoli e 67 commi portano una marcatura di abrogazione.
 
 ---
 
@@ -90,23 +90,23 @@ Nel nostro Knowledge Graph, le rubriche svolgono due funzioni cruciali:
 
 | Entità / Label | Quantità | Ruolo nel Modello |
 |---|---|---|
-| **`:Comma`** | **`180.747`** | Unità atomica di testo, ricerca semantica e retrieval |
-| **`:Articolo`** | **`74.078`** | Articoli con rubriche, capi e collocazione tematica |
-| **`:Norma`** | **`12.225`** | Tutti gli atti normativi censiti: |
-| ↳ *con testo integrale (`caricata: true`)* | *`11.134`* | *Su 11.136 scaricabili dal portale, 16 tipologie* |
-| ↳ *stub citati (`caricata: false`)* | *`1.114`* | *Atti richiamati nei testi per tracciare i rinvii* |
-| **TOTALE NODI** | **`267.050`** | |
+| **`:Comma`** | **`171.165`** | Unità atomica di testo, ricerca semantica e retrieval |
+| **`:Articolo`** | **`70.813`** | Articoli con rubriche, capi e collocazione tematica |
+| **`:Norma`** | **`12.173`** | Tutti gli atti normativi censiti: |
+| ↳ *con testo integrale (`caricata: true`)* | *`11.052`* | *Su 11.136 scaricabili dal portale, 16 tipologie* |
+| ↳ *stub citati (`caricata: false`)* | *`1.121`* | *Atti richiamati nei testi per tracciare i rinvii* |
+| **TOTALE NODI** | **`254.152`** | |
 
 ### Relazioni (Archi)
 
 | Relazione | Quantità | Direzione | Significato |
 |---|---|---|---|
-| **`HA_COMMA`** | **`180.747`** | `Articolo ➔ Comma` | Contenimento strutturale |
-| **`HA_ARTICOLO`** | **`74.078`** | `Norma ➔ Articolo` | Contenimento strutturale |
-| **`CITA`** | **`69.450`** | `(Comma/Norma) ➔ Norma` | Rinvio normativo formale |
-| **`CITA_ARTICOLO`** | **`24.171`** | `Comma ➔ Articolo` | Rinvio puntuale ad articolo specifico risolto |
-| **`ABROGA`** | **`412`** | `Norma ➔ Norma` | Abrogazione di un atto per intero, riconosciuta senza ambiguità |
-| **TOTALE ARCHI** | **`348.858`** | | |
+| **`HA_COMMA`** | **`171.165`** | `Articolo ➔ Comma` | Contenimento strutturale |
+| **`HA_ARTICOLO`** | **`70.813`** | `Norma ➔ Articolo` | Contenimento strutturale |
+| **`CITA`** | **`56.504`** | `(Comma/Norma) ➔ Norma` | Rinvio normativo formale |
+| **`CITA_ARTICOLO`** | **`21.578`** | `Comma ➔ Articolo` | Rinvio puntuale ad articolo specifico risolto |
+| **`ABROGA`** | **`522`** | `Norma ➔ Norma` | Abrogazione di un atto per intero, riconosciuta senza ambiguità |
+| **TOTALE ARCHI** | **`320.582`** | | |
 
 `CITA_ARTICOLO` era fermo a 16.763 finche' `RE_BERSAGLIO`, nel parser,
 pretendeva che il numero d'articolo fosse **adiacente** al nome dell'atto. Nel
@@ -126,7 +126,7 @@ corrispondere a cio' che un caricamento pulito produrrebbe.
 I `:Comma` erano 180.932 fino alla riparazione del parser: i **316 in più** sono
 il testo che si perdeva su 312 articoli, dove il buffer della rubrica non si
 chiudeva su `)` seguito da punteggiatura. Il conteggio dei nodi per etichetta
-somma a 280.486 e non a 268.238 perché ogni `:Norma` ne porta due — quella
+somma a 266.325 e non a 254.152 perché ogni `:Norma` ne porta due — quella
 generica e quella del tipo (`:Legge`, `:DecretoDelegato`, e così via).
 
 **I nodi `:Allegato` non ci sono più.** Erano 519 su 27 norme e portavano solo
@@ -225,9 +225,9 @@ sul nodo che ha già in mano, senza un `MATCH` in più su ogni ricerca.
 
 | Proprietà | Su | Quantità | Significato |
 |---|---|---:|---|
-| `Norma.abrogata` / `abrogataDa` | `:Norma` | **369** | L'atto è caduto per intero |
-| `Articolo.abrogato` / `abrogatoDa` | `:Articolo` | **128** | Articolo soppresso dentro un atto vivo |
-| `Comma.abrogato` / `abrogatoDa` | `:Comma` | **50** | Comma soppresso dentro un atto vivo |
+| `Norma.abrogata` / `abrogataDa` | `:Norma` | **424** | L'atto è caduto per intero |
+| `Articolo.abrogato` / `abrogatoDa` | `:Articolo` | **172** | Articolo soppresso dentro un atto vivo |
+| `Comma.abrogato` / `abrogatoDa` | `:Comma` | **67** | Comma soppresso dentro un atto vivo |
 
 Le si ricalcola da zero a ogni esecuzione di `src/08_abrogazioni.py --scrivi`,
 archi `ABROGA` compresi: senza cancellarli prima, un arco che smette di essere
@@ -262,7 +262,7 @@ meccanismo è permanente: `08_abrogazioni.py --scrivi` va rieseguito
 #### `ABROGA`, e perché copre meno di quanto sembri
 
 Nel corpus ci sono **1.728 commi** che contengono «è abrogato», «sono abrogati»
-o «e' abrogato», e se ne modellano 413. Non è una svista: la forma più comune
+o «e' abrogato», e se ne modellano 522. Non è una svista: la forma più comune
 abroga una **parte** — *«All'articolo 2 della Legge n.55/1994, il punto 8.0 è
 abrogato»* — e leggerla come abrogazione dell'articolo 2 dichiarerebbe morta
 una norma viva. In un archivio che deve dire a un cittadino se ha diritto a
@@ -285,7 +285,7 @@ La marcatura effettiva non viene solo da lì. L'archivio di Stato segna da sé
 gli atti caduti premettendo `ABROGATO - ` al titolo — **125 norme** — e i due
 segnali si sovrappongono per **88 norme** — ed è una conferma reciproca, non una
 ridondanza: il titolo dice *che* un atto è caduto, i commi dicono *da chi*.
-L'unione marca **358 norme** con `Norma.abrogata`, e le 321 con attribuzione
+L'unione marca **424 norme** con `Norma.abrogata`, e le 405 con attribuzione
 nota portano anche `Norma.abrogataDa`.
 
 #### Le trappole, in ordine di quanto sono costate
@@ -334,7 +334,7 @@ Ciò che l'arco garantiva lo garantiscono quattro controlli in fila: tipo
 concorde col prefisso dell'id, atto che risolve a **una** sola norma, bersaglio
 non posteriore alla fonte, e partizione che esiste davvero dentro quell'atto —
 se il testo dice «comma 7» e l'articolo ne ha sei, il riferimento è stato letto
-male. Si marcano così **128 articoli** e **50 commi**, con `abrogato` e
+male. Si marcano così **172 articoli** e **67 commi**, con `abrogato` e
 `abrogatoDa`, esposti al modello come `passoAbrogato`.
 
 Il numero resta limitato perché la maggioranza delle clausole scende ancora più

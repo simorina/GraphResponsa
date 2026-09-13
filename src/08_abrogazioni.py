@@ -15,7 +15,7 @@ Si riconoscono percio' le sole forme che colpiscono un atto INTERO:
     "Sono abrogate la Legge n.97/1989 e la Legge n.99/1991"  (plurale)
 
 e si scarta tutto il resto: parti d'atto, decorrenze differite a date future,
-clausole di salvezza. Restano 321 norme.
+clausole di salvezza. Restano 405 norme.
 
 L'abrogazione di singoli articoli e commi si scrive a parte, piu' sotto: e' un
 bersaglio diverso e va marcata sul nodo Articolo o Comma, non sulla Norma.
@@ -26,7 +26,7 @@ L'archivio di Stato marca da se' gli atti caduti, premettendo "ABROGATO - " al
 titolo: 125 norme. E' una fonte redazionale, non una lettura nostra, e i due
 segnali si sovrappongono per 88 norme. Il titolo dice CHE un
 atto e' caduto, i commi dicono DA CHI: si tengono entrambi, il flag `abrogata`
-dall'unione e l'attribuzione `abrogataDa` dai soli commi. In tutto 358 norme.
+dall'unione e l'attribuzione `abrogataDa` dai soli commi. In tutto 424 norme.
 
 ## Il livello parziale: dentro atti che restano vivi
 
@@ -48,7 +48,7 @@ sola norma, il bersaglio non puo' essere posteriore alla fonte, e la partizione
 nominata deve esistere davvero dentro quell'atto - se il testo dice "comma 7" e
 l'articolo ne ha sei, il riferimento e' stato letto male.
 
-Si marcano 128 articoli e 50 commi: 117 dedotti dalle clausole degli atti,
+Si marcano 172 articoli e 67 commi: 161 dedotti dalle clausole degli atti,
 11 letti dal testo coordinato del Codice Penale (vedi da_testi_coordinati).
 Lo stato del calcolo finisce su un nodo (:StatoVigenza): vedi
 in_attesa_di_maturare(), perche' da quando le decorrenze si confrontano con
@@ -130,9 +130,16 @@ if hasattr(sys.stdout, "reconfigure"):
 # e messo prima ruberebbe la corrispondenza a "decreto delegato". Gli atti lo
 # usano spesso senza qualificarlo - "il Decreto 12 maggio 1999 n.59" - e
 # misurato sul corpus 73 di questi 87 riferimenti risolvono a un solo atto D-.
-TIPO = (r"(legge|decreto\s+delegato|decreto\s*[-–]?\s*legge|"
-        r"decreto\s+reggenziale|regolamento|decreto\s+consil\w+|"
-        r"decreto\s+consigl\w+|decreto)")
+# "legge costituzionale" e "legge qualificata" vanno prima di "legge" nuda, per la
+# stessa ragione di "decreto": altrimenti l'alternanza si ferma a "legge" e il
+# tipo si perde. Non era un dettaglio. "E' abrogata la Legge Costituzionale 25
+# febbraio 2004 n.27" veniva letta come Legge ordinaria n.27, e appena la
+# risoluzione ha cominciato a usare il tipo per scegliere fra i candidati ha
+# marcato abrogata L-27-2004 invece di LC-27-2004: prima i due omonimi la
+# rendevano "ambigua" e la scartavano, cosi' l'errore restava nascosto.
+TIPO = (r"(legge\s+costituzionale|legge\s+qualificata|legge|decreto\s+delegato|"
+        r"decreto\s*[-–]?\s*legge|decreto\s+reggenziale|regolamento|"
+        r"decreto\s+consil\w+|decreto\s+consigl\w+|decreto)")
 # La virgola fra l'anno e il numero e' comune quanto la sua assenza - "Legge 18
 # luglio 1979, n.46" accanto a "Legge 27 ottobre 2004 n. 146" - e pretendere la
 # sola forma senza virgola faceva perdere l'atto per intero.
@@ -199,8 +206,11 @@ LOOKBACK = 45
 # primo punto e virgola: in un elenco l'esclusione appartiene alla sola voce
 # che la porta - "la Legge n.147; il Decreto n.62 ad esclusione dell'articolo
 # 7" lascia intatta la prima e colpisce in parte la seconda.
+# "eccetto" mancava accanto a "eccettuato": "E' abrogato il Decreto-Legge 18
+# febbraio 2022 n.20 eccetto l'articolo 33" veniva letta come abrogazione piena,
+# e l'articolo 33 - che resta in vigore - sarebbe stato dato per morto.
 ESCLUSIONE = re.compile(r"(ad?\s+esclusione|ad?\s+eccezione|fatta\s+eccezione|"
-                        r"eccezione\s+fatta|eccettuat|tranne\s+)", re.I)
+                        r"eccezione\s+fatta|eccett(?:o\b|uat)|tranne\s+)", re.I)
 LOOKAHEAD = 70
 
 
@@ -247,12 +257,18 @@ COMMA_AVANTI = re.compile(r"(?:è|e'|sono)\s+abrogat[aeio]\s+i[l]?\s+comm[ai]\s+
                           r"(\d+[^\s,;]*)([^;]{0,70})", re.I)
 # "L'articolo 86, comma 2, della Legge n.92/2008 e' abrogato": stesso bersaglio
 # dei due sopra - un comma - ma nominato in ordine inverso, prima l'articolo.
+# Il numero di comma non puo' fermarsi prima di un'altra cifra. Il gruppo e'
+# pigro e quello che segue accetta qualsiasi carattere, quindi in "l'articolo 5,
+# comma 14 del Decreto-Legge n. 68/2020" si fermava a "1" e lasciava "4" al
+# gruppo successivo: marcava abrogato il comma 1, che e' vivo, invece del 14.
+# Il difetto era nascosto dall'ambiguita' di "n. 68/2020", che prima scartava
+# il bersaglio: risolto il tipo, e' venuto allo scoperto.
 ART_COMMA = re.compile(r"\bl'articolo\s+(\d+[^\s,;]*)\s*,\s*comm[ai]\s+"
-                       r"([\d\s,ebisterquan]{1,30}?)\s*,?\s*([^;]{0,70}?)"
+                       r"([\d\s,ebisterquan]{1,30}?)(?!\d)\s*,?\s*([^;]{0,70}?)"
                        r"(?:è|e'|sono)\s+abrogat", re.I)
 ART_COMMA_AVANTI = re.compile(r"(?:è|e'|sono)\s+abrogat[aeio]\s+l'articolo\s+"
                               r"(\d+[^\s,;]*)\s*,\s*comm[ai]\s+"
-                              r"([\d\s,ebisterquan]{1,30}?)\s*,?\s*([^;]{0,70})", re.I)
+                              r"([\d\s,ebisterquan]{1,30}?)(?!\d)\s*,?\s*([^;]{0,70})", re.I)
 
 # Gli ELENCHI di articoli, che prima lasciavo fuori del tutto perche' fra
 # "articoli" e la fine del tratto si raccoglievano cifre nude - date, numeri
@@ -365,10 +381,45 @@ def commi_abrogati(testo):
 # Oggi questo controllo non respinge nulla (83 coppie su 83 concordano): serve
 # a impedire che, crescendo l'archivio, "Legge n.88/2003" si agganci a un
 # decreto con lo stesso numero e lo stesso anno.
-PREFISSO = {"legge": {"L"}, "decreto delegato": {"DD"},
+PREFISSO = {"legge": {"L"}, "legge costituzionale": {"LC"},
+            "legge qualificata": {"LQ"}, "decreto delegato": {"DD"},
             "decreto legge": {"DL", "EC"}, "decreto reggenziale": {"D"},
             "regolamento": {"R"}, "decreto consiliare": {"DC", "DD"},
             "decreto": {"D", "DR"}}
+
+
+def atto_del_tipo(ids, tipo):
+    """Fra le norme con quel numero e quell'anno, quella del tipo dichiarato.
+
+    Restituisce (motivo, id): motivo e' None se la scelta e' univoca, altrimenti
+    "assente", "ambiguo" o "tipo".
+
+    La risoluzione cercava per numero e anno e pretendeva UN risultato, poi
+    controllava il tipo. Ma ogni tipo d'atto ha la propria numerazione:
+    "Decreto Delegato 24 gennaio 2024 n.11" collide con la Legge, il
+    Decreto-Legge e il Regolamento n.11 del 2024, e il bersaglio veniva
+    scartato come ambiguo prima ancora di guardare il tipo che lo avrebbe
+    distinto. Misurato: 104 scarti a livello d'atto e 122 a livello
+    d'articolo, e fra le 37 norme abrogate senza atto abrogante 18 lo erano
+    solo per questo. Il tipo dichiarato deve SCEGLIERE fra i candidati, non
+    soltanto respingere l'unico rimasto.
+    """
+    attesi = PREFISSO.get(tipo)
+    compatibili = [i for i in ids if not attesi or i.split("-")[0] in attesi]
+    if len(compatibili) == 1:
+        return None, compatibili[0]
+    if compatibili:
+        return "ambiguo", None
+    return ("tipo" if ids else "assente"), None
+
+
+# Le prove girano all'import, come in 02_parse.py: una risoluzione che sbaglia
+# qui marca abrogata la norma sbagliata.
+assert atto_del_tipo(["DD-11-2024", "L-11-2024", "R-11-2024"], "decreto delegato") == (None, "DD-11-2024")
+assert atto_del_tipo(["D-2-1990", "DD-2-1990"], "decreto") == (None, "D-2-1990")
+assert atto_del_tipo(["DD-11-2024", "DD-11-2024~17170306"], "decreto delegato")[0] == "ambiguo"
+assert atto_del_tipo(["L-11-2024"], "decreto delegato")[0] == "tipo"
+assert atto_del_tipo([], "legge")[0] == "assente"
 
 # Se compare una partizione, il bersaglio e' quella e non l'atto.
 PARTE = re.compile(r"(?:articol|comm[ai]|punt[oi]|letter[ae]|capovers|allegat)", re.I)
@@ -412,6 +463,50 @@ DECORRENZA_ANNO = re.compile(
 DECORRENZA_INTERNA = re.compile(
     r"(?:a\s+decorrere|con\s+decorrenza|con\s+efficacia|a\s+partire)\s+"
     r"dall[ao]?\s*(?:stessa|medesima)\s+data", re.I)
+
+
+DATA_TOLLERANZA_GIORNI = 31
+
+
+def data_discorde(testo, numero, anno, data_nodo):
+    """Se la clausola cita per quell'atto una data lontana piu' di un mese dal nodo.
+
+    La risoluzione guarda numero, anno e tipo, mai il giorno. Di solito basta,
+    ma "E' abrogato il Regolamento 22 agosto 2025 n.15" risolveva verso il
+    Regolamento del 30 settembre 2025 n.15, che parla di controllo di
+    legittimita' mentre la clausola sta in un decreto sull'ICEE: un altro atto.
+
+    L'uguaglianza stretta pero' sarebbe sbagliata. Misurato sui 425 archi gia'
+    scritti, 4 hanno la data discorde di 1, 6, 10 e 27 giorni, e sono tutti
+    corretti: refusi ("29 settembre" per il 19) e date di firma che non
+    coincidono con quelle d'archivio. Un mese di tolleranza li tiene e scarta
+    il caso sbagliato (39 giorni). La soglia poggia su pochi casi, e se ne
+    comparissero altri vicini al confine va rivista, non ritoccata alla cieca.
+    """
+    if not data_nodo:
+        return False
+    try:
+        nodo = datetime.date.fromisoformat(str(data_nodo)[:10])
+    except ValueError:
+        return False
+    riferimento = (r"(\d{1,2})\s+(" + "|".join(MESI) + r")\s+(\d{4})\s*,?\s*n\.?\s*"
+                   + str(numero) + r"\b")
+    for m in re.finditer(riferimento, testo, re.I):
+        if int(m.group(3)) != anno:
+            continue
+        try:
+            citata = datetime.date(anno, MESI[m.group(2).lower()], int(m.group(1)))
+        except ValueError:
+            return False
+        return abs((citata - nodo).days) > DATA_TOLLERANZA_GIORNI
+    return False
+
+
+assert data_discorde("È abrogato il Regolamento 22 agosto 2025 n.15.", 15, 2025, "2025-09-30")
+assert not data_discorde("Sono abrogati: - la Legge 29 settembre 2014 n. 147;", 147, 2014, "2014-09-19")
+assert not data_discorde("È abrogato il Decreto Delegato 7 gennaio 2019 n.1.", 1, 2019, "2019-01-07")
+assert not data_discorde("È abrogato il Decreto Delegato n.1/2019.", 1, 2019, "2019-01-07")
+assert not data_discorde("È abrogato il Regolamento 22 agosto 2025 n.15.", 15, 2025, None)
 
 
 def decorrenza_non_maturata(testo, oggi=None):
@@ -510,6 +605,8 @@ def atti_con_tipo(testo):
 # versioni precedenti del filtro e sarebbero finite nel grafo.
 PROVE = [
     ("È abrogata la Legge 27 ottobre 2004 n. 146.", 1),
+    ("É abrogato il Decreto Delegato 5 marzo 2026 n.32.", 1),
+    ("È abrogato il Decreto – Legge 18 febbraio 2022 n.20 eccetto l'articolo 33 del medesimo.", 0),
     ("La Legge n.146/2004 è abrogata.", 1),
     ("Con l'entrata in vigore della presente legge è abrogata la Legge 20 novembre 1990 n.137.", 1),
     ("È abrogato l'articolo 8 della Legge n.146/2004.", 0),
@@ -615,7 +712,12 @@ PROVE = [
 
 # Le due grafie dell'apostrofo sono la stessa parola: si normalizzano prima di
 # leggere, cosi' le espressioni restano scritte in un modo solo.
-APOSTROFI = str.maketrans({"’": "'", "‘": "'", "ʼ": "'"})
+# La E acuta sta qui con gli apostrofi, e per la stessa ragione: e' una grafia
+# del verbo che le espressioni non conoscevano. "É abrogato il Decreto
+# Delegato 5 marzo 2026 n.32" non passava ne' il prefiltro Cypher, che cerca
+# 'è abrogat' con l'accento grave, ne' AVANTI: tre abrogazioni piene perse.
+# La traduzione e' globale ma innocua - nessuna espressione dipende dall'acuto.
+APOSTROFI = str.maketrans({"’": "'", "‘": "'", "ʼ": "'", "é": "è", "É": "È"})
 
 
 def bersagli(testo):
@@ -703,6 +805,7 @@ PROVE_ARTICOLO = [
     ("È abrogato l'articolo 5, comma 2, della Legge n.188/2011.", 0),
 ]
 PROVE_COMMA = [
+    ("E' abrogato l'articolo 5, comma 14 del Decreto-Legge n. 68/2020.", [("14", "5")]),
     ("Il comma 3 dell'articolo 3 della Legge n.92/2008 è abrogato.", [("3", "3")]),
     ("I commi 1 e 2 dell'articolo 86 della Legge n.140/2017 sono abrogati.",
      [("1", "86"), ("2", "86")]),
@@ -778,6 +881,7 @@ def candidati(g):
            OR toLower(c.testo) CONTAINS 'è abrogat'
            OR toLower(c.testo) CONTAINS "e' abrogat"
            OR toLower(c.testo) CONTAINS 'e’ abrogat'
+           OR toLower(c.testo) CONTAINS 'é abrogat'
         MATCH (c)<-[:HA_COMMA]-(:Articolo)<-[:HA_ARTICOLO]-(f:Norma)
         RETURN c.id AS comma, c.testo AS testo, f.id AS fonte, f.anno AS anno
     """)
@@ -786,7 +890,7 @@ def candidati(g):
     trovati = []
     scarti = {"nessun bersaglio riconosciuto": 0, "bersaglio assente o ambiguo": 0,
               "abrogherebbe se stessa": 0, "bersaglio posteriore alla fonte": 0,
-              "tipo dell'atto discordante": 0}
+              "tipo dell'atto discordante": 0, "data citata discordante": 0}
     for r in righe:
         testo = " ".join((r["testo"] or "").split())
         trovato = bersagli(testo)
@@ -799,26 +903,30 @@ def candidati(g):
         for numero, anno, tipo in trovato:
             norme = g.query("""
                 MATCH (n:Norma) WHERE n.numero = $numero AND n.anno = $anno
-                RETURN n.id AS id, n.titolo AS titolo
+                RETURN n.id AS id, n.titolo AS titolo, toString(n.data) AS data
             """, {"numero": numero, "anno": anno})
-            if len(norme) != 1:
+            motivo, scelto = atto_del_tipo([x["id"] for x in norme], tipo)
+            if motivo == "tipo":
+                scarti["tipo dell'atto discordante"] += 1
+                continue
+            if motivo:
                 scarti["bersaglio assente o ambiguo"] += 1
                 continue
-            if norme[0]["id"] == r["fonte"]:
+            norma_scelta = next(x for x in norme if x["id"] == scelto)
+            if scelto == r["fonte"]:
                 scarti["abrogherebbe se stessa"] += 1
                 continue
-            attesi = PREFISSO.get(tipo)
-            if attesi and norme[0]["id"].split("-")[0] not in attesi:
-                scarti["tipo dell'atto discordante"] += 1
+            if data_discorde(testo, numero, anno, norma_scelta.get("data")):
+                scarti["data citata discordante"] += 1
                 continue
             # Un atto non puo' abrogarne uno successivo: se il verso e'
             # invertito, il riferimento e' stato letto male e va scartato.
             if (anno or 0) > (r["anno"] or 0):
                 scarti["bersaglio posteriore alla fonte"] += 1
                 continue
-            trovati.append({"fonte": r["fonte"], "bersaglio": norme[0]["id"],
+            trovati.append({"fonte": r["fonte"], "bersaglio": scelto,
                             "comma": r["comma"], "testo": testo,
-                            "titolo": norme[0]["titolo"]})
+                            "titolo": norma_scelta["titolo"]})
     return trovati, scarti, in_attesa_di_maturare(righe)
 
 
@@ -863,15 +971,15 @@ def parziali(g):
             MATCH (n:Norma) WHERE n.numero = $n AND n.anno = $a
             RETURN n.id AS id
         """, {"n": numero, "a": anno})
-        esito = None
-        if len(trovate) != 1:
+        # Stesso difetto e stessa cura di candidati(): il tipo sceglie fra i
+        # candidati omonimi invece di arrivare dopo a respingere l'unico.
+        motivo, scelto = atto_del_tipo([x["id"] for x in trovate], tipo)
+        if motivo == "tipo":
+            esito = ("tipo discordante", None)
+        elif motivo:
             esito = ("atto assente o ambiguo", None)
         else:
-            attesi = PREFISSO.get(tipo)
-            if attesi and trovate[0]["id"].split("-")[0] not in attesi:
-                esito = ("tipo discordante", None)
-            else:
-                esito = (None, trovate[0]["id"])
+            esito = (None, scelto)
         cache[atto] = esito
         return esito
 
