@@ -510,6 +510,53 @@ def _bersagli_abrogati(righe):
     return righe
 
 
+def _atti_novellati(righe):
+    """Annota quali ATTI sono stati modificati da leggi successive.
+
+    _novelle() guarda l'articolo, e serve quando l'utente chiede di quello.
+    Su una domanda generica pero' - "come funziona l'edilizia sovvenzionata" -
+    la ricerca porta gli articoli che parlano del tema, non quelli che sono
+    stati toccati: misurato, restituiva l'art. 26 e l'art. 19 della L-44/2015,
+    mentre la L-64/2025 ne aveva riscritto gli articoli 3, 5, 16 e 22. Nessun
+    avviso compariva, e l'agente rispondeva con la disciplina del 2015 come se
+    nulla fosse cambiato.
+
+    Questo segnale sta un livello sopra: dice che l'ATTO che stai leggendo e'
+    stato novellato, anche se l'articolo che hai in mano non lo e'. Non
+    sostituisce la lettura - dice dove guardare - ed e' anch'esso solo
+    positivo: la sua presenza avverte, la sua assenza non promette nulla.
+    """
+    ids = sorted({r["normaId"] for r in righe if r.get("normaId")})
+    if not ids:
+        return righe
+    try:
+        trovate = grafo().query("""
+            UNWIND $ids AS id
+            MATCH (n:Norma {id: id})-[:HA_ARTICOLO]->(a:Articolo)
+            MATCH (c:Comma)-[:CITA_ARTICOLO]->(a)
+            MATCH (dopo:Norma)-[:HA_ARTICOLO]->(:Articolo)-[:HA_COMMA]->(c)
+            WHERE dopo.anno > n.anno AND dopo.id <> n.id
+            WITH id, dopo, a,
+                 CASE WHEN c.testo =~ $riscrittura THEN true ELSE false END AS riscrive
+            WITH id, dopo, collect(DISTINCT a.numero) AS articoli,
+                 max(riscrive) AS riscrive
+            WHERE riscrive
+            ORDER BY dopo.anno DESC
+            WITH id, collect({norma: dopo.id, anno: dopo.anno,
+                              titolo: dopo.titolo,
+                              articoli: articoli[..6]})[..3] AS novellanti
+            RETURN id, novellanti
+        """, {"ids": ids, "riscrittura": RISCRITTURA})
+    except Exception:
+        return righe
+    mappa = {t["id"]: t["novellanti"] for t in trovate if t["novellanti"]}
+    for r in righe:
+        atti = mappa.get(r.get("normaId"))
+        if atti:
+            r["attoNovellatoDa"] = atti
+    return righe
+
+
 def _piu_recenti(righe):
     """Marca i risultati che hanno un omologo piu' recente nella stessa lista.
 
@@ -676,7 +723,7 @@ def cerca_testo(query: str, limite: int = 8, dal_anno: int | None = None) -> dic
             righe = _fondi([(semantici, PESO_SEMANTICO), (lessicali, PESO_LESSICALE)], limite)
             modo = "ibrida"
     if righe:
-        righe = _piu_recenti(_bersagli_abrogati(_novelle(righe)))
+        righe = _piu_recenti(_atti_novellati(_bersagli_abrogati(_novelle(righe))))
 
     if not righe:
         return {"risultati": [], "quanti": 0, "ricerca": modo,
