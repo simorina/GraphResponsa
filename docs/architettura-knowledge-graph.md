@@ -7,7 +7,7 @@ interrogato da un agente in modalità Graph RAG.
 integrale** su 11.136 scaricabili dal portale, distribuite su 16 tipologie di atto:
 leggi, decreti in tutte le loro forme, regolamenti, notifiche, ordinanze, statuti,
 errata corrige e verbali. Tutti i 181.248 commi hanno un embedding, e 358 norme,
-129 articoli e 53 commi portano una marcatura di abrogazione.
+128 articoli e 50 commi portano una marcatura di abrogazione.
 
 ---
 
@@ -225,13 +225,39 @@ sul nodo che ha già in mano, senza un `MATCH` in più su ogni ricerca.
 
 | Proprietà | Su | Quantità | Significato |
 |---|---|---:|---|
-| `Norma.abrogata` / `abrogataDa` | `:Norma` | **358** | L'atto è caduto per intero |
-| `Articolo.abrogato` / `abrogatoDa` | `:Articolo` | **118** | Articolo soppresso dentro un atto vivo |
-| `Comma.abrogato` / `abrogatoDa` | `:Comma` | **52** | Comma soppresso dentro un atto vivo |
+| `Norma.abrogata` / `abrogataDa` | `:Norma` | **369** | L'atto è caduto per intero |
+| `Articolo.abrogato` / `abrogatoDa` | `:Articolo` | **128** | Articolo soppresso dentro un atto vivo |
+| `Comma.abrogato` / `abrogatoDa` | `:Comma` | **50** | Comma soppresso dentro un atto vivo |
 
 Le si ricalcola da zero a ogni esecuzione di `src/08_abrogazioni.py --scrivi`,
 archi `ABROGA` compresi: senza cancellarli prima, un arco che smette di essere
 riconosciuto sopravvive alla correzione del filtro che lo escludeva.
+
+#### Questo indice ha una scadenza
+
+Una clausola può differire la propria abrogazione a una data: *«è abrogata la
+Legge n.26/1960 **a partire dal 1° gennaio 1983**»*. Il filtro le scartava
+tutte, futura o passata, e costava 43 abrogazioni già pienamente efficaci — il
+1983 è venuto da quarant'anni. Ora la data **si confronta con oggi**.
+
+Ne discende una proprietà che va conosciuta: **lo stesso testo produce
+marcature diverse in momenti diversi.** È corretto — la vigenza è una proprietà
+del tempo, non del testo — ma significa che l'indice invecchia da solo, e
+un'abrogazione che matura non compare finché `08` non viene rieseguito.
+
+Perché la cosa non viva solo in un commento, lo script scrive sul grafo un nodo
+singleton:
+
+```cypher
+(:StatoVigenza {id: 'abrogazioni', calcolatoIl: date, clausoleInAttesa: int,
+                prossimaMaturazione: date, normeMarcate: int, archi: int})
+```
+
+Chi interroga il grafo può così sapere **quanto è vecchio** l'indice di vigenza
+e se c'è qualcosa in attesa, senza leggere il codice. A oggi la coda è di **una
+sola** clausola (`L-141/2025`, che matura col periodo d'imposta 2026), ma il
+meccanismo è permanente: `08_abrogazioni.py --scrivi` va rieseguito
+**periodicamente**, non solo dopo un caricamento.
 
 #### `ABROGA`, e perché copre meno di quanto sembri
 
@@ -308,7 +334,7 @@ Ciò che l'arco garantiva lo garantiscono quattro controlli in fila: tipo
 concorde col prefisso dell'id, atto che risolve a **una** sola norma, bersaglio
 non posteriore alla fonte, e partizione che esiste davvero dentro quell'atto —
 se il testo dice «comma 7» e l'articolo ne ha sei, il riferimento è stato letto
-male. Si marcano così **129 articoli** e **53 commi**, con `abrogato` e
+male. Si marcano così **128 articoli** e **50 commi**, con `abrogato` e
 `abrogatoDa`, esposti al modello come `passoAbrogato`.
 
 Il numero resta limitato perché la maggioranza delle clausole scende ancora più

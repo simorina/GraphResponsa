@@ -48,8 +48,11 @@ sola norma, il bersaglio non puo' essere posteriore alla fonte, e la partizione
 nominata deve esistere davvero dentro quell'atto - se il testo dice "comma 7" e
 l'articolo ne ha sei, il riferimento e' stato letto male.
 
-Si marcano 129 articoli e 53 commi: 118 dedotti dalle clausole degli atti,
+Si marcano 128 articoli e 50 commi: 117 dedotti dalle clausole degli atti,
 11 letti dal testo coordinato del Codice Penale (vedi da_testi_coordinati).
+Lo stato del calcolo finisce su un nodo (:StatoVigenza): vedi
+in_attesa_di_maturare(), perche' da quando le decorrenze si confrontano con
+oggi questo indice invecchia da solo.
 
 ## La decorrenza differita non e' un rifiuto in blocco
 
@@ -729,6 +732,45 @@ def prova():
         sys.exit("\n  Il riconoscimento non e' affidabile: non scrivo nulla.")
 
 
+DOMANI_LONTANO = datetime.date(2999, 12, 31)
+
+
+def in_attesa_di_maturare(righe):
+    """Le clausole che oggi si scartano ma che col tempo diventeranno vere.
+
+    Da quando la decorrenza differita si confronta con la data di oggi, il
+    grafo di vigenza HA UNA SCADENZA: lo stesso testo produce marcature diverse
+    in momenti diversi, e un'abrogazione che matura non compare finche' qualcuno
+    non riesegue questo script. E' corretto - la vigenza e' una proprieta' del
+    tempo, non del testo - ma e' un obbligo operativo nuovo, e un obbligo che
+    vive solo in un commento e' un obbligo che verra' dimenticato.
+
+    Si riconoscono confrontando la stessa clausola con oggi e con una data
+    remota: se il termine non e' venuto adesso ma lo sarebbe allora, quella
+    clausola sta aspettando.
+    """
+    oggi = datetime.date.today()
+    fuori = []
+    for r in righe:
+        testo = " ".join((r["testo"] or "").split())
+        if not decorrenza_non_maturata(testo, oggi):
+            continue
+        if decorrenza_non_maturata(testo, DOMANI_LONTANO):
+            continue                  # il termine non si legge: non maturera' mai
+        quando = None
+        m = DECORRENZA_DATA.search(testo)
+        if m:
+            try:
+                quando = datetime.date(int(m.group(3)), MESI[m.group(2).lower()],
+                                       int(m.group(1)))
+            except ValueError:
+                pass
+        elif DECORRENZA_ANNO.search(testo):
+            quando = datetime.date(int(DECORRENZA_ANNO.search(testo).group(1)), 12, 31)
+        fuori.append({"fonte": r["fonte"], "quando": quando, "testo": testo[:160]})
+    return sorted(fuori, key=lambda x: (x["quando"] or DOMANI_LONTANO))
+
+
 def candidati(g):
     righe = g.query("""
         MATCH (c:Comma)
@@ -777,7 +819,7 @@ def candidati(g):
             trovati.append({"fonte": r["fonte"], "bersaglio": norme[0]["id"],
                             "comma": r["comma"], "testo": testo,
                             "titolo": norme[0]["titolo"]})
-    return trovati, scarti
+    return trovati, scarti, in_attesa_di_maturare(righe)
 
 
 def parziali(g):
@@ -934,7 +976,7 @@ def main():
     prova()
 
     g = grafo()
-    trovati, scarti = candidati(g)
+    trovati, scarti, attesa = candidati(g)
     for k, v in scarti.items():
         print(f"  scartati, {k:<32} {v:>5}")
 
@@ -1050,6 +1092,36 @@ def main():
           f"{conferma['conFonte']} con l'atto abrogante")
     print(f"           {parz['articoli']} articoli e {parz['commi']} commi "
           f"soppressi dentro atti vivi")
+
+    # La data del calcolo va SUL GRAFO, non solo a schermo. Da quando la
+    # decorrenza differita si confronta con oggi, questo indice invecchia da
+    # solo: chi lo interroga fra sei mesi deve poter sapere quanto e' vecchio
+    # e se c'e' qualcosa che nel frattempo e' maturato, senza dover leggere il
+    # codice o ricordarsi una regola.
+    prossima = next((a["quando"] for a in attesa if a["quando"]), None)
+    g.query("""
+        MERGE (s:StatoVigenza {id: 'abrogazioni'})
+        SET s.calcolatoIl = date($oggi),
+            s.clausoleInAttesa = $attesa,
+            s.prossimaMaturazione = CASE WHEN $prossima IS NULL
+                                         THEN null ELSE date($prossima) END,
+            s.normeMarcate = $marcate, s.archi = $archi
+    """, {"oggi": datetime.date.today().isoformat(),
+          "attesa": len(attesa),
+          "prossima": prossima.isoformat() if prossima else None,
+          "marcate": conferma["marcate"], "archi": conferma["archi"]})
+    print(f"\n  stato scritto sul grafo (:StatoVigenza) - calcolato il "
+          f"{datetime.date.today()}")
+    if attesa:
+        print(f"  {len(attesa)} clausole aspettano di maturare; la prima il "
+              f"{prossima or '(data non leggibile)'}:")
+        for a in attesa[:5]:
+            # str() prima dell'allineamento: un oggetto date non lo accetta e
+            # la riga usciva con "<12" stampato al posto della data.
+            print(f"    {str(a['quando'] or '?'):<12} {a['fonte']:<14} "
+                  f"{a['testo'][:70]}")
+        print("  Rieseguire questo script dopo quella data, altrimenti "
+              "l'abrogazione non comparira' mai.")
 
 
 if __name__ == "__main__":
