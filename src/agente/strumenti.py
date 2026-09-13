@@ -178,7 +178,8 @@ def ricerca_vettoriale():
     return _vettoriale
 
 
-def _full_text(query, limite, dal_anno=None):
+def _full_text(query, limite, dal_anno=None, al_anno=None, prefissi=None,
+               escludi_abrogati=False):
     """Ricerca lessicale: la riserva quando il vettoriale non e' disponibile."""
     righe = grafo().query("""
         CALL db.index.fulltext.queryNodes('testo_normativo', $query)
@@ -193,6 +194,10 @@ def _full_text(query, limite, dal_anno=None):
         // intestazioni per la loro rubrica.
         WHERE node.testo IS NOT NULL AND trim(node.testo) <> ''
           AND ($dal_anno IS NULL OR norma.anno >= $dal_anno)
+          AND ($al_anno IS NULL OR norma.anno <= $al_anno)
+          AND ($prefissi IS NULL OR split(norma.id, '-')[0] IN $prefissi)
+          AND (NOT $escludi_abrogati OR NOT (coalesce(norma.abrogata, false)
+               OR coalesce(node.abrogato, false) OR coalesce(art.abrogato, false)))
         RETURN norma.id AS normaId, norma.titolo AS normaTitolo,
                norma.anno AS anno,
                toString(norma.dataEntrataVigore) AS inVigoreDal,
@@ -200,10 +205,14 @@ def _full_text(query, limite, dal_anno=None):
                art.numero AS articolo, art.rubrica AS rubrica,
                art.titolo AS partizioneTitolo, art.capoRubrica AS partizioneCapo,
                CASE WHEN node:Comma THEN node.numero ELSE null END AS comma,
-               node.testo AS testo, norma.urlDocumento AS urlDocumento
+               node.testo AS testo, norma.urlDocumento AS urlDocumento,
+               norma.abrogata AS abrogata, norma.abrogataDa AS abrogataDa,
+               coalesce(node.abrogato, art.abrogato) AS passoAbrogato,
+               coalesce(node.abrogatoDa, art.abrogatoDa) AS passoAbrogatoDa
         ORDER BY score DESC, norma.anno DESC LIMIT $ampio
     """, {"query": _lucene(query), "limite": limite, "ampio": limite * 3,
-          "dal_anno": dal_anno})
+          "dal_anno": dal_anno, "al_anno": al_anno, "prefissi": prefissi,
+          "escludi_abrogati": bool(escludi_abrogati)})
 
     # Stessa potatura dei doppioni del ramo ibrido: due rami, una semantica.
     tenute, viste = [], {}
@@ -277,6 +286,10 @@ MATCH (norma:Norma)-[:HA_ARTICOLO]->(art)
 // misurato al secondo posto cercando la loro stessa rubrica.
 WHERE node.testo IS NOT NULL AND trim(node.testo) <> ''
   AND ($dal_anno IS NULL OR norma.anno >= $dal_anno)
+  AND ($al_anno IS NULL OR norma.anno <= $al_anno)
+  AND ($prefissi IS NULL OR split(norma.id, '-')[0] IN $prefissi)
+  AND (NOT $escludi_abrogati OR NOT (coalesce(norma.abrogata, false)
+       OR coalesce(node.abrogato, false) OR coalesce(art.abrogato, false)))
 RETURN norma.id AS normaId, norma.titolo AS normaTitolo, norma.anno AS anno,
        toString(norma.dataEntrataVigore) AS inVigoreDal,
        toString(norma.data) AS dataAtto,
@@ -300,6 +313,10 @@ MATCH (norma:Norma)-[:HA_ARTICOLO]->(art)
 // misurato al secondo posto cercando la loro stessa rubrica.
 WHERE art.testo IS NOT NULL AND trim(art.testo) <> ''
   AND ($dal_anno IS NULL OR norma.anno >= $dal_anno)
+  AND ($al_anno IS NULL OR norma.anno <= $al_anno)
+  AND ($prefissi IS NULL OR split(norma.id, '-')[0] IN $prefissi)
+  AND (NOT $escludi_abrogati OR NOT (coalesce(norma.abrogata, false)
+       OR coalesce(art.abrogato, false)))
 RETURN norma.id AS normaId, norma.titolo AS normaTitolo, norma.anno AS anno,
        toString(norma.dataEntrataVigore) AS inVigoreDal,
        toString(norma.data) AS dataAtto,
@@ -329,18 +346,30 @@ def _vettore_domanda(query):
         return None
 
 
-def _semantico(query, limite, dal_anno=None):
+# Con un filtro attivo il ramo vettoriale pesca piu' largo. L'indice restituisce
+# i k vicini PRIMA che il filtro scarti: per l'anno non e' servito - misurato,
+# con dal_anno 2000, 2015 e 2022 i risultati restavano otto - ma un tipo raro e'
+# un'altra cosa. Le leggi costituzionali sono 17 atti su 11.052, e fra i 24
+# vicini piu' simili di una domanda qualunque possono non comparire mai.
+AMPIEZZA_FILTRATA = 8
+
+
+def _semantico(query, limite, dal_anno=None, al_anno=None, prefissi=None,
+               escludi_abrogati=False):
     """I due indici vettoriali fusi in una lista sola. None se non disponibili."""
     vettore = _vettore_domanda(query)
     if vettore is None:
         return None
+    filtrato = any(v is not None for v in (dal_anno, al_anno, prefissi)) or escludi_abrogati
+    k = limite * AMPIEZZA_FILTRATA if filtrato else limite
     liste = []
     for indice, risalita in ((INDICE_VETTORIALE, RISALITA_COMMI),
                              (INDICE_RUBRICHE, RISALITA_RUBRICHE)):
         try:
             liste.append(grafo().query(risalita, {
-                "indice": indice, "k": limite, "vettore": vettore,
-                "dal_anno": dal_anno}))
+                "indice": indice, "k": k, "vettore": vettore,
+                "dal_anno": dal_anno, "al_anno": al_anno, "prefissi": prefissi,
+                "escludi_abrogati": bool(escludi_abrogati)}))
         except Exception:
             # L'indice delle rubriche puo' non esserci ancora: si prosegue con
             # quello dei commi invece di far fallire tutta la ricerca.
@@ -636,8 +665,39 @@ def _fondi(liste, limite, taglia=True):
     return finali
 
 
+# I prefissi d'id, e non Norma.tipo, perche' il campo tipo ha 43 grafie diverse
+# per sedici tipi ("Decreto Delegato", "Decreto  Delegato", "Decreto delegato"
+# ...) mentre il prefisso e' uno e controllato: e' quello che comune.norma_id
+# assegna al caricamento.
+PREFISSI_TIPO = {"L", "LC", "LQ", "LRC", "DD", "DL", "DC", "DR", "D", "R",
+                 "N", "EC", "O", "S", "V", "X"}
+
+
+def _prefissi(tipi):
+    """(prefissi validati o None, errore o None) per il filtro sul tipo d'atto.
+
+    Un prefisso sconosciuto non si ignora in silenzio: filtrare su un tipo che
+    non esiste restituirebbe zero risultati, e l'agente ne concluderebbe che
+    l'archivio non disciplina la materia. Meglio dirgli che ha sbagliato tipo.
+    """
+    if not tipi:
+        return None, None
+    richiesti = sorted({str(t).strip().upper() for t in tipi if str(t).strip()})
+    ignoti = [t for t in richiesti if t not in PREFISSI_TIPO]
+    if ignoti:
+        return None, f"Tipi d'atto sconosciuti: {ignoti}. Validi: {sorted(PREFISSI_TIPO)}"
+    return (richiesti or None), None
+
+
+assert _prefissi(None) == (None, None)
+assert _prefissi(["l", " DD "]) == (["DD", "L"], None)
+assert _prefissi(["LEGGE"])[1] is not None
+
+
 @tool
-def cerca_testo(query: str, limite: int = 8, dal_anno: int | None = None) -> dict:
+def cerca_testo(query: str, limite: int = 8, dal_anno: int | None = None,
+                al_anno: int | None = None, tipi: list[str] | None = None,
+                escludi_abrogati: bool = False) -> dict:
     """Cerca nel testo della normativa in archivio.
 
     E' lo strumento da usare per primo su qualunque domanda di merito
@@ -669,7 +729,7 @@ def cerca_testo(query: str, limite: int = 8, dal_anno: int | None = None) -> dic
     e' stato abrogato tutto e non e' piu' diritto vigente, per quanto il
     testo si legga bene. Dillo in apertura, cita `abrogataDa` se c'e', e cerca
     la disciplina che l'ha sostituito. L'assenza del campo non prova nulla in
-    senso contrario: il marchio copre 358 norme su oltre dodicimila.
+    senso contrario: il marchio copre 424 norme su oltre dodicimila.
 
     Il campo `citatoDaAttiSuccessivi` e' il piu' importante che leggi. Elenca
     gli atti POSTERIORI che citano proprio quell'articolo, e in questo
@@ -701,9 +761,28 @@ def cerca_testo(query: str, limite: int = 8, dal_anno: int | None = None) -> dic
         limite: quanti risultati restituire (default 8, alzalo se la materia e' ampia)
         dal_anno: opzionale, scarta le norme anteriori a quell'anno. Utile per
             cercare la disciplina piu' recente su una materia gia' individuata.
+        al_anno: opzionale, scarta le norme posteriori a quell'anno. Serve per le
+            domande storiche: "com'era regolato X prima del 2000" vuole
+            al_anno=1999, NON dal_anno - dal_anno escluderebbe proprio il periodo
+            chiesto.
+        tipi: opzionale, limita a certi tipi d'atto, indicati per prefisso:
+            L legge, LC legge costituzionale, LQ legge qualificata, DD decreto
+            delegato, DL decreto-legge, DC decreto consiliare, DR decreto
+            reggenziale, D decreto, R regolamento. Es. ["DD"] per "i decreti
+            delegati su X", ["L", "LQ", "LC"] per "le leggi su X".
+        escludi_abrogati: opzionale, toglie i passi di cui l'abrogazione e' NOTA -
+            atto intero, articolo o comma. Usalo quando la domanda chiede la
+            disciplina vigente. NON garantisce che cio' che resta sia vigente: il
+            marchio copre solo una parte delle abrogazioni, quindi i campi di
+            vigenza dei risultati vanno letti comunque.
     """
-    lessicali = _full_text(query, limite * AMPIEZZA, dal_anno)
-    semantici = _semantico(query, limite * AMPIEZZA, dal_anno)
+    prefissi, errore = _prefissi(tipi)
+    if errore:
+        return {"errore": errore}
+    filtri = {"dal_anno": dal_anno, "al_anno": al_anno, "prefissi": prefissi,
+              "escludi_abrogati": escludi_abrogati}
+    lessicali = _full_text(query, limite * AMPIEZZA, **filtri)
+    semantici = _semantico(query, limite * AMPIEZZA, **filtri)
     if semantici is None:
         righe = lessicali[:limite]
         modo = "solo lessicale (semantica non disponibile)"
