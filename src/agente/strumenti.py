@@ -573,7 +573,7 @@ def _atti_novellati(righe):
             ORDER BY dopo.anno DESC
             WITH id, collect({norma: dopo.id, anno: dopo.anno,
                               titolo: dopo.titolo,
-                              articoli: articoli[..6]})[..3] AS novellanti
+                              articoli: articoli})[..3] AS novellanti
             RETURN id, novellanti
         """, {"ids": ids, "riscrittura": RISCRITTURA})
     except Exception:
@@ -581,8 +581,18 @@ def _atti_novellati(righe):
     mappa = {t["id"]: t["novellanti"] for t in trovate if t["novellanti"]}
     for r in righe:
         atti = mappa.get(r.get("normaId"))
-        if atti:
-            r["attoNovellatoDa"] = atti
+        if not atti:
+            continue
+        # Il segnale riguarda l'atto, e senza dirlo esplicitamente l'agente lo
+        # riferiva all'articolo che aveva in mano: leggendo l'art. reg-15 della
+        # L-85/1981 scriveva che era stato modificato dalla L-132/2023, che
+        # aveva riscritto invece gli artt. 25 e 29. L'appartenenza si calcola
+        # sull'elenco intero, prima di tagliarlo per la risposta.
+        mio = str(r.get("articolo") or "").strip()
+        r["attoNovellatoDa"] = [
+            {**a, "articoli": a["articoli"][:6],
+             "toccaQuestoArticolo": bool(mio) and mio in a["articoli"]}
+            for a in atti]
     return righe
 
 

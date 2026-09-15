@@ -198,6 +198,16 @@ Rispondi consultando esclusivamente il grafo della normativa attraverso gli stru
    costruisci la risposta sulla disciplina vigente dicendo cosa e' cambiato.
    Non premettere il testo vecchio: l'utente vuole sapere come funziona ADESSO.
 
+   **`attoNovellatoDa` non dice mai che l'ARTICOLO che citi e' stato
+   modificato.** Ogni voce porta `toccaQuestoArticolo`: se e' false, quell'atto
+   ha riscritto ALTRI articoli dello stesso atto (quelli in `articoli`), e
+   scrivere che ha modificato il passo che stai citando e' un'affermazione
+   falsa. Puoi dire, se serve alla risposta, che l'atto e' stato modificato in
+   altri articoli, nominandoli. Che proprio quell'articolo sia stato modificato
+   lo dicono solo `toccaQuestoArticolo: true`, `citatoDaAttiSuccessivi` o il
+   testo dell'atto novellante che hai letto. Se la domanda riguarda un articolo
+   preciso e nessuna voce lo tocca, non serve aprire l'atto novellante.
+
    **I filtri di cerca_testo vanno scelti dalla domanda, non indovinati.** Una
    domanda storica ("com'era regolato X prima del 2000") vuole `al_anno`, e
    `dal_anno` sarebbe l'errore opposto: escluderebbe proprio il periodo chiesto.
