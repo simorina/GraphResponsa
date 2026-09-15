@@ -3,11 +3,11 @@
 Grafo Neo4j della normativa della Repubblica di San Marino, costruito per essere
 interrogato da un agente in modalità Graph RAG.
 
-**Stato aggiornato:** **254.510 nodi**, **321.005 relazioni**, **11.053 norme con testo
+**Stato aggiornato:** **254.878 nodi**, **321.443 relazioni**, **11.054 norme con testo
 integrale** su 11.136 scaricabili dal portale, distribuite su 16 tipologie di atto:
 leggi, decreti in tutte le loro forme, regolamenti, notifiche, ordinanze, statuti,
-errata corrige e verbali. Tutti i 171.417 commi hanno un embedding, e 424 norme,
-186 articoli e 68 commi portano una marcatura di abrogazione.
+errata corrige e verbali. Tutti i 171.647 commi hanno un embedding, e 425 norme,
+227 articoli e 69 commi portano una marcatura di abrogazione.
 
 ---
 
@@ -90,23 +90,23 @@ Nel nostro Knowledge Graph, le rubriche svolgono due funzioni cruciali:
 
 | Entità / Label | Quantità | Ruolo nel Modello |
 |---|---|---|
-| **`:Comma`** | **`171.417`** | Unità atomica di testo, ricerca semantica e retrieval |
-| **`:Articolo`** | **`70.919`** | Articoli con rubriche, capi e collocazione tematica |
+| **`:Comma`** | **`171.647`** | Unità atomica di testo, ricerca semantica e retrieval |
+| **`:Articolo`** | **`71.057`** | Articoli con rubriche, capi e collocazione tematica |
 | **`:Norma`** | **`12.173`** | Tutti gli atti normativi censiti: |
-| ↳ *con testo integrale (`caricata: true`)* | *`11.053`* | *Su 11.136 scaricabili dal portale, 16 tipologie* |
-| ↳ *stub citati (`caricata: false`)* | *`1.120`* | *Atti richiamati nei testi per tracciare i rinvii* |
-| **TOTALE NODI** | **`254.510`** | |
+| ↳ *con testo integrale (`caricata: true`)* | *`11.054`* | *Su 11.136 scaricabili dal portale, 16 tipologie* |
+| ↳ *stub citati (`caricata: false`)* | *`1.119`* | *Atti richiamati nei testi per tracciare i rinvii* |
+| **TOTALE NODI** | **`254.878`** | |
 
 ### Relazioni (Archi)
 
 | Relazione | Quantità | Direzione | Significato |
 |---|---|---|---|
-| **`HA_COMMA`** | **`171.417`** | `Articolo ➔ Comma` | Contenimento strutturale |
-| **`HA_ARTICOLO`** | **`70.919`** | `Norma ➔ Articolo` | Contenimento strutturale |
-| **`CITA`** | **`56.515`** | `(Comma/Norma) ➔ Norma` | Rinvio normativo formale |
-| **`CITA_ARTICOLO`** | **`21.632`** | `Comma ➔ Articolo` | Rinvio puntuale ad articolo specifico risolto |
-| **`ABROGA`** | **`522`** | `Norma ➔ Norma` | Abrogazione di un atto per intero, riconosciuta senza ambiguità |
-| **TOTALE ARCHI** | **`321.005`** | | |
+| **`HA_COMMA`** | **`171.647`** | `Articolo ➔ Comma` | Contenimento strutturale |
+| **`HA_ARTICOLO`** | **`71.057`** | `Norma ➔ Articolo` | Contenimento strutturale |
+| **`CITA`** | **`56.491`** | `(Comma/Norma) ➔ Norma` | Rinvio normativo formale |
+| **`CITA_ARTICOLO`** | **`21.725`** | `Comma ➔ Articolo` | Rinvio puntuale ad articolo specifico risolto |
+| **`ABROGA`** | **`523`** | `Norma ➔ Norma` | Abrogazione di un atto per intero, riconosciuta senza ambiguità |
+| **TOTALE ARCHI** | **`321.443`** | | |
 
 `CITA_ARTICOLO` era fermo a 16.763 finche' `RE_BERSAGLIO`, nel parser,
 pretendeva che il numero d'articolo fosse **adiacente** al nome dell'atto. Nel
@@ -126,7 +126,7 @@ corrispondere a cio' che un caricamento pulito produrrebbe.
 I `:Comma` erano 180.932 fino alla riparazione del parser: i **316 in più** sono
 il testo che si perdeva su 312 articoli, dove il buffer della rubrica non si
 chiudeva su `)` seguito da punteggiatura. Il conteggio dei nodi per etichetta
-somma a 266.683 e non a 254.510 perché ogni `:Norma` ne porta due — quella
+somma a 267.051 e non a 254.878 perché ogni `:Norma` ne porta due — quella
 generica e quella del tipo (`:Legge`, `:DecretoDelegato`, e così via).
 
 **I nodi `:Allegato` non ci sono più.** Erano 519 su 27 norme e portavano solo
@@ -236,8 +236,9 @@ Rispetto al Codice Penale la lettura del PDF ha quattro regole in più:
   - un **Titolo abrogato per intero** (`TITOLO II [ABROGATO]`) non riporta i
     suoi articoli: si ritrovano nel grafo da `Articolo.titolo`, e la fonte si
     cerca nella nota col nome del Titolo, non col numero dell'articolo;
-  - i **rinvii fra note** (*«vedere nota n. 4»*) si risolvono per atto e
-    articolo, perché il numero indicato può essere sbagliato: qui era la 5.
+  - i **rinvii fra note** (*«vedere nota n. 4»*) si risolvono prima sulla nota
+    indicata, se nomina lo stesso atto per lo stesso articolo, poi per atto e
+    articolo, perché il numero può essere sbagliato: qui era la 5.
 
 Sui commi riscritti le citazioni ricavate dal testo vecchio si staccano e si
 ricalcolano sul nuovo; gli archi che portano un'`origine` restano.
@@ -245,6 +246,69 @@ ricalcolano sul nuovo; gli archi che portano un'`origine` restano.
 Dei 65 atti linkati dalla raccolta, 63 avevano già il testo nel grafo. La
 `L-85/1981` è entrata dopo (sezione seguente); la `L-17/1917` resta fuori: è
 una scansione senza testo, e senza OCR non si legge.
+
+### La raccolta sul Lavoro, ferma al 2018
+
+La seconda raccolta è quella **sul Lavoro** (`data/coordinati/lavoro.pdf`, 302
+pagine, **aggiornata al 24 dicembre 2018**): 26 atti coordinati nel corpo, dalla
+`L-7/1961` alla `L-173/2018`, e sotto *«ALTRE NORME IN MATERIA DI LAVORO»*
+estratti di altri cinque. Dei **144 atti linkati**, 142 avevano già il testo nel
+grafo. La `L-41/1972` c'era ma era rifiutata da `03` ed è entrata con `13`
+(sezione seguente). La Legge Ipotecaria del 16 marzo 1854 è una scansione,
+come la `L-17/1917`.
+
+Cosa ha cambiato: **207 articoli e 564 commi** riscritti, **90 archi di
+novella**, e **43 articoli abrogati** su sette atti, 41 dei quali col proprio
+atto abrogante. Ci sono anche otto articoli che il grafo non aveva:
+- `L-137/2003`: artt. 5-bis, 6-bis, 6-ter e 6-quater;
+- `DD-14/2018`: art. 15-bis;
+- `DL-156/2011`: art. 8-bis;
+- `DL-148/2015`: art. 6-bis;
+- `L-115/2017`: art. 25-bis.
+
+L'art. 25-bis del `DL-156/2011` risultava nuovo per numero, ma il suo id
+esisteva già e la scrittura lo ha aggiornato senza crearne un secondo.
+
+**Il testo e' vecchio di otto anni, e lo si dice.** Nessuno di quegli articoli
+aveva gia' un testo coordinato: nel grafo c'era quello promulgato, piu' vecchio
+ancora, quindi la riscrittura resta un passo avanti. Ma un testo del 2018
+presentato come vigente sarebbe una risposta sbagliata detta con sicurezza:
+`leggi_articolo` restituisce ora `testoCoordinatoAl`, e il prompt chiede
+all'agente di aprire gli atti posteriori a quella data quando l'articolo ne
+porta, e di dichiarare la data quando non ne trova.
+
+Il PDF ha rotto sette regole scritte per l'Edilizia:
+
+  - **le note sono a 10pt**, non a 9: la soglia fissa le leggeva come testo.
+    Ora è mezzo punto sotto il corpo più frequente del documento, misurato
+    senza i numeri di nota (il numero della nota 95 è a 12pt);
+  - intestazioni **senza trattino** (*«DECRETO LEGGE 5 ottobre 2011 n.156»*) o
+    **col punto finale**, e articoli come `Art. 8/bis` e `Articolo Unico`
+    (numerato `Unico`, come nel resto del grafo): senza, due atti finivano
+    dentro quello che li precede;
+  - un **Allegato** in maiuscolo o centrato chiude l'articolo. L'organico
+    dell'Ufficio del Lavoro in coda alla `L-131/2005` sono undici pagine di
+    *«POSTI N. 1»* che finivano nell'art. 24;
+  - un articolo **`[ABROGATO]` finisce lì**. Dopo l'art. 5 della `L-71/2014` la
+    nota col testo originario prosegue per due pagine al corpo del testo;
+  - un **Titolo in mezzo a un elenco** (*«articoli 8, 9, 10, 11 del Titolo
+    III, 26 e 27»*) lo spezzava, e gli artt. 26 e 27 della `L-7/1961` restavano
+    senza fonte. Stessa sorte per la nota *«Articoli abrogati dalla Legge…»*,
+    che non ha l'intestazione *«Modifiche legislative»*;
+  - **Decreto-Legge e Decreto Delegato sono affini**: la numerazione dei decreti
+    è unica, e il portale registra da `DD-118-2014` una ratifica che la
+    raccolta chiama Decreto-Legge;
+  - un atto si **rinumera** solo se il coordinato ne riporta tutti gli
+    articoli. La `L-7/1961` non riporta il Titolo I abrogato, e gli artt. 6-60
+    rinumerati da 1 avrebbero preso l'ordine degli artt. 1-5.
+
+Anche un estratto **nel corpo** (due articoli dei quindici del `DD-14/2018`)
+non autorizza più a riscrivere l'atto intero: serve che il coordinato copra
+almeno il 90% degli articoli del grafo. Dopo le modifiche la raccolta
+sull'Edilizia produce lo stesso esito di prima. Nel suo dump cambiano solo due
+tabelle di Allegati, che erano già rimaste fuori dal grafo.
+
+Resta non risolta una nota che chiama *«Legge»* il `DL-156/2011`.
 
 ### Un atto con più numerazioni: la legge di registro
 
@@ -271,6 +335,18 @@ L'art. 7 non manca per errore: il PDF passa dall'art. 6 all'art. 8.
 `data/parsed/L-85-1981.json` è ora prodotto da `13` (lo dice `fonteParsing`):
 rilanciare `02_parse.py` in forzatura su quella norma la riporterebbe allo stato
 rifiutato, e andrebbe rieseguito `13`.
+
+La stessa strada ha preso la **`L-41/1972`**, legge organica per i dipendenti
+dello Stato e **citata da 160 commi**: artt. 1-108, poi gli Allegati B
+(fascicolo personale), C (concorsi), E (orario di servizio) e H (diritti
+sindacali), ciascuno da "Art. 1" (`allB-1`, `allH-9`). Restano fuori l'Allegato
+A, che il PDF stesso dichiara *«non inserito»*, e l'F, tabella a colonne. Due
+dettagli:
+- una seconda formula di promulgazione chiude l'Allegato H, e `13` taglia ogni
+  sezione su di essa;
+- `Art. 94 (*)` non era un'intestazione per il parser, e l'art. 94 spariva
+  nel 93. L'asterisco rimanda a un'errata sul secondo comma, stampata dopo le
+  firme, che non è integrata nel testo.
 
 ### Lo stesso atto sotto due schede
 

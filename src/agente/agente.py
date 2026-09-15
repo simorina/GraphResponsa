@@ -208,6 +208,15 @@ Rispondi consultando esclusivamente il grafo della normativa attraverso gli stru
    testo dell'atto novellante che hai letto. Se la domanda riguarda un articolo
    preciso e nessuna voce lo tocca, non serve aprire l'atto novellante.
 
+   **`testoCoordinatoAl` e' la data fino a cui il testo e' aggiornato.** Se
+   c'e', l'articolo non e' piu' quello promulgato: e' il testo coordinato del
+   Consiglio Grande e Generale, con le modifiche fino a quella data. Dopo
+   quella data il testo puo' essere cambiato ancora: se l'articolo porta
+   `citatoDaAttiSuccessivi` o `versionePiuRecente` con atti posteriori a quella
+   data, aprili prima di rispondere. Quando la data e' lontana (la raccolta sul
+   Lavoro e' ferma al 24 dicembre 2018) e non trovi modifiche successive,
+   dillo: "testo coordinato aggiornato al 24 dicembre 2018".
+
    **I filtri di cerca_testo vanno scelti dalla domanda, non indovinati.** Una
    domanda storica ("com'era regolato X prima del 2000") vuole `al_anno`, e
    `dal_anno` sarebbe l'errore opposto: escluderebbe proprio il periodo chiesto.

@@ -36,6 +36,7 @@ import importlib.util
 import json
 import re
 import sys
+from collections import Counter
 from pathlib import Path
 
 import fitz
@@ -65,24 +66,50 @@ riallinea = _modulo("riallinea09", "09_riallinea_citazioni.py")
 DERIVATO = RADICE / "data" / "derivato"
 FONTE = cp.FONTE
 
+# Nella raccolta sul Lavoro il trattino manca ("DECRETO LEGGE 5 ottobre 2011
+# n.156") e l'intestazione puo' chiudere col punto ("LEGGE 17 febbraio 1961 n.
+# 7."): senza, i due atti finivano dentro quello che li precede nel PDF.
 TIPI_ATTO = (r"legge\s+costituzionale|legge\s+qualificata|legge|regolamento"
-             r"|decreto\s*[-–—]\s*legge|decreto\s+delegato|decreto\s+consiliare"
+             r"|decreto\s*[-–—]?\s*legge|decreto\s+delegato|decreto\s+consiliare"
              r"|decreto\s+reggenziale|decreto")
 RE_ATTO = re.compile(
     r"(?P<tipo>" + TIPI_ATTO + r")\s+\d{1,2}\s+(?:" + cp.MESI + r")\s+"
-    r"(?P<anno>\d{4})\s*,?\s*n\.?\s*(?P<numero>\d+)", re.I)
+    r"(?P<anno>\d{4})\s*,?\s*n\.?\s*(?P<numero>\d+)\s*\.?", re.I)
 # "Art 22-bis" compare senza punto: con l'espressione di 10 l'articolo spariva
-# dentro il precedente.
+# dentro il precedente. "Art. 8/bis" e "Articolo Unico" vengono dal Lavoro; nel
+# grafo l'articolo unico e' numerato "Unico".
 RE_ART = re.compile(
-    r"^\s*Art(?:\.|icolo)?\s*(\d+)\s*(?:[-\s]\s*(" + cp.ORDINALI + r"))?\s*\.?\s*$", re.I)
+    r"^\s*Art(?:\.|icolo)?\s*(\d+|unico)\s*(?:[-\s/]\s*(" + cp.ORDINALI + r"))?\s*\.?\s*$", re.I)
 RE_COMMA_NUMERATO = re.compile(
     r"^(\d{1,3})\s*(?:[-\s]\s*(" + cp.ORDINALI + r"))?\s*\.\s+(?=\S)", re.I)
 RE_ABROGATO_INTERO = re.compile(r"\[ABROGAT[OA]\][.;]?")
 RE_ABROGATO_PARTE = re.compile(r"\[ABROGAT[OA]\]")
-RE_AGGIORNAMENTO = re.compile(r"\(Aggiornamento al\s+([^)]+)\)", re.I)
+RE_AGGIORNAMENTO = re.compile(r"\((?:Aggiornamento|aggiornat[oa])\s+al\s+([^)]+)\)", re.I)
+# Un Allegato in coda all'atto e' una tabella o un modulo: l'organico
+# dell'Ufficio del Lavoro dietro la L-131/2005 sono undici pagine di "POSTI N. 1
+# / FUNZIONI / LIVELLO RETRIBUTIVO", che finivano tutte nell'art. 24.
+RE_ALLEGATO = re.compile(r"^\s*Allegat[oi]\b", re.I)
+# "Articoli abrogati dalla Legge 29 aprile 2014 n.71, Articolo 24: vedere nota
+# n. 35." - la nota dei gruppi di articoli caduti insieme non ha l'intestazione
+# "Modifiche legislative", e senza di essa l'atto abrogante non si leggeva.
+RE_ABROGATI_DA = re.compile(r"^(\d{1,3}\s+)Articol[oi]\s+abrogat[oi]\s+dal(?:la|lo|l['’])?\s*", re.I)
+# "Testo originario Legge 31 marzo 2014 n.43, Articolo 3:" - l'articolo nato da
+# una novella, con l'atto per esteso invece che fra parentesi come in 10.
+RE_ORIGINE_ESTESA = re.compile(
+    r"Testo originario\s+(" + cp.TIPO + r")\s+\d{1,2}\s+(?:" + cp.MESI + r")\s+(\d{4})"
+    r"\s*,?\s*n\.?\s*(\d+)\s*,\s*(?:Articolo|Art\.?)\s*(\d+)", re.I)
 RE_TITOLO_CITATO = re.compile(r"\bTitol[oi]\s+([IVXLC]+)\b")
 RE_NOTA_SOSTANZIALE = re.compile(r"Testo originario|Modifiche legislative", re.I)
-RE_RINVIO_NOTA = re.compile(r"^\W*(?:vedi|vedere)\s+(?:la\s+)?nota", re.I)
+# Il rinvio puo' seguire il frammento ("comma 1, punto primo dell'elenco:
+# vedere nota n. 1.") e dire quale nota: e' il dato piu' affidabile che c'e'.
+RE_RINVIO_NOTA = re.compile(
+    r"(?:^|:)\W*(?:vedi|vedere)\s+(?:la\s+)?nota\b\s*(?:n\.?\s*(?P<numero>\d+)|(?P<precedente>precedente))?",
+    re.I)
+# "articoli 8, 9, 10, 11 del Titolo III, 26 e 27 del Titolo IV": la
+# partizione in mezzo spezzava l'elenco, e gli artt. 26 e 27 della L-7/1961
+# restavano abrogati senza fonte.
+RE_PARTIZIONE_IN_ELENCO = re.compile(
+    r"\s+del(?:la|l['’])?\s+(?:Titolo|Capo|Capitolo|Sezione)\s+[IVXLC]+\b(?=\s*(?:,|e\b|ed\b))", re.I)
 # L'articolo che introduce una novella in un altro atto: il coordinato ne
 # riporta il testo aggiornato dalle modifiche successive, che pero' riguardano
 # l'atto bersaglio. Scritto qui, l'art. 11 della L-115/2017 avrebbe detto nel
@@ -98,6 +125,28 @@ X_INTESTAZIONE = 70
 
 # ---------------------------------------------------------------- estrazione
 
+def _dimensione(span):
+    """Il corpo di una riga senza i numeri di nota.
+
+    Il richiamo in apice (6.5pt) o il numero che apre la nota (12pt alla nota
+    95 del Lavoro) non dicono se la riga e' testo o nota: contato, la nota 95
+    finiva nel corpo e ci apriva un atto.
+    """
+    piene = [s for s in span if s["text"].strip()]
+    testo = [s for s in piene if not s["text"].strip().isdigit()] or piene
+    return max((s["size"] for s in testo), default=0)
+
+
+def _riga_nota(span):
+    """"50Legge 21 dicembre..." - il numero che apre la nota va staccato dal
+    testo, o spezza_note non ci vede l'inizio della nota 50."""
+    piene = [s for s in span if s["text"].strip()]
+    if len(piene) > 1 and piene[0]["text"].strip().isdigit():
+        i = span.index(piene[0])
+        return (piene[0]["text"].strip() + " " + "".join(s["text"] for s in span[i + 1:]).strip()).rstrip()
+    return "".join(s["text"] for s in span).rstrip()
+
+
 def righe_pdf(pdf):
     """Come in 10, con in piu' il grassetto.
 
@@ -107,16 +156,23 @@ def righe_pdf(pdf):
     sarebbe diventata l'inizio di un atto nuovo.
     """
     corpo, note = [], []
-    for pagina in fitz.open(pdf):
+    pagine = [[riga for blocco in pagina.get_text("dict")["blocks"]
+               for riga in blocco.get("lines", [])] for pagina in fitz.open(pdf)]
+    # Le note stanno un punto o piu' sotto il testo, ma non allo stesso corpo in
+    # ogni raccolta: 9pt sotto gli 11 dell'Edilizia, 10pt sotto gli 11 del
+    # Lavoro. La soglia fissa a 10 prendeva le note del Lavoro per testo.
+    dimensioni = Counter(round(_dimensione(r["spans"])) for righe in pagine for r in righe
+                         if _dimensione(r["spans"]))
+    soglia = dimensioni.most_common(1)[0][0] - 0.5 if dimensioni else 10
+    for righe in pagine:
         visive = {}
-        for blocco in pagina.get_text("dict")["blocks"]:
-            for riga in blocco.get("lines", []):
-                span = riga["spans"]
-                dim = max((s["size"] for s in span), default=0)
-                if dim < 10:
-                    note.append("".join(s["text"] for s in span).rstrip())
-                    continue
-                visive.setdefault(round(riga["bbox"][1]), []).append((riga, dim))
+        for riga in righe:
+            span = riga["spans"]
+            dim = _dimensione(span)
+            if dim < soglia:
+                note.append(_riga_nota(span))
+                continue
+            visive.setdefault(round(riga["bbox"][1]), []).append((riga, dim))
         for quota in sorted(visive):
             pezzi = sorted(visive[quota], key=lambda r: r[0]["bbox"][0])
             testo, richiami, grassetto = "", [], False
@@ -142,8 +198,11 @@ def segmenta(corpo):
     """
     teste = [i for i, (t, x, _, b) in enumerate(corpo)
              if b and x < X_INTESTAZIONE and RE_ATTO.fullmatch(t)]
-    altre = next((i for i, (t, _, _, _) in enumerate(corpo)
-                  if t.upper() == "ALTRE NORME"), len(corpo))
+    # "ALTRE NORME" nell'Edilizia, "ALTRE NORME IN MATERIA DI LAVORO:" nel
+    # Lavoro. Maiuscolo e a margine: "altre norme in vigore" a capo resta testo.
+    altre = next((i for i, (t, x, _, _) in enumerate(corpo)
+                  if x < X_INTESTAZIONE and t == t.upper()
+                  and re.match(r"ALTRE NORME\b", t)), len(corpo))
     segmenti = []
     for k, i in enumerate(teste):
         fine = teste[k + 1] if k + 1 < len(teste) else len(corpo)
@@ -171,7 +230,7 @@ def _progressivo(precedente, numero, ordinale):
 
 def estrai_articoli(righe):
     articoli, partizioni = [], []
-    corrente, rubrica_aperta, partizione = None, False, None
+    corrente, rubrica_aperta, partizione, allegato = None, False, None, False
     contesto = {"titolo": None, "titoloRubrica": None, "capo": None, "capoRubrica": None}
     for testo, x, richiami, grassetto in righe:
         # Il numero di pagina va scartato per primo: fra un "TITOLO II
@@ -184,11 +243,19 @@ def estrai_articoli(righe):
         # abrogato col suo Titolo - risorgeva col testo dell'art. 41.
         m = RE_ART.match(testo) if grassetto else None
         if m:
-            numero = m.group(1) + ("-" + m.group(2).lower() if m.group(2) else "")
+            base = "Unico" if m.group(1).lower() == "unico" else m.group(1)
+            numero = base + ("-" + m.group(2).lower() if m.group(2) else "")
             corrente = {"numero": numero, "rubrica": None, "commi": [], "numeri": [],
                         "note": list(richiami), "numerato": None, **contesto}
             articoli.append(corrente)
-            rubrica_aperta, partizione = False, None
+            rubrica_aperta, partizione, allegato = False, None, False
+            continue
+        # Maiuscolo o centrato: "Allegato A della Legge..." andato a capo a
+        # margine resta testo del comma.
+        if RE_ALLEGATO.match(testo) and (testo.split()[0].isupper() or x >= cp.X_CENTRATO):
+            corrente, partizione, allegato = None, None, True
+            continue
+        if allegato:
             continue
 
         mp = cp.RE_PARTIZIONE.match(testo)
@@ -221,6 +288,11 @@ def estrai_articoli(righe):
         if corrente is None:
             continue
         corrente["note"] += richiami
+        # Un articolo abrogato e' "[ABROGATO]" e basta. Dopo l'art. 5 della
+        # L-71/2014 la nota col testo originario prosegue per due pagine al
+        # corpo del testo, e senza questo arresto diventava l'articolo.
+        if corrente.get("chiuso"):
+            continue
         if not corrente["commi"] and (rubrica_aperta or testo.startswith("(")):
             corrente["rubrica"] = ((corrente["rubrica"] or "") + " " + testo).strip()
             rubrica_aperta = not testo.endswith(")")
@@ -230,6 +302,12 @@ def estrai_articoli(righe):
         if x >= cp.X_CENTRATO and "[" not in testo:
             continue
         if testo.upper() == testo and re.search(r"[A-ZÀ-Ù]{3}", testo) and "[" not in testo:
+            continue
+
+        if not corrente["commi"] and RE_ABROGATO_INTERO.fullmatch(testo.replace(" ", "")):
+            corrente["commi"].append([testo])
+            corrente["numeri"].append("1")
+            corrente["chiuso"] = True
             continue
 
         mn = RE_COMMA_NUMERATO.match(testo)
@@ -270,6 +348,15 @@ def rifinisci(articoli):
     return articoli
 
 
+def origine(nota):
+    trovata = cp.origine(nota)
+    if trovata:
+        return trovata
+    m = RE_ORIGINE_ESTESA.search(nota)
+    return m and {"tipo": re.sub(r"\s+", " ", m.group(1)).strip(),
+                  "numero": int(m.group(3)), "anno": int(m.group(2)), "articolo": m.group(4)}
+
+
 def leggi(pdf):
     corpo, righe_note = righe_pdf(pdf)
     segmenti = segmenta(corpo)
@@ -279,8 +366,10 @@ def leggi(pdf):
     quante = max([n for s in segmenti for a in s["articoli"] for n in a["note"]]
                  + [n for s in segmenti for p in s["partizioni"] for n in p["note"]]
                  + [0])
-    note = cp.spezza_note(righe_note, quante)
+    note = {n: RE_ABROGATI_DA.sub(r"\1Modifiche legislative: ", t)
+            for n, t in cp.spezza_note(righe_note, quante).items()}
     voci = [v for s in segmenti for v in s["articoli"] + s["partizioni"]]
+    per_nota = {n: [{**m, "nota": n} for m in cp.modifiche(t)] for n, t in note.items()}
     for voce in voci:
         voce["modifiche"], voce["origine"] = [], None
         # Una nota che dice solo "Si veda il Decreto Delegato n.35/2025" o
@@ -290,25 +379,58 @@ def leggi(pdf):
         voce["noteSostanziali"] = [n for n in voce["note"]
                                    if RE_NOTA_SOSTANZIALE.search(note.get(n, ""))]
         for n in voce["note"]:
-            testo = note.get(n, "")
-            voce["modifiche"] += cp.modifiche(testo)
-            voce["origine"] = voce["origine"] or cp.origine(testo)
-    # "Decreto-Legge n.30/2018, Articolo 5: vedere nota n. 4." - il testo
-    # della modifica sta in un'altra nota, e il numero indicato e' pure
-    # sbagliato (e' la 5). Si ritrova per atto e articolo, non per numero di
-    # nota: senza, gli artt. 29 e 30 restavano abrogati senza fonte.
-    completi = {}
-    for voce in voci:
-        for m in voce["modifiche"]:
-            if not RE_RINVIO_NOTA.match(m["testo"]):
-                completi.setdefault((m["numero"], m["anno"], m["articolo"]), m["testo"])
-    for voce in voci:
-        for m in voce["modifiche"]:
-            if RE_RINVIO_NOTA.match(m["testo"]):
-                m["testo"] = completi.get((m["numero"], m["anno"], m["articolo"]), m["testo"])
+            voce["modifiche"] += [dict(m) for m in per_nota.get(n, [])]
+            voce["origine"] = voce["origine"] or origine(note.get(n, ""))
+    risolvi_rinvii(voci, per_nota)
     aggiornato = next((RE_AGGIORNAMENTO.search(t).group(1).strip()
                        for t, _, _, _ in corpo[:80] if RE_AGGIORNAMENTO.search(t)), None)
     return segmenti, note, aggiornato
+
+
+def _rinvio(testo):
+    return RE_RINVIO_NOTA.search(testo) if len(testo) < 200 else None
+
+
+def risolvi_rinvii(voci, per_nota):
+    """"vedere nota n. 15", "vedere nota precedente": il testo della modifica
+    sta in un'altra nota.
+
+    Prima si guarda la nota indicata, se vi compare lo stesso atto: nel Lavoro
+    la L-63/1985 modifica sia la L-7/1961 sia la L-23/1977, e cercata solo per
+    atto e articolo la nota 16 riceveva il testo scritto per la L-7. Ma il
+    numero puo' essere sbagliato - "Decreto-Legge n.30/2018, Articolo 5:
+    vedere nota n. 4." nell'Edilizia, dove e' la 5 - e allora, se la nota
+    indicata non nomina l'atto per quell'articolo, vale atto e articolo; senza,
+    gli artt. 29 e 30 restavano abrogati senza fonte.
+    """
+    completi = {}
+    for voce in voci:
+        for m in voce["modifiche"]:
+            if not _rinvio(m["testo"]):
+                completi.setdefault((m["numero"], m["anno"], m["articolo"]), m["testo"])
+    for voce in voci:
+        for m in voce["modifiche"]:
+            r = _rinvio(m["testo"])
+            if not r:
+                continue
+            indicata = (int(r.group("numero")) if r.group("numero")
+                        else m["nota"] - 1 if r.group("precedente") else None)
+            candidati = [c for c in per_nota.get(indicata, [])
+                         if (c["numero"], c["anno"]) == (m["numero"], m["anno"])
+                         and not _rinvio(c["testo"])
+                         and (c["articolo"] is None or m["articolo"] is None
+                              or c["articolo"] == m["articolo"])]
+            if candidati:
+                m["testo"] = candidati[0]["testo"]
+            else:
+                m["testo"] = completi.get((m["numero"], m["anno"], m["articolo"]), m["testo"])
+
+
+def abroganti(articolo):
+    """cp.abroganti sulle modifiche con gli elenchi di articoli ricuciti."""
+    return cp.abroganti({**articolo, "modifiche": [
+        {**m, "testo": RE_PARTIZIONE_IN_ELENCO.sub("", m["testo"])}
+        for m in articolo["modifiche"]]})
 
 
 # ------------------------------------------------------------ risoluzione atti
@@ -330,7 +452,10 @@ def indice_norme(g):
 # "Decreto" senza aggettivo e' la forma breve con cui le note chiamano anche i
 # Decreti Consiliari e Reggenziali: il Decreto 21 febbraio 2006 n.39 e' nel
 # grafo come DC-39-2006, e D-39-2006 e' uno stub vuoto nato da una citazione.
-AFFINI = {"D": {"D", "DC", "DR"}}
+# I decreti condividono una numerazione annua, e il portale a volte registra
+# da Decreto Delegato una ratifica che il coordinato chiama Decreto-Legge: il
+# "Decreto - Legge 24 luglio 2014 n.118" e' nel grafo come DD-118-2014.
+AFFINI = {"D": {"D", "DC", "DR"}, "DL": {"DL", "DD"}, "DD": {"DD", "DL"}}
 
 
 def risolutore(indice):
@@ -475,8 +600,13 @@ def pianifica(segmento, presenti):
     # Un estratto in appendice non dice nulla degli articoli che non riporta:
     # "tutti impliciti" autorizza a riscrivere l'atto intero solo se il
     # coordinato l'atto intero lo contiene.
+    # Anche nel corpo una raccolta puo' riportare un solo pezzo di un atto: il
+    # Lavoro tiene due articoli dei quindici del DD-14/2018. Riordinare l'atto
+    # intero su quei due si fa solo se il coordinato copre quasi tutto il grafo.
+    coperti = {cp.chiave(a["numero"]) for a in segmento["articoli"]} & set(presenti)
     tutto_implicito = (not segmento["appendice"] and bool(presenti)
-                       and all(p["implicito"] for p in presenti.values()))
+                       and all(p["implicito"] for p in presenti.values())
+                       and len(coperti) >= 0.9 * len(presenti))
     visti, doppi, scelti, veicoli, assorbenti = set(), [], [], [], []
     precedente_presente = None
     for a in segmento["articoli"]:
@@ -510,10 +640,14 @@ def pianifica(segmento, presenti):
     # Un articolo nuovo si mette subito dopo quello che lo precede nel
     # coordinato: il 3-bis dopo il 3, non in fondo all'atto.
     massimo = max([p["ordine"] for p in presenti.values() if p["ordine"] is not None] + [0])
+    # Si rinumera solo se il coordinato ha tutti gli articoli del grafo: la
+    # L-7/1961 non riporta il Titolo I abrogato, e gli artt. 6-60 rinumerati da
+    # 1 avrebbero preso l'ordine degli artt. 1-5, che restano.
+    riordina = tutto_implicito and set(presenti) <= {cp.chiave(a["numero"]) for a in segmento["articoli"]}
     ultimo = None
     for i, a in enumerate(segmento["articoli"], 1):
         k = cp.chiave(a["numero"])
-        if tutto_implicito:
+        if riordina:
             a["ordine"], a["riordina"] = i, True
         elif k in presenti:
             a["ordine"], a["riordina"] = presenti[k]["ordine"], False
@@ -582,7 +716,7 @@ def main():
             print(f"    [ABROGATO] interi: {', '.join(abrogati) or '-'} | in parte: {', '.join(in_parte) or '-'}")
 
         evidenze = [{"articolo": a["numero"],
-                     "fonti": [f for f in cp.abroganti(a) if f],
+                     "fonti": [f for f in abroganti(a) if f],
                      "articoloId": f"{norma}/art-{a['numero']}"}
                     for a in s["articoli"] if a["abrogato"]]
         vivi = {cp.chiave(a["numero"]) for a in s["articoli"] if not a["abrogato"]}
@@ -616,7 +750,8 @@ def main():
                 elif m.get("articolo") and atto != norma:
                     novelle.append({"atto": atto, "articolo": m["articolo"],
                                     "bersaglio": f"{norma}/art-{a['numero']}",
-                                    "numeroBersaglio": re.match(r"\d+", a["numero"]).group(0)})
+                                    "numeroBersaglio": (re.match(r"\d+", a["numero"])
+                                                        or re.match(r".+", a["numero"])).group(0)})
         print(f"    novelle agganciabili {len(novelle)}")
         piani.append({"segmento": s, "norma": norma, "scelti": scelti,
                       "evidenze": evidenze, "novelle": novelle})

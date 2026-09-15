@@ -854,6 +854,7 @@ def leggi_articolo(norma_id: str, numero: str) -> dict:
                n.urlDocumento AS urlDocumento,
                n.abrogata AS abrogata, n.abrogataDa AS abrogataDa,
                a.abrogato AS passoAbrogato, a.abrogatoDa AS passoAbrogatoDa,
+               a.testoAggiornatoAl AS testoCoordinatoAl,
                collect({numero: c.numero, testo: c.testo,
                         abrogato: c.abrogato, abrogatoDa: c.abrogatoDa}) AS commi
     """, {"norma_id": norma_id, "numero": str(numero)})
