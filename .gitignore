@@ -2,6 +2,11 @@
 Neo4j-*.txt
 data/raw/
 data/parsed/
+# I testi coordinati pesano 77 MB in PDF e si riscaricano tutti con
+# scripts/scarica_testi_coordinati.py, che legge data/coordinati/manifesto.json:
+# il manifesto si versiona, i PDF no. I due gia' tracciati restano tracciati -
+# ignorarli qui non li toglie dall'indice.
+data/coordinati/*.pdf
 __pycache__/
 *.pyc
 .venv/
