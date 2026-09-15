@@ -6,7 +6,38 @@ stringa libera scritta nella scheda del portale. Tenere questa mappa in un solo
 posto evita che i vari script derivino id diversi per la stessa norma.
 """
 
+import os
 import re
+
+
+def certifica():
+    """Fa leggere a Python le CA di certifi invece di quelle di sistema.
+
+    Su questa macchina lo store radice che Python eredita da Windows contiene
+    36 CA soltanto, e fra quelle manca chi firma il certificato di Aura: ogni
+    connessione muore con "self signed certificate in certificate chain" senza
+    che nessuno stia intercettando nulla - riprodotto su reti diverse. Con le
+    CA di certifi (le stesse che usa gia' `requests` qui dentro) se ne vedono
+    147 e la verifica passa.
+
+    Si agisce su SSL_CERT_FILE e non sui parametri del driver perche' la
+    pipeline apre connessioni in tre modi diversi - Neo4jGraph, il driver
+    grezzo di neo4j, e Neo4jVector, che il suo driver se lo costruisce da se'
+    e non accetta configurazione - e OpenSSL legge questa variabile in tutti
+    e tre. Cosi' lo schema neo4j+s:// resta quello dichiarato nel .env, con
+    la cifratura che impone.
+
+    Va chiamata prima di aprire la connessione; chiamarla piu' volte non fa
+    danno. Se qualcuno ha gia' impostato SSL_CERT_FILE, si rispetta la sua
+    scelta.
+    """
+    if os.environ.get("SSL_CERT_FILE"):
+        return
+    try:
+        import certifi
+    except ImportError:      # senza certifi si prova comunque: altrove funziona
+        return
+    os.environ["SSL_CERT_FILE"] = certifi.where()
 
 # L'archivio non usa solo le etichette del menu a tendina: la L.140/2017 e'
 # schedata come "Legge ordinaria", che nel dropdown non compare affatto.

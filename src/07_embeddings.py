@@ -29,6 +29,9 @@ from langchain_neo4j import Neo4jVector
 from langchain_voyageai import VoyageAIEmbeddings
 from neo4j import GraphDatabase
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from comune import certifica  # noqa: E402
+
 ROOT = Path(__file__).resolve().parent.parent
 load_dotenv(ROOT / ".env")
 
@@ -75,6 +78,10 @@ def main():
     for chiave in ("VOYAGE_API_KEY", "NEO4J_URI"):
         if not os.environ.get(chiave):
             raise SystemExit(f"Manca {chiave} nel file .env")
+
+    # Prima di qualunque connessione: la usano sia conta() col driver grezzo
+    # sia Neo4jVector, che il driver se lo apre per conto suo.
+    certifica()
 
     uri = os.environ["NEO4J_URI"]
     utente = os.environ["NEO4J_USERNAME"]

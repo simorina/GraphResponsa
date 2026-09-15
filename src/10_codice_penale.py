@@ -46,7 +46,7 @@ from dotenv import load_dotenv
 from langchain_neo4j import Neo4jGraph
 
 sys.path.insert(0, str(Path(__file__).parent))
-from comune import SEPARATORE_COLLISIONE, norma_id  # noqa: E402
+from comune import SEPARATORE_COLLISIONE, certifica, norma_id  # noqa: E402
 
 RADICE = Path(__file__).resolve().parent.parent
 PDF_DEFAULT = RADICE / "data" / "coordinati" / "codice-penale.pdf"
@@ -472,6 +472,7 @@ DELETE r
 
 def grafo():
     load_dotenv(RADICE / ".env")
+    certifica()
     return Neo4jGraph(url=os.environ["NEO4J_URI"],
                       username=os.environ["NEO4J_USERNAME"],
                       password=os.environ["NEO4J_PASSWORD"],

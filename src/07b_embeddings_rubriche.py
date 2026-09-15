@@ -33,6 +33,9 @@ from dotenv import load_dotenv
 from langchain_voyageai import VoyageAIEmbeddings
 from neo4j import GraphDatabase
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from comune import certifica  # noqa: E402
+
 ROOT = Path(__file__).resolve().parent.parent
 load_dotenv(ROOT / ".env")
 if hasattr(sys.stdout, "reconfigure"):
@@ -88,6 +91,7 @@ def main():
         if not os.environ.get(chiave):
             raise SystemExit(f"Manca {chiave} nel file .env")
 
+    certifica()
     driver = GraphDatabase.driver(
         os.environ["NEO4J_URI"],
         auth=(os.environ["NEO4J_USERNAME"], os.environ["NEO4J_PASSWORD"]))
