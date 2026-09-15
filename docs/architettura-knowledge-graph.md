@@ -3,11 +3,11 @@
 Grafo Neo4j della normativa della Repubblica di San Marino, costruito per essere
 interrogato da un agente in modalità Graph RAG.
 
-**Stato aggiornato:** **268.238 nodi**, **350.069 relazioni**, **11.134 norme con testo
+**Stato aggiornato:** **254.510 nodi**, **321.005 relazioni**, **11.053 norme con testo
 integrale** su 11.136 scaricabili dal portale, distribuite su 16 tipologie di atto:
 leggi, decreti in tutte le loro forme, regolamenti, notifiche, ordinanze, statuti,
-errata corrige e verbali. Tutti i 181.248 commi hanno un embedding, e 358 norme,
-129 articoli e 53 commi portano una marcatura di abrogazione.
+errata corrige e verbali. Tutti i 171.417 commi hanno un embedding, e 424 norme,
+186 articoli e 68 commi portano una marcatura di abrogazione.
 
 ---
 
@@ -90,23 +90,23 @@ Nel nostro Knowledge Graph, le rubriche svolgono due funzioni cruciali:
 
 | Entità / Label | Quantità | Ruolo nel Modello |
 |---|---|---|
-| **`:Comma`** | **`180.747`** | Unità atomica di testo, ricerca semantica e retrieval |
-| **`:Articolo`** | **`74.078`** | Articoli con rubriche, capi e collocazione tematica |
-| **`:Norma`** | **`12.225`** | Tutti gli atti normativi censiti: |
-| ↳ *con testo integrale (`caricata: true`)* | *`11.134`* | *Su 11.136 scaricabili dal portale, 16 tipologie* |
-| ↳ *stub citati (`caricata: false`)* | *`1.114`* | *Atti richiamati nei testi per tracciare i rinvii* |
-| **TOTALE NODI** | **`267.050`** | |
+| **`:Comma`** | **`171.417`** | Unità atomica di testo, ricerca semantica e retrieval |
+| **`:Articolo`** | **`70.919`** | Articoli con rubriche, capi e collocazione tematica |
+| **`:Norma`** | **`12.173`** | Tutti gli atti normativi censiti: |
+| ↳ *con testo integrale (`caricata: true`)* | *`11.053`* | *Su 11.136 scaricabili dal portale, 16 tipologie* |
+| ↳ *stub citati (`caricata: false`)* | *`1.120`* | *Atti richiamati nei testi per tracciare i rinvii* |
+| **TOTALE NODI** | **`254.510`** | |
 
 ### Relazioni (Archi)
 
 | Relazione | Quantità | Direzione | Significato |
 |---|---|---|---|
-| **`HA_COMMA`** | **`180.747`** | `Articolo ➔ Comma` | Contenimento strutturale |
-| **`HA_ARTICOLO`** | **`74.078`** | `Norma ➔ Articolo` | Contenimento strutturale |
-| **`CITA`** | **`69.450`** | `(Comma/Norma) ➔ Norma` | Rinvio normativo formale |
-| **`CITA_ARTICOLO`** | **`24.171`** | `Comma ➔ Articolo` | Rinvio puntuale ad articolo specifico risolto |
-| **`ABROGA`** | **`412`** | `Norma ➔ Norma` | Abrogazione di un atto per intero, riconosciuta senza ambiguità |
-| **TOTALE ARCHI** | **`348.858`** | | |
+| **`HA_COMMA`** | **`171.417`** | `Articolo ➔ Comma` | Contenimento strutturale |
+| **`HA_ARTICOLO`** | **`70.919`** | `Norma ➔ Articolo` | Contenimento strutturale |
+| **`CITA`** | **`56.515`** | `(Comma/Norma) ➔ Norma` | Rinvio normativo formale |
+| **`CITA_ARTICOLO`** | **`21.632`** | `Comma ➔ Articolo` | Rinvio puntuale ad articolo specifico risolto |
+| **`ABROGA`** | **`522`** | `Norma ➔ Norma` | Abrogazione di un atto per intero, riconosciuta senza ambiguità |
+| **TOTALE ARCHI** | **`321.005`** | | |
 
 `CITA_ARTICOLO` era fermo a 16.763 finche' `RE_BERSAGLIO`, nel parser,
 pretendeva che il numero d'articolo fosse **adiacente** al nome dell'atto. Nel
@@ -126,7 +126,7 @@ corrispondere a cio' che un caricamento pulito produrrebbe.
 I `:Comma` erano 180.932 fino alla riparazione del parser: i **316 in più** sono
 il testo che si perdeva su 312 articoli, dove il buffer della rubrica non si
 chiudeva su `)` seguito da punteggiatura. Il conteggio dei nodi per etichetta
-somma a 280.486 e non a 268.238 perché ogni `:Norma` ne porta due — quella
+somma a 266.683 e non a 254.510 perché ogni `:Norma` ne porta due — quella
 generica e quella del tipo (`:Legge`, `:DecretoDelegato`, e così via).
 
 **I nodi `:Allegato` non ci sono più.** Erano 519 su 27 norme e portavano solo
@@ -191,6 +191,87 @@ dalla `L-101/2003` e abrogato dalla `L-59/2025`: `_bersagli_abrogati()` in
 Vale per **un atto su 7.800**: i commi impliciti scendono da 46.800 a 46.392.
 Il metodo però è riusabile su qualunque altro testo coordinato.
 
+### Le raccolte coordinate: più atti nello stesso PDF
+
+`src/12_raccolta_coordinata.py` porta il metodo alle **raccolte**, che tengono
+più atti coordinati nello stesso PDF e, sotto *«ALTRE NORME»*, articoli di atti
+collegati. Riusa la lettura delle note di `10` e le espressioni delle citazioni
+del parser e di `09`, importandole. La prima raccolta integrata è quella
+sull'**Edilizia Sovvenzionata** (`data/coordinati/edilizia-sovvenzionata.pdf`,
+aggiornata al 30 marzo 2026): `L-110/1994`, `L-44/2015`, `L-64/2025` e
+`R-5/2026`, più estratti di altri tredici atti.
+
+Cosa ha cambiato: **94 articoli e 298 commi** riscritti; **7 articoli** che il
+grafo non aveva (L-44/2015 artt. 3-bis e 22-bis, DL-30/2018 artt. 5-bis, 6-bis
+e 6-ter, R-8/2015 art. 2-bis, L-200/2011 art. 52); la `L-110/1994` passa da 85
+commi impliciti a 203 commi veri; **14 articoli e un comma** della `L-110/1994`
+ora risultano abrogati, ciascuno con il suo atto abrogante. Prima l'agente dava
+per vigente l'art. 29, abrogato dal `DL-30/2018`, e non trovava l'art. 3-bis
+della `L-44/2015`, che fissa le percentuali del contributo in conto interessi.
+
+Si riscrive **solo ciò che il coordinato cambia**, perché ogni comma riscritto
+perde vettore e citazioni:
+
+  - gli articoli con una nota *«Testo originario»* o *«Modifiche legislative»*,
+    quelli nuovi e quelli abrogati. Le note *«Si veda…»* non contano;
+  - tutti gli articoli di un atto che il caricamento aveva ridotto a commi
+    impliciti, ma solo se il coordinato riporta l'atto intero: un estratto in
+    appendice non dice nulla degli articoli che non contiene;
+  - **non** gli articoli che introducono una novella in un altro atto (*«è
+    aggiunto il seguente articolo»*): il coordinato ne riporta il testo
+    aggiornato dalle modifiche successive, che però riguardano l'atto
+    bersaglio. Per la stessa ragione le loro note non producono archi di
+    novella;
+  - l'articolo che nel grafo aveva **inghiottito un "-bis"** si riscrive
+    insieme a lui: il parser non riconosceva `Art. 6 - bis`, e l'art. 6 del
+    `DL-30/2018` aveva 22 commi con dentro il 6-bis e il 6-ter.
+
+Rispetto al Codice Penale la lettura del PDF ha quattro regole in più:
+
+  - **atti e articoli si aprono solo sulle intestazioni in grassetto.** L'art.
+    84 della `L-110/1994` elenca le leggi abrogate una per riga, e un a capo
+    su *«articolo 31.»* faceva risorgere l'art. 31;
+  - i commi possono essere **numerati** (`1.`, `1 bis.`) oltre che distinti dal
+    rientro;
+  - un **Titolo abrogato per intero** (`TITOLO II [ABROGATO]`) non riporta i
+    suoi articoli: si ritrovano nel grafo da `Articolo.titolo`, e la fonte si
+    cerca nella nota col nome del Titolo, non col numero dell'articolo;
+  - i **rinvii fra note** (*«vedere nota n. 4»*) si risolvono per atto e
+    articolo, perché il numero indicato può essere sbagliato: qui era la 5.
+
+Sui commi riscritti le citazioni ricavate dal testo vecchio si staccano e si
+ricalcolano sul nuovo; gli archi che portano un'`origine` restano.
+
+Dei 65 atti linkati dalla raccolta, 63 avevano già il testo nel grafo. La
+`L-85/1981` è entrata dopo (sezione seguente); la `L-17/1917` resta fuori: è
+una scansione senza testo, e senza OCR non si legge.
+
+### Un atto con più numerazioni: la legge di registro
+
+La `L-85/1981` era **uno stub citato da 104 commi**. Il suo PDF tiene la legge
+(artt. 1-76), la Tabella A delle tariffe, la Tabella B (artt. 1-4), la Tabella
+C (art. 1) e il Regolamento di applicazione (artt. 1-19): i numeri 1-4
+ricorrono quattro volte, e `03_load.py` la rifiutava come *«numerazione
+patologica»* — il presidio giusto contro gli Allegati letti come corpo, che qui
+scartava un atto sano. Il parser, per giunta, metteva firme e tabelle in un
+comma dell'art. 76 di 11.000 caratteri.
+
+`src/13_atto_composto.py` divide il PDF nelle sue sezioni, le fa leggere al
+parser di `02` una per una e ne **qualifica i numeri**: `reg-15` è l'art. 15 del
+Regolamento, `tabB-1` l'art. 1 della Tabella B, e la sezione va in
+`Articolo.titolo` (*«Regolamento di applicazione»*, *«Tabella B»*). Poi carica la
+sola norma con le query di `03`. Risultato: **99 articoli**, 37 citazioni
+puntuali in più (tutte e 35 quelle entranti verificate a mano: agganciano
+l'articolo della legge che il testo nomina), e l'agente legge il Regolamento.
+
+La **Tabella A resta fuori**: è a quattro colonne, e il testo estratto le
+alterna riga per riga. Nell'indice sarebbe testo senza senso ma cercabile.
+L'art. 7 non manca per errore: il PDF passa dall'art. 6 all'art. 8.
+
+`data/parsed/L-85-1981.json` è ora prodotto da `13` (lo dice `fonteParsing`):
+rilanciare `02_parse.py` in forzatura su quella norma la riporterebbe allo stato
+rifiutato, e andrebbe rieseguito `13`.
+
 ### Lo stesso atto sotto due schede
 
 Il portale pubblica alcuni atti **due volte**, con due pagine di scheda e due
@@ -225,18 +306,44 @@ sul nodo che ha già in mano, senza un `MATCH` in più su ogni ricerca.
 
 | Proprietà | Su | Quantità | Significato |
 |---|---|---:|---|
-| `Norma.abrogata` / `abrogataDa` | `:Norma` | **358** | L'atto è caduto per intero |
-| `Articolo.abrogato` / `abrogatoDa` | `:Articolo` | **118** | Articolo soppresso dentro un atto vivo |
-| `Comma.abrogato` / `abrogatoDa` | `:Comma` | **52** | Comma soppresso dentro un atto vivo |
+| `Norma.abrogata` / `abrogataDa` | `:Norma` | **424** | L'atto è caduto per intero |
+| `Articolo.abrogato` / `abrogatoDa` | `:Articolo` | **186** | Articolo soppresso dentro un atto vivo |
+| `Comma.abrogato` / `abrogatoDa` | `:Comma` | **68** | Comma soppresso dentro un atto vivo |
 
 Le si ricalcola da zero a ogni esecuzione di `src/08_abrogazioni.py --scrivi`,
 archi `ABROGA` compresi: senza cancellarli prima, un arco che smette di essere
 riconosciuto sopravvive alla correzione del filtro che lo escludeva.
 
+#### Questo indice ha una scadenza
+
+Una clausola può differire la propria abrogazione a una data: *«è abrogata la
+Legge n.26/1960 **a partire dal 1° gennaio 1983**»*. Il filtro le scartava
+tutte, futura o passata, e costava 43 abrogazioni già pienamente efficaci — il
+1983 è venuto da quarant'anni. Ora la data **si confronta con oggi**.
+
+Ne discende una proprietà che va conosciuta: **lo stesso testo produce
+marcature diverse in momenti diversi.** È corretto — la vigenza è una proprietà
+del tempo, non del testo — ma significa che l'indice invecchia da solo, e
+un'abrogazione che matura non compare finché `08` non viene rieseguito.
+
+Perché la cosa non viva solo in un commento, lo script scrive sul grafo un nodo
+singleton:
+
+```cypher
+(:StatoVigenza {id: 'abrogazioni', calcolatoIl: date, clausoleInAttesa: int,
+                prossimaMaturazione: date, normeMarcate: int, archi: int})
+```
+
+Chi interroga il grafo può così sapere **quanto è vecchio** l'indice di vigenza
+e se c'è qualcosa in attesa, senza leggere il codice. A oggi la coda è di **una
+sola** clausola (`L-141/2025`, che matura col periodo d'imposta 2026), ma il
+meccanismo è permanente: `08_abrogazioni.py --scrivi` va rieseguito
+**periodicamente**, non solo dopo un caricamento.
+
 #### `ABROGA`, e perché copre meno di quanto sembri
 
 Nel corpus ci sono **1.728 commi** che contengono «è abrogato», «sono abrogati»
-o «e' abrogato», e se ne modellano 413. Non è una svista: la forma più comune
+o «e' abrogato», e se ne modellano 522. Non è una svista: la forma più comune
 abroga una **parte** — *«All'articolo 2 della Legge n.55/1994, il punto 8.0 è
 abrogato»* — e leggerla come abrogazione dell'articolo 2 dichiarerebbe morta
 una norma viva. In un archivio che deve dire a un cittadino se ha diritto a
@@ -259,7 +366,7 @@ La marcatura effettiva non viene solo da lì. L'archivio di Stato segna da sé
 gli atti caduti premettendo `ABROGATO - ` al titolo — **125 norme** — e i due
 segnali si sovrappongono per **88 norme** — ed è una conferma reciproca, non una
 ridondanza: il titolo dice *che* un atto è caduto, i commi dicono *da chi*.
-L'unione marca **358 norme** con `Norma.abrogata`, e le 321 con attribuzione
+L'unione marca **424 norme** con `Norma.abrogata`, e le 405 con attribuzione
 nota portano anche `Norma.abrogataDa`.
 
 #### Le trappole, in ordine di quanto sono costate
@@ -308,7 +415,7 @@ Ciò che l'arco garantiva lo garantiscono quattro controlli in fila: tipo
 concorde col prefisso dell'id, atto che risolve a **una** sola norma, bersaglio
 non posteriore alla fonte, e partizione che esiste davvero dentro quell'atto —
 se il testo dice «comma 7» e l'articolo ne ha sei, il riferimento è stato letto
-male. Si marcano così **129 articoli** e **53 commi**, con `abrogato` e
+male. Si marcano così **186 articoli** e **68 commi**, con `abrogato` e
 `abrogatoDa`, esposti al modello come `passoAbrogato`.
 
 Il numero resta limitato perché la maggioranza delle clausole scende ancora più
@@ -405,11 +512,20 @@ flowchart TD
         S --> T
         T --> M
     end
+
+    subgraph CO["7. Testi coordinati"]
+        X["data/coordinati/*.pdf"] --> Y["10_codice_penale.py / 12_raccolta_coordinata.py"]
+        Y --> Z["Testo vigente, commi, novelle con origine"]
+        Y --> W["data/derivato/abrogazioni_*.json"]
+        Z --> M
+        W --> Q
+    end
 ```
 
 I passi 4, 5 e 6 sono **idempotenti e rieseguibili**: il 07 e il 07b calcolano
 solo ciò che manca, il 09 usa `MERGE` e non duplica, l'08 azzera e riscrive da
-capo le proprie marcature. Vanno
+capo le proprie marcature. Il 7 va eseguito **prima** del 6 e del 4: deposita
+le evidenze che l'08 legge e lascia commi e rubriche senza vettore. Vanno
 rilanciati dopo ogni caricamento — un comma senza embedding è quasi invisibile
 alla ricerca (§4.5), e un atto abrogato non marcato è indistinguibile da uno
 vigente.

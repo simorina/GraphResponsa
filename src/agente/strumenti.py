@@ -196,7 +196,8 @@ def ricerca_vettoriale():
     return _vettoriale
 
 
-def _full_text(query, limite, dal_anno=None):
+def _full_text(query, limite, dal_anno=None, al_anno=None, prefissi=None,
+               escludi_abrogati=False):
     """Ricerca lessicale: la riserva quando il vettoriale non e' disponibile."""
     righe = grafo().query("""
         CALL db.index.fulltext.queryNodes('testo_normativo', $query)
@@ -211,6 +212,10 @@ def _full_text(query, limite, dal_anno=None):
         // intestazioni per la loro rubrica.
         WHERE node.testo IS NOT NULL AND trim(node.testo) <> ''
           AND ($dal_anno IS NULL OR norma.anno >= $dal_anno)
+          AND ($al_anno IS NULL OR norma.anno <= $al_anno)
+          AND ($prefissi IS NULL OR split(norma.id, '-')[0] IN $prefissi)
+          AND (NOT $escludi_abrogati OR NOT (coalesce(norma.abrogata, false)
+               OR coalesce(node.abrogato, false) OR coalesce(art.abrogato, false)))
         RETURN norma.id AS normaId, norma.titolo AS normaTitolo,
                norma.anno AS anno,
                toString(norma.dataEntrataVigore) AS inVigoreDal,
@@ -218,10 +223,14 @@ def _full_text(query, limite, dal_anno=None):
                art.numero AS articolo, art.rubrica AS rubrica,
                art.titolo AS partizioneTitolo, art.capoRubrica AS partizioneCapo,
                CASE WHEN node:Comma THEN node.numero ELSE null END AS comma,
-               node.testo AS testo, norma.urlDocumento AS urlDocumento
+               node.testo AS testo, norma.urlDocumento AS urlDocumento,
+               norma.abrogata AS abrogata, norma.abrogataDa AS abrogataDa,
+               coalesce(node.abrogato, art.abrogato) AS passoAbrogato,
+               coalesce(node.abrogatoDa, art.abrogatoDa) AS passoAbrogatoDa
         ORDER BY score DESC, norma.anno DESC LIMIT $ampio
     """, {"query": _lucene(query), "limite": limite, "ampio": limite * 3,
-          "dal_anno": dal_anno})
+          "dal_anno": dal_anno, "al_anno": al_anno, "prefissi": prefissi,
+          "escludi_abrogati": bool(escludi_abrogati)})
 
     # Stessa potatura dei doppioni del ramo ibrido: due rami, una semantica.
     tenute, viste = [], {}
@@ -295,6 +304,10 @@ MATCH (norma:Norma)-[:HA_ARTICOLO]->(art)
 // misurato al secondo posto cercando la loro stessa rubrica.
 WHERE node.testo IS NOT NULL AND trim(node.testo) <> ''
   AND ($dal_anno IS NULL OR norma.anno >= $dal_anno)
+  AND ($al_anno IS NULL OR norma.anno <= $al_anno)
+  AND ($prefissi IS NULL OR split(norma.id, '-')[0] IN $prefissi)
+  AND (NOT $escludi_abrogati OR NOT (coalesce(norma.abrogata, false)
+       OR coalesce(node.abrogato, false) OR coalesce(art.abrogato, false)))
 RETURN norma.id AS normaId, norma.titolo AS normaTitolo, norma.anno AS anno,
        toString(norma.dataEntrataVigore) AS inVigoreDal,
        toString(norma.data) AS dataAtto,
@@ -318,6 +331,10 @@ MATCH (norma:Norma)-[:HA_ARTICOLO]->(art)
 // misurato al secondo posto cercando la loro stessa rubrica.
 WHERE art.testo IS NOT NULL AND trim(art.testo) <> ''
   AND ($dal_anno IS NULL OR norma.anno >= $dal_anno)
+  AND ($al_anno IS NULL OR norma.anno <= $al_anno)
+  AND ($prefissi IS NULL OR split(norma.id, '-')[0] IN $prefissi)
+  AND (NOT $escludi_abrogati OR NOT (coalesce(norma.abrogata, false)
+       OR coalesce(art.abrogato, false)))
 RETURN norma.id AS normaId, norma.titolo AS normaTitolo, norma.anno AS anno,
        toString(norma.dataEntrataVigore) AS inVigoreDal,
        toString(norma.data) AS dataAtto,
@@ -347,18 +364,30 @@ def _vettore_domanda(query):
         return None
 
 
-def _semantico(query, limite, dal_anno=None):
+# Con un filtro attivo il ramo vettoriale pesca piu' largo. L'indice restituisce
+# i k vicini PRIMA che il filtro scarti: per l'anno non e' servito - misurato,
+# con dal_anno 2000, 2015 e 2022 i risultati restavano otto - ma un tipo raro e'
+# un'altra cosa. Le leggi costituzionali sono 17 atti su 11.052, e fra i 24
+# vicini piu' simili di una domanda qualunque possono non comparire mai.
+AMPIEZZA_FILTRATA = 8
+
+
+def _semantico(query, limite, dal_anno=None, al_anno=None, prefissi=None,
+               escludi_abrogati=False):
     """I due indici vettoriali fusi in una lista sola. None se non disponibili."""
     vettore = _vettore_domanda(query)
     if vettore is None:
         return None
+    filtrato = any(v is not None for v in (dal_anno, al_anno, prefissi)) or escludi_abrogati
+    k = limite * AMPIEZZA_FILTRATA if filtrato else limite
     liste = []
     for indice, risalita in ((INDICE_VETTORIALE, RISALITA_COMMI),
                              (INDICE_RUBRICHE, RISALITA_RUBRICHE)):
         try:
             liste.append(grafo().query(risalita, {
-                "indice": indice, "k": limite, "vettore": vettore,
-                "dal_anno": dal_anno}))
+                "indice": indice, "k": k, "vettore": vettore,
+                "dal_anno": dal_anno, "al_anno": al_anno, "prefissi": prefissi,
+                "escludi_abrogati": bool(escludi_abrogati)}))
         except Exception:
             # L'indice delle rubriche puo' non esserci ancora: si prosegue con
             # quello dei commi invece di far fallire tutta la ricerca.
@@ -408,6 +437,21 @@ def _rerank(query, righe, limite):
     return [righe[x.index] for x in esito.results]
 
 
+# Le formule con cui un atto riscrive un altro: "e' cosi' sostituito", "sono
+# abrogati", "e' aggiunto il seguente articolo". Distinguono la novella vera
+# dal semplice rimando - "i soggetti in possesso dei requisiti di cui
+# all'articolo 3" cita l'articolo senza toccarlo - e l'apostrofo va in una
+# classe di caratteri perche' gli atti usano ' e ’ indifferentemente.
+#
+# NON si usa \b davanti a "è": in Java - il motore che sta dietro a `=~` di
+# Cypher - \w e' ASCII, quindi fra uno spazio e una vocale accentata NON c'e'
+# confine di parola e l'espressione non agganciava mai nulla. Misurato: "e'
+# cosi' sostituito" dava riscrive=false. Il confine si scrive a mano.
+RISCRITTURA = (r"(?is).*(?:^|[\s,;:.(«\"])(?:è|e['’]|sono|viene|vengono)\s+"
+               r"(?:cos[ìi]['’]?\s+)?"
+               r"(?:sostituit|modificat|abrogat|aggiunt|inserit|soppress)\w*.*")
+
+
 def _novelle(righe):
     """Annota quali risultati sono citati da atti SUCCESSIVI.
 
@@ -435,12 +479,23 @@ def _novelle(righe):
             MATCH (c:Comma)-[:CITA_ARTICOLO]->(a)
             MATCH (dopo:Norma)-[:HA_ARTICOLO]->(artDopo:Articolo)-[:HA_COMMA]->(c)
             WHERE dopo.anno > n.anno
-            WITH k, dopo, artDopo, c ORDER BY dopo.anno DESC
-            WITH k, collect({norma: dopo.id, anno: dopo.anno,
-                             articolo: artDopo.numero, comma: c.numero,
-                             testo: c.testo})[..2] AS novelle
+            // Un comma che RISCRIVE la disposizione vale piu' di uno che la
+            // richiama di passaggio, e va detto al modello.
+            WITH k, dopo, artDopo, c,
+                 CASE WHEN c.testo =~ $riscrittura THEN true ELSE false END AS riscrive
+            ORDER BY riscrive DESC
+            // Un comma per ATTO, non i primi due commi in assoluto: un atto
+            // recente con due rimandi si prendeva tutti i posti e l'atto che
+            // l'articolo lo aveva riscritto restava fuori. Misurato sull'art.
+            // 3 della L-44/2015: comparivano due commi della L-87/2026 che vi
+            // rimandano, e non la L-64/2025 che ne ha sostituito le lettere.
+            WITH k, dopo, collect({norma: dopo.id, anno: dopo.anno,
+                                   articolo: artDopo.numero, comma: c.numero,
+                                   testo: c.testo, riscrive: riscrive})[0] AS voce
+            ORDER BY voce.riscrive DESC, voce.anno DESC
+            WITH k, collect(voce)[..3] AS novelle
             RETURN k.n AS norma, k.a AS articolo, novelle
-        """, {"chiavi": chiavi})
+        """, {"chiavi": chiavi, "riscrittura": RISCRITTURA})
     except Exception:
         return righe
     mappa = {(t["norma"], t["articolo"]): t["novelle"] for t in trovate}
@@ -499,6 +554,63 @@ def _bersagli_abrogati(righe):
         caduti = mappa.get((r.get("normaId"), str(r.get("articolo"))))
         if caduti:
             r["passiIntrodottiOraAbrogati"] = caduti
+    return righe
+
+
+def _atti_novellati(righe):
+    """Annota quali ATTI sono stati modificati da leggi successive.
+
+    _novelle() guarda l'articolo, e serve quando l'utente chiede di quello.
+    Su una domanda generica pero' - "come funziona l'edilizia sovvenzionata" -
+    la ricerca porta gli articoli che parlano del tema, non quelli che sono
+    stati toccati: misurato, restituiva l'art. 26 e l'art. 19 della L-44/2015,
+    mentre la L-64/2025 ne aveva riscritto gli articoli 3, 5, 16 e 22. Nessun
+    avviso compariva, e l'agente rispondeva con la disciplina del 2015 come se
+    nulla fosse cambiato.
+
+    Questo segnale sta un livello sopra: dice che l'ATTO che stai leggendo e'
+    stato novellato, anche se l'articolo che hai in mano non lo e'. Non
+    sostituisce la lettura - dice dove guardare - ed e' anch'esso solo
+    positivo: la sua presenza avverte, la sua assenza non promette nulla.
+    """
+    ids = sorted({r["normaId"] for r in righe if r.get("normaId")})
+    if not ids:
+        return righe
+    try:
+        trovate = grafo().query("""
+            UNWIND $ids AS id
+            MATCH (n:Norma {id: id})-[:HA_ARTICOLO]->(a:Articolo)
+            MATCH (c:Comma)-[:CITA_ARTICOLO]->(a)
+            MATCH (dopo:Norma)-[:HA_ARTICOLO]->(:Articolo)-[:HA_COMMA]->(c)
+            WHERE dopo.anno > n.anno AND dopo.id <> n.id
+            WITH id, dopo, a,
+                 CASE WHEN c.testo =~ $riscrittura THEN true ELSE false END AS riscrive
+            WITH id, dopo, collect(DISTINCT a.numero) AS articoli,
+                 max(riscrive) AS riscrive
+            WHERE riscrive
+            ORDER BY dopo.anno DESC
+            WITH id, collect({norma: dopo.id, anno: dopo.anno,
+                              titolo: dopo.titolo,
+                              articoli: articoli})[..3] AS novellanti
+            RETURN id, novellanti
+        """, {"ids": ids, "riscrittura": RISCRITTURA})
+    except Exception:
+        return righe
+    mappa = {t["id"]: t["novellanti"] for t in trovate if t["novellanti"]}
+    for r in righe:
+        atti = mappa.get(r.get("normaId"))
+        if not atti:
+            continue
+        # Il segnale riguarda l'atto, e senza dirlo esplicitamente l'agente lo
+        # riferiva all'articolo che aveva in mano: leggendo l'art. reg-15 della
+        # L-85/1981 scriveva che era stato modificato dalla L-132/2023, che
+        # aveva riscritto invece gli artt. 25 e 29. L'appartenenza si calcola
+        # sull'elenco intero, prima di tagliarlo per la risposta.
+        mio = str(r.get("articolo") or "").strip()
+        r["attoNovellatoDa"] = [
+            {**a, "articoli": a["articoli"][:6],
+             "toccaQuestoArticolo": bool(mio) and mio in a["articoli"]}
+            for a in atti]
     return righe
 
 
@@ -581,8 +693,39 @@ def _fondi(liste, limite, taglia=True):
     return finali
 
 
+# I prefissi d'id, e non Norma.tipo, perche' il campo tipo ha 43 grafie diverse
+# per sedici tipi ("Decreto Delegato", "Decreto  Delegato", "Decreto delegato"
+# ...) mentre il prefisso e' uno e controllato: e' quello che comune.norma_id
+# assegna al caricamento.
+PREFISSI_TIPO = {"L", "LC", "LQ", "LRC", "DD", "DL", "DC", "DR", "D", "R",
+                 "N", "EC", "O", "S", "V", "X"}
+
+
+def _prefissi(tipi):
+    """(prefissi validati o None, errore o None) per il filtro sul tipo d'atto.
+
+    Un prefisso sconosciuto non si ignora in silenzio: filtrare su un tipo che
+    non esiste restituirebbe zero risultati, e l'agente ne concluderebbe che
+    l'archivio non disciplina la materia. Meglio dirgli che ha sbagliato tipo.
+    """
+    if not tipi:
+        return None, None
+    richiesti = sorted({str(t).strip().upper() for t in tipi if str(t).strip()})
+    ignoti = [t for t in richiesti if t not in PREFISSI_TIPO]
+    if ignoti:
+        return None, f"Tipi d'atto sconosciuti: {ignoti}. Validi: {sorted(PREFISSI_TIPO)}"
+    return (richiesti or None), None
+
+
+assert _prefissi(None) == (None, None)
+assert _prefissi(["l", " DD "]) == (["DD", "L"], None)
+assert _prefissi(["LEGGE"])[1] is not None
+
+
 @tool
-def cerca_testo(query: str, limite: int = 8, dal_anno: int | None = None) -> dict:
+def cerca_testo(query: str, limite: int = 8, dal_anno: int | None = None,
+                al_anno: int | None = None, tipi: list[str] | None = None,
+                escludi_abrogati: bool = False) -> dict:
     """Cerca nel testo della normativa in archivio.
 
     E' lo strumento da usare per primo su qualunque domanda di merito
@@ -614,7 +757,7 @@ def cerca_testo(query: str, limite: int = 8, dal_anno: int | None = None) -> dic
     e' stato abrogato tutto e non e' piu' diritto vigente, per quanto il
     testo si legga bene. Dillo in apertura, cita `abrogataDa` se c'e', e cerca
     la disciplina che l'ha sostituito. L'assenza del campo non prova nulla in
-    senso contrario: il marchio copre 358 norme su oltre dodicimila.
+    senso contrario: il marchio copre 424 norme su oltre dodicimila.
 
     Il campo `citatoDaAttiSuccessivi` e' il piu' importante che leggi. Elenca
     gli atti POSTERIORI che citano proprio quell'articolo, e in questo
@@ -646,9 +789,28 @@ def cerca_testo(query: str, limite: int = 8, dal_anno: int | None = None) -> dic
         limite: quanti risultati restituire (default 8, alzalo se la materia e' ampia)
         dal_anno: opzionale, scarta le norme anteriori a quell'anno. Utile per
             cercare la disciplina piu' recente su una materia gia' individuata.
+        al_anno: opzionale, scarta le norme posteriori a quell'anno. Serve per le
+            domande storiche: "com'era regolato X prima del 2000" vuole
+            al_anno=1999, NON dal_anno - dal_anno escluderebbe proprio il periodo
+            chiesto.
+        tipi: opzionale, limita a certi tipi d'atto, indicati per prefisso:
+            L legge, LC legge costituzionale, LQ legge qualificata, DD decreto
+            delegato, DL decreto-legge, DC decreto consiliare, DR decreto
+            reggenziale, D decreto, R regolamento. Es. ["DD"] per "i decreti
+            delegati su X", ["L", "LQ", "LC"] per "le leggi su X".
+        escludi_abrogati: opzionale, toglie i passi di cui l'abrogazione e' NOTA -
+            atto intero, articolo o comma. Usalo quando la domanda chiede la
+            disciplina vigente. NON garantisce che cio' che resta sia vigente: il
+            marchio copre solo una parte delle abrogazioni, quindi i campi di
+            vigenza dei risultati vanno letti comunque.
     """
-    lessicali = _full_text(query, limite * AMPIEZZA, dal_anno)
-    semantici = _semantico(query, limite * AMPIEZZA, dal_anno)
+    prefissi, errore = _prefissi(tipi)
+    if errore:
+        return {"errore": errore}
+    filtri = {"dal_anno": dal_anno, "al_anno": al_anno, "prefissi": prefissi,
+              "escludi_abrogati": escludi_abrogati}
+    lessicali = _full_text(query, limite * AMPIEZZA, **filtri)
+    semantici = _semantico(query, limite * AMPIEZZA, **filtri)
     if semantici is None:
         righe = lessicali[:limite]
         modo = "solo lessicale (semantica non disponibile)"
@@ -668,7 +830,7 @@ def cerca_testo(query: str, limite: int = 8, dal_anno: int | None = None) -> dic
             righe = _fondi([(semantici, PESO_SEMANTICO), (lessicali, PESO_LESSICALE)], limite)
             modo = "ibrida"
     if righe:
-        righe = _piu_recenti(_bersagli_abrogati(_novelle(righe)))
+        righe = _piu_recenti(_atti_novellati(_bersagli_abrogati(_novelle(righe))))
 
     if not righe:
         return {"risultati": [], "quanti": 0, "ricerca": modo,
