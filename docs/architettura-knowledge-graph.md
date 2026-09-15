@@ -3,10 +3,10 @@
 Grafo Neo4j della normativa della Repubblica di San Marino, costruito per essere
 interrogato da un agente in modalità Graph RAG.
 
-**Stato aggiornato:** **254.312 nodi**, **320.766 relazioni**, **11.052 norme con testo
+**Stato aggiornato:** **254.510 nodi**, **321.005 relazioni**, **11.053 norme con testo
 integrale** su 11.136 scaricabili dal portale, distribuite su 16 tipologie di atto:
 leggi, decreti in tutte le loro forme, regolamenti, notifiche, ordinanze, statuti,
-errata corrige e verbali. Tutti i 171.318 commi hanno un embedding, e 424 norme,
+errata corrige e verbali. Tutti i 171.417 commi hanno un embedding, e 424 norme,
 186 articoli e 68 commi portano una marcatura di abrogazione.
 
 ---
@@ -90,23 +90,23 @@ Nel nostro Knowledge Graph, le rubriche svolgono due funzioni cruciali:
 
 | Entità / Label | Quantità | Ruolo nel Modello |
 |---|---|---|
-| **`:Comma`** | **`171.318`** | Unità atomica di testo, ricerca semantica e retrieval |
-| **`:Articolo`** | **`70.820`** | Articoli con rubriche, capi e collocazione tematica |
+| **`:Comma`** | **`171.417`** | Unità atomica di testo, ricerca semantica e retrieval |
+| **`:Articolo`** | **`70.919`** | Articoli con rubriche, capi e collocazione tematica |
 | **`:Norma`** | **`12.173`** | Tutti gli atti normativi censiti: |
-| ↳ *con testo integrale (`caricata: true`)* | *`11.052`* | *Su 11.136 scaricabili dal portale, 16 tipologie* |
-| ↳ *stub citati (`caricata: false`)* | *`1.121`* | *Atti richiamati nei testi per tracciare i rinvii* |
-| **TOTALE NODI** | **`254.312`** | |
+| ↳ *con testo integrale (`caricata: true`)* | *`11.053`* | *Su 11.136 scaricabili dal portale, 16 tipologie* |
+| ↳ *stub citati (`caricata: false`)* | *`1.120`* | *Atti richiamati nei testi per tracciare i rinvii* |
+| **TOTALE NODI** | **`254.510`** | |
 
 ### Relazioni (Archi)
 
 | Relazione | Quantità | Direzione | Significato |
 |---|---|---|---|
-| **`HA_COMMA`** | **`171.318`** | `Articolo ➔ Comma` | Contenimento strutturale |
-| **`HA_ARTICOLO`** | **`70.820`** | `Norma ➔ Articolo` | Contenimento strutturale |
-| **`CITA`** | **`56.513`** | `(Comma/Norma) ➔ Norma` | Rinvio normativo formale |
-| **`CITA_ARTICOLO`** | **`21.593`** | `Comma ➔ Articolo` | Rinvio puntuale ad articolo specifico risolto |
+| **`HA_COMMA`** | **`171.417`** | `Articolo ➔ Comma` | Contenimento strutturale |
+| **`HA_ARTICOLO`** | **`70.919`** | `Norma ➔ Articolo` | Contenimento strutturale |
+| **`CITA`** | **`56.515`** | `(Comma/Norma) ➔ Norma` | Rinvio normativo formale |
+| **`CITA_ARTICOLO`** | **`21.632`** | `Comma ➔ Articolo` | Rinvio puntuale ad articolo specifico risolto |
 | **`ABROGA`** | **`522`** | `Norma ➔ Norma` | Abrogazione di un atto per intero, riconosciuta senza ambiguità |
-| **TOTALE ARCHI** | **`320.766`** | | |
+| **TOTALE ARCHI** | **`321.005`** | | |
 
 `CITA_ARTICOLO` era fermo a 16.763 finche' `RE_BERSAGLIO`, nel parser,
 pretendeva che il numero d'articolo fosse **adiacente** al nome dell'atto. Nel
@@ -126,7 +126,7 @@ corrispondere a cio' che un caricamento pulito produrrebbe.
 I `:Comma` erano 180.932 fino alla riparazione del parser: i **316 in più** sono
 il testo che si perdeva su 312 articoli, dove il buffer della rubrica non si
 chiudeva su `)` seguito da punteggiatura. Il conteggio dei nodi per etichetta
-somma a 266.485 e non a 254.312 perché ogni `:Norma` ne porta due — quella
+somma a 266.683 e non a 254.510 perché ogni `:Norma` ne porta due — quella
 generica e quella del tipo (`:Legge`, `:DecretoDelegato`, e così via).
 
 **I nodi `:Allegato` non ci sono più.** Erano 519 su 27 norme e portavano solo
@@ -242,10 +242,35 @@ Rispetto al Codice Penale la lettura del PDF ha quattro regole in più:
 Sui commi riscritti le citazioni ricavate dal testo vecchio si staccano e si
 ricalcolano sul nuovo; gli archi che portano un'`origine` restano.
 
-Due atti linkati dalla raccolta **non** sono entrati: la `L-85/1981` (legge
-sulle imposte di registro) è scaricata ma il caricamento la rifiuta, perché
-contiene anche il regolamento e la numerazione degli articoli riparte da capo;
-la `L-17/1917` è una scansione senza testo, e senza OCR non si legge.
+Dei 65 atti linkati dalla raccolta, 63 avevano già il testo nel grafo. La
+`L-85/1981` è entrata dopo (sezione seguente); la `L-17/1917` resta fuori: è
+una scansione senza testo, e senza OCR non si legge.
+
+### Un atto con più numerazioni: la legge di registro
+
+La `L-85/1981` era **uno stub citato da 104 commi**. Il suo PDF tiene la legge
+(artt. 1-76), la Tabella A delle tariffe, la Tabella B (artt. 1-4), la Tabella
+C (art. 1) e il Regolamento di applicazione (artt. 1-19): i numeri 1-4
+ricorrono quattro volte, e `03_load.py` la rifiutava come *«numerazione
+patologica»* — il presidio giusto contro gli Allegati letti come corpo, che qui
+scartava un atto sano. Il parser, per giunta, metteva firme e tabelle in un
+comma dell'art. 76 di 11.000 caratteri.
+
+`src/13_atto_composto.py` divide il PDF nelle sue sezioni, le fa leggere al
+parser di `02` una per una e ne **qualifica i numeri**: `reg-15` è l'art. 15 del
+Regolamento, `tabB-1` l'art. 1 della Tabella B, e la sezione va in
+`Articolo.titolo` (*«Regolamento di applicazione»*, *«Tabella B»*). Poi carica la
+sola norma con le query di `03`. Risultato: **99 articoli**, 37 citazioni
+puntuali in più (tutte e 35 quelle entranti verificate a mano: agganciano
+l'articolo della legge che il testo nomina), e l'agente legge il Regolamento.
+
+La **Tabella A resta fuori**: è a quattro colonne, e il testo estratto le
+alterna riga per riga. Nell'indice sarebbe testo senza senso ma cercabile.
+L'art. 7 non manca per errore: il PDF passa dall'art. 6 all'art. 8.
+
+`data/parsed/L-85-1981.json` è ora prodotto da `13` (lo dice `fonteParsing`):
+rilanciare `02_parse.py` in forzatura su quella norma la riporterebbe allo stato
+rifiutato, e andrebbe rieseguito `13`.
 
 ### Lo stesso atto sotto due schede
 
