@@ -580,6 +580,33 @@ MERGE (cm)-[:CITA_ARTICOLO]->(a)
 """
 
 
+Q_ARTICOLI_ATTO = """
+MATCH (:Norma {id: $atto})-[:HA_ARTICOLO]->(a:Articolo)
+OPTIONAL MATCH (a)-[:HA_COMMA]->(c:Comma)
+WITH a, c ORDER BY c.ordine
+WITH a, collect(c.testo) AS commi
+RETURN a.numero AS numero, coalesce(a.rubrica, '') + ' ' + coalesce(commi[0], '') AS testo
+"""
+
+
+def articolo_introduttivo(g, atto, numero, anno, articolo):
+    """L'articolo di `atto` che ha inserito `articolo` nella legge numero/anno.
+
+    Si riconosce da rubrica e primo comma: nominano l'articolo inserito
+    ("articolo 3-bis"), la legge che lo riceve ("Legge n.44/2015") e il verbo
+    dell'inserimento. Vale solo se il candidato e' uno: meglio nessun arco che
+    uno sull'articolo sbagliato.
+    """
+    base, _, ordinale = str(articolo).partition("-")
+    nome = re.escape(base) + (r"\s*[-\s]?\s*" + re.escape(ordinale) if ordinale else "")
+    re_articolo = re.compile(r"articol[oi]\s+" + nome + r"\b", re.I)
+    re_legge = re.compile(rf"\b{numero}\s*/\s*{anno}\b|\b{anno}\s*,?\s*n\.?\s*{numero}\b", re.I)
+    re_verbo = re.compile(r"aggiunt|inserit|introdu", re.I)
+    candidati = [r["numero"] for r in g.query(Q_ARTICOLI_ATTO, {"atto": atto})
+                 if all(e.search(r["testo"][:800]) for e in (re_articolo, re_legge, re_verbo))]
+    return candidati[0] if len(candidati) == 1 else None
+
+
 def gemelli(g, norma):
     return [r["id"] for r in g.query(
         "MATCH (n:Norma) WHERE n.id = $n OR n.id STARTS WITH $p RETURN n.id AS id ORDER BY id",
@@ -752,6 +779,19 @@ def main():
                                     "bersaglio": f"{norma}/art-{a['numero']}",
                                     "numeroBersaglio": (re.match(r"\d+", a["numero"])
                                                         or re.match(r".+", a["numero"])).group(0)})
+                elif m is a["origine"] and atto != norma:
+                    # "Testo originario (Legge n.64/2025)" non dice quale
+                    # articolo abbia inserito il 3-bis nella L-44/2015: senza
+                    # arco l'agente non sapeva che l'art. 5 della L-64/2025 e il
+                    # 3-bis sono lo stesso testo, e lo cercava nella legge sbagliata.
+                    introduttivo = articolo_introduttivo(g, atto, s["numero"], s["anno"], a["numero"])
+                    if introduttivo:
+                        novelle.append({"atto": atto, "articolo": introduttivo,
+                                        "bersaglio": f"{norma}/art-{a['numero']}",
+                                        "numeroBersaglio": a["numero"]})
+                        print(f"    art. {a['numero']} inserito da {atto}, art. {introduttivo}")
+                    else:
+                        print(f"    ! art. {a['numero']} inserito da {atto}: articolo introduttivo non trovato")
         print(f"    novelle agganciabili {len(novelle)}")
         piani.append({"segmento": s, "norma": norma, "scelti": scelti,
                       "evidenze": evidenze, "novelle": novelle})

@@ -495,6 +495,43 @@ def _novelle(righe):
     return righe
 
 
+def _testo_aggiornato_in(righe):
+    """Dove sta oggi il testo che questo articolo ha scritto in un altro atto.
+
+    L'art. 5 della L-64/2025 aggiunge l'art. 3-bis alla L-44/2015: lo stesso
+    testo, che il coordinato tiene aggiornato dentro la L-44. Senza il segnale
+    l'agente cercava un "art. 3-bis" nella L-64, e alla domanda successiva
+    doveva ricostruire a mano che i due articoli erano uno solo.
+
+    Segue gli archi di novella scritti dai testi coordinati (quelli con
+    un'origine) verso articoli che portano un testo coordinato.
+    """
+    chiavi = [{"n": r["normaId"], "a": str(r.get("articolo"))}
+              for r in righe if r.get("normaId") and r.get("articolo")]
+    if not chiavi:
+        return righe
+    try:
+        trovate = grafo().query("""
+            UNWIND $chiavi AS k
+            MATCH (:Norma {id: k.n})-[:HA_ARTICOLO]->(:Articolo {numero: k.a})
+                  -[:HA_COMMA]->(:Comma)-[r:CITA_ARTICOLO]->(b:Articolo)
+            WHERE r.origine IS NOT NULL AND b.fonteTesto IS NOT NULL
+            MATCH (m:Norma)-[:HA_ARTICOLO]->(b)
+            WHERE m.id <> k.n
+            WITH k, collect(DISTINCT {normaId: m.id, articolo: b.numero,
+                                      testoCoordinatoAl: b.testoAggiornatoAl})[..5] AS dove
+            RETURN k.n AS norma, k.a AS articolo, dove
+        """, {"chiavi": chiavi})
+    except Exception:
+        return righe
+    mappa = {(t["norma"], t["articolo"]): t["dove"] for t in trovate}
+    for r in righe:
+        dove = mappa.get((r.get("normaId"), str(r.get("articolo"))))
+        if dove:
+            r["testoAggiornatoIn"] = dove
+    return righe
+
+
 def _bersagli_abrogati(righe):
     """Annota i risultati che introducono o modificano un passo ABROGATO.
 
@@ -812,7 +849,7 @@ def cerca_testo(query: str, limite: int = 8, dal_anno: int | None = None,
             righe = _fondi([(semantici, PESO_SEMANTICO), (lessicali, PESO_LESSICALE)], limite)
             modo = "ibrida"
     if righe:
-        righe = _piu_recenti(_atti_novellati(_bersagli_abrogati(_novelle(righe))))
+        righe = _piu_recenti(_atti_novellati(_bersagli_abrogati(_testo_aggiornato_in(_novelle(righe)))))
 
     if not righe:
         return {"risultati": [], "quanti": 0, "ricerca": modo,
@@ -885,7 +922,8 @@ def leggi_articolo(norma_id: str, numero: str) -> dict:
     riga["normaId"] = riga.get("normaId")
     _novelle([riga])
     _bersagli_abrogati([riga])
-    for marchio in ("citatoDaAttiSuccessivi", "passiIntrodottiOraAbrogati"):
+    _testo_aggiornato_in([riga])
+    for marchio in ("citatoDaAttiSuccessivi", "passiIntrodottiOraAbrogati", "testoAggiornatoIn"):
         if riga.get(marchio):
             righe[0][marchio] = riga[marchio]
 

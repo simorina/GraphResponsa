@@ -310,6 +310,47 @@ tabelle di Allegati, che erano già rimaste fuori dal grafo.
 
 Resta non risolta una nota che chiama *«Legge»* il `DL-156/2011`.
 
+### L'articolo inserito e l'articolo che lo inserisce
+
+Alla domanda *«per i giovani come funziona»* l'agente ha risposto dall'art.
+3-bis della `L-44/2015`, e alla successiva *«la L-64/2025 non dice niente?»* ha
+dovuto ricostruire a mano che l'art. 5 della `L-64/2025` è lo stesso testo
+(coincidono al 97,9%: cambia solo *«è aggiunto il seguente articolo 3-bis»*).
+Prima aveva cercato un art. 3-bis dentro la L-64. Ogni *«L. 64/2025»* della
+risposta, poi, era seguito da *«[art. 1]»*.
+
+Quell'etichetta non l'aveva scritta il modello. `_ancora_gli_atti` rende
+cliccabile ogni atto nominato in prosa, e sceglie come bersaglio la fonte
+dell'atto intero. Se non ce n'era una ripiegava sulla prima fonte di
+quell'atto:
+- con `struttura_norma` era l'art. 1, da cui *«[art. 1]»*;
+- con `leggi_articolo` era il comma 1 dell'articolo letto, da cui *«[3-bis.1]»*
+  anche per requisiti del comma 18.
+
+Ora `rispondi()` aggiunge una fonte d'atto intero per ogni atto consultato, e
+l'atto nominato si etichetta *«[atto]»*.
+
+La nota del coordinato dice *«Testo originario (Legge n.64/2025)»* senza
+l'articolo, e `12` agganciava le novelle solo con l'articolo. Ora lo cerca
+nell'atto d'origine: rubrica e primo comma devono nominare l'articolo inserito,
+la legge che lo riceve e il verbo dell'inserimento, e il candidato dev'essere
+uno solo. Sulle due raccolte il caso è unico: le altre 100 note senza articolo
+nominano l'atto stesso.
+
+Lato agente:
+- sull'articolo inserito, l'arco fa comparire la L-64/2025 in
+  `citatoDaAttiSuccessivi`;
+- sull'articolo che lo inserisce, `testoAggiornatoIn` indica dove sta oggi il
+  testo;
+- il prompt vieta di usare l'art. 1 come marcatore di un'intera legge.
+
+I **commi a numero doppio** dell'art. 5 (`1`, `1`, `2`…: la frase introduttiva e
+il comma 1 del 3-bis citato) non sono stati rinumerati. Gli articoli con numeri
+di comma ripetuti sono 4.188, quasi tutti novelle che riportano commi altrui, e
+rinumerarli nel parser cambierebbe id, vettori e citazioni di migliaia di
+commi. Con `testoAggiornatoIn` l'agente cita l'articolo di destinazione, che ha
+la numerazione pulita.
+
 ### Un atto con più numerazioni: la legge di registro
 
 La `L-85/1981` era **uno stub citato da 104 commi**. Il suo PDF tiene la legge

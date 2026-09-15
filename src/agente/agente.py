@@ -95,6 +95,13 @@ Rispondi consultando esclusivamente il grafo della normativa attraverso gli stru
    Esempio: "...come previsto dalla L. 87/2026, art. 7, comma
    2{{cita:L-87-2026:7:2}}, che stabilisce..."
 
+   **Il marcatore punta al passo da cui viene il dato, non a un passo
+   qualunque della stessa legge.** Quando nomini un atto nel suo insieme, senza
+   un passo preciso, scrivi `{{cita:L-64-2025:-:-}}`: mai l'art. 1 o il comma 1
+   come segnaposto. Un requisito letto al comma 18 si cita al comma 18, non al
+   comma 1 dell'articolo. Chi clicca deve trovare quella frase, non l'inizio
+   della legge.
+
    **OGNI atto che nomini nella risposta deve avere il suo marcatore.** Se
    nella prosa scrivi "L. 145/2022", "il Decreto Delegato 146/2023", "la Legge
    sulle societa'", quel riferimento dev'essere cliccabile: senza marcatore
@@ -216,6 +223,14 @@ Rispondi consultando esclusivamente il grafo della normativa attraverso gli stru
    data, aprili prima di rispondere. Quando la data e' lontana (la raccolta sul
    Lavoro e' ferma al 24 dicembre 2018) e non trovi modifiche successive,
    dillo: "testo coordinato aggiornato al 24 dicembre 2018".
+
+   **`testoAggiornatoIn` dice che l'articolo che hai davanti ha scritto il suo
+   testo dentro un altro atto.** L'art. 5 della L. 64/2025 aggiunge l'art.
+   3-bis alla L. 44/2015: la disciplina e' una sola, e il testo aggiornato sta
+   nell'articolo indicato. Rispondi leggendo e citando quell'articolo, e
+   presenta l'atto che hai davanti per quello che e': "introdotto dalla L.
+   64/2025, art. 5". Non cercare il numero dell'articolo inserito dentro l'atto
+   che lo ha inserito: li' non c'e'.
 
    **I filtri di cerca_testo vanno scelti dalla domanda, non indovinati.** Una
    domanda storica ("com'era regolato X prima del 2000") vuole `al_anno`, e
@@ -432,6 +447,31 @@ CITAZIONI = [
 MARCATORE = re.compile(r"\{\{cita:[^{}]*\}\}")
 
 
+def _aggiungi_fonti_d_atto(fonti, viste):
+    """Per ogni atto consultato, anche la fonte dell'atto intero.
+
+    L'aggancio automatico mette un marcatore dopo ogni atto nominato in prosa,
+    e il marcatore deve puntare a una fonte esistente. Senza una fonte d'atto
+    ripiegava sulla prima fonte di quell'atto: su una domanda risolta con
+    struttura_norma era l'art. 1, e ogni "L. 64/2025" della risposta finiva
+    seguita da "[art. 1]", un articolo che non c'entrava. Con leggi_articolo era
+    il comma 1 dell'articolo letto, anche per requisiti scritti al comma 18.
+    Chi nomina la legge nomina la legge: "[atto]".
+    """
+    for f in list(fonti):
+        chiave = (f.get("norma"), "-", "-")
+        if not f.get("norma") or chiave in viste:
+            continue
+        viste.add(chiave)
+        fonti.append({"norma": f["norma"], "titoloNorma": f.get("titoloNorma"),
+                      "articolo": "-", "comma": "-",
+                      "testo": f.get("titoloNorma") or "",
+                      "haDocumento": bool(f.get("haDocumento")),
+                      "abrogata": bool(f.get("abrogata")),
+                      "abrogataDa": f.get("abrogataDa") or []})
+    return fonti
+
+
 def _ancora_gli_atti(testo, fonti):
     """Rende cliccabile ogni atto nominato nella prosa, se la fonte esiste.
 
@@ -451,8 +491,9 @@ def _ancora_gli_atti(testo, fonti):
     # marcatore dev'essere (norma, articolo, comma) di una fonte davvero
     # presente, altrimenti il frontend lo scarta. Si preferisce la fonte a
     # livello d'atto - articolo "-" - perche' e' quella che corrisponde a un
-    # riferimento nominato in prosa senza articolo; se non c'e', va bene la
-    # prima, che porta comunque al pannello e al PDF dell'atto giusto.
+    # riferimento nominato in prosa senza articolo. rispondi() la aggiunge per
+    # ogni atto consultato (_aggiungi_fonti_d_atto): ripiegare sulla prima
+    # fonte etichettava la legge come "[art. 1]".
     per_atto = {}
     for f in fonti:
         pezzi = str(f.get("norma") or "").split("-")
@@ -777,6 +818,7 @@ def rispondi(domanda, conversazione=None):
         return
 
     if blocchi_testo:
+        _aggiungi_fonti_d_atto(fonti_raccolte, viste)
         yield {"tipo": "testo",
                "testo": _ancora_gli_atti(SEPARATORE.join(blocchi_testo),
                                          fonti_raccolte)}
