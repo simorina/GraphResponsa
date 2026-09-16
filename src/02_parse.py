@@ -215,6 +215,45 @@ for _nome, _righe_test, _atteso in _PROVE_STRUTTURA_ALLEGATO:
     assert _ha_struttura_propria(_righe_test) == _atteso, f"struttura allegato ({_nome}): {_righe_test!r}"
 
 
+# --- Rubrica presunta: riga breve chiusa da un punto subito dopo "Art. N" ---
+#
+# Quando e' presa per rubrica ma e' testo, sparisce: l'articolo ha altri commi,
+# e il recupero a fine parse() scatta solo per gli articoli rimasti vuoti.
+# Misurato sul corpus intero (3.177 rubriche presunte rimaste rubrica): nessuna
+# era seguita da un comma numerato >= 2; 2.038 finivano con ":" ("L'Art. 3 e'
+# cosi' modificato:", "Il cittadino ha diritto:") e sono sempre l'apertura di
+# un elenco o di una novella; circa 330 di quelle chiuse da "." sono frasi
+# ("E' abrogata la Legge ...", "La presente legge entra in vigore ...").
+# Una rubrica non finisce con i due punti e non inizia con un articolo o con
+# un verbo: "Giuramento.", "Caccia vietata su terreno ricoperto di neve.".
+RE_INCIPIT_FRASE = re.compile(
+    r"^[-–\s]*(?:(?:il|lo|la|i|gli|le|un|una|uno|non|sono|ogni)\s|l['’]|(?:è|é|e['’])\s)",
+    re.I)
+
+
+def _puo_essere_rubrica(riga):
+    return (len(riga) <= 80 and riga.endswith(".")
+            and not RE_INCIPIT_FRASE.match(riga))
+
+
+_PROVE_RUBRICA_PRESUNTA = [
+    ("Giuramento.", True),
+    ("Caccia vietata su terreno ricoperto di neve.", True),
+    ("- Vitto.", True),
+    ("Il Collegio dei sindaci revisori.", False),  # ponytail: sacrificata, resta nel testo e non si perde
+    ("L'Art. 21 è così modificato:", False),
+    ("Il cittadino ha diritto:", False),
+    ("E' abrogata la Legge 17 settembre 1986 n.98.", False),
+    ("È nominato Presidente del Centro il Prof. Umberto Eco.", False),
+    ("L’uso dei richiami è consentito dal 2 settembre 2001.", False),
+    ("- Il Rettore indicherà l'ora dell'uscita.", False),
+    ("Sono abrogati gli artt. 3 e 4 della Legge 25 novembre 1980, n.86.", False),
+    ("Lotteria nazionale e giochi", False),  # senza punto: mai presunta
+]
+for _riga, _atteso in _PROVE_RUBRICA_PRESUNTA:
+    assert _puo_essere_rubrica(_riga) == _atteso, f"rubrica presunta: {_riga!r}"
+
+
 def righe_pdf(path):
     doc = fitz.open(path)
     righe = []
@@ -552,7 +591,7 @@ def parse(id_norma, meta):
                     attesa_rubrica = False
                 i += 1
                 continue
-            elif not m_art and not m_part and not RE_COMMA.match(riga) and not RE_COMMA_INLINE.match(riga) and len(riga) <= 80 and (riga.endswith(".") or riga.endswith(":")):
+            elif not m_art and not m_part and not RE_COMMA.match(riga) and not RE_COMMA_INLINE.match(riga) and _puo_essere_rubrica(riga):
                 articolo_corrente["rubrica"] = riga.rstrip(".:").strip()
                 # Presunta, non certa: negli atti storici un articolo e' spesso
                 # una frase sola, e questa regola gliela porta via lasciandolo
