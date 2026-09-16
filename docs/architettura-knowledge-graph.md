@@ -495,6 +495,31 @@ l'atto, e il numero diventa `all-N`: nel parser, in `09` e in `08`. Vale per
 gli atti con un solo allegato numerato; con più allegati il bersaglio resta
 scartato.
 
+### Il PDF di un articolo coordinato
+
+Il riferimento a un articolo apriva il PDF della norma. Per il Codice Penale il
+documento della `L-17-1974` è la legge di emanazione: due pagine e un rimando
+agli allegati. I 480 articoli del Codice nel grafo vengono invece dal testo
+coordinato, che sul portale è un altro documento. Chi cliccava sull'art. 150
+non lo trovava.
+
+`src/17_documenti_coordinati.py` legge i testi coordinati elencati in
+`data/coordinati/documenti.json`. Per ogni articolo trova la pagina dove
+comincia (l'intestazione in grassetto al corpo del testo, sotto l'ultima
+intestazione d'atto) e scrive sull'articolo `urlDocumento` e
+`paginaDocumento`: 480 articoli del Codice (478 con la pagina), 94
+dell'Edilizia (93) e 207 del Lavoro (tutti).
+
+La catena fino al browser:
+- gli strumenti restituiscono l'URL dell'articolo quando c'è, e la pagina;
+- il server lo usa in `/documenti/{norma}?articolo=N`;
+- il sito apre il PDF a `#page=N`.
+
+Il Codice e l'Edilizia il portale li serve come ZIP con due PDF, *«SENZA NOTE»*
+e completo. Per un articolo il server estrae il più grande, su cui sono contate
+le pagine, e lo apre nel visualizzatore. Lo ZIP di una norma resta un
+download. `17` va rieseguito dopo `10` e `12`.
+
 ### Un atto con più numerazioni: la legge di registro
 
 La `L-85/1981` era **uno stub citato da 104 commi**. Il suo PDF tiene la legge

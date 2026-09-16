@@ -20,6 +20,8 @@ export interface Fonte {
   comma: string | number;
   testo: string;
   haDocumento?: boolean;
+  /** La pagina del PDF dove l'articolo comincia (testi coordinati). */
+  pagina?: number | null;
 }
 
 export interface ThoughtStep {

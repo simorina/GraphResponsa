@@ -18,11 +18,13 @@ import mimetypes
 import sys
 import urllib.error
 import urllib.request
+import zipfile
+from io import BytesIO
 from pathlib import Path
 
 import uvicorn
 from fastapi import Depends, FastAPI, HTTPException
-from fastapi.responses import FileResponse, StreamingResponse
+from fastapi.responses import FileResponse, Response, StreamingResponse
 from pydantic import BaseModel, Field
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -122,7 +124,7 @@ def stato():
 # ------------------------------------------------------------------ documenti
 
 @app.get("/documenti/{norma_id}")
-def documento(norma_id: str):
+def documento(norma_id: str, articolo: str | None = None):
     """
     Proxy verso il PDF originale della norma sul portale del Consiglio Grande
     e Generale, senza autenticazione: sono atti pubblici, e a differenza di
@@ -132,7 +134,7 @@ def documento(norma_id: str):
     la scarica invece di mostrarla. Qui si rilegge il file e lo si re-inoltra
     con `inline`, cosi' si apre nel visualizzatore PDF del browser.
     """
-    url = url_documento(norma_id)
+    url = url_documento(norma_id, articolo)
     if not url:
         raise HTTPException(status_code=404,
                             detail="Documento non disponibile per questa norma.")
@@ -157,6 +159,28 @@ def documento(norma_id: str):
                   "application/zip": ".zip", "application/x-zip-compressed": ".zip"}
     estensione = ESTENSIONI.get(tipo) or mimetypes.guess_extension(tipo) or ".pdf"
     disposizione = "inline" if tipo == "application/pdf" else "attachment"
+
+    # Il testo coordinato di un articolo arriva impacchettato: il Codice
+    # Penale e l'Edilizia sono ZIP con due PDF, "SENZA NOTE" e quello completo.
+    # Le pagine degli articoli (17_documenti_coordinati.py) sono contate sul
+    # completo, che e' il piu' grande: si estrae quello e si apre nel
+    # visualizzatore, dove #page=N funziona. Un ZIP di norma resta un download.
+    if articolo and estensione == ".zip":
+        with risposta:
+            dati = risposta.read()
+        try:
+            archivio_zip = zipfile.ZipFile(BytesIO(dati))
+            pdf = max((i for i in archivio_zip.infolist() if i.filename.lower().endswith(".pdf")),
+                      key=lambda i: i.file_size, default=None)
+        except zipfile.BadZipFile:
+            pdf = None
+        if pdf is not None:
+            return Response(
+                archivio_zip.read(pdf), media_type="application/pdf",
+                headers={"Content-Disposition": f'inline; filename="{norma_id}.pdf"',
+                         "Cache-Control": "public, max-age=86400"})
+        return Response(dati, media_type=tipo, headers={
+            "Content-Disposition": f'attachment; filename="{norma_id}{estensione}"'})
 
     def a_pezzi():
         # Non l'intero file in memoria: un allegato puo' pesare diversi MB, e

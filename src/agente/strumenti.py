@@ -205,7 +205,9 @@ def _full_text(query, limite, dal_anno=None, al_anno=None, prefissi=None,
                art.numero AS articolo, art.rubrica AS rubrica,
                art.titolo AS partizioneTitolo, art.capoRubrica AS partizioneCapo,
                CASE WHEN node:Comma THEN node.numero ELSE null END AS comma,
-               node.testo AS testo, norma.urlDocumento AS urlDocumento,
+               node.testo AS testo,
+               coalesce(art.urlDocumento, norma.urlDocumento) AS urlDocumento,
+               art.paginaDocumento AS paginaDocumento,
                norma.abrogata AS abrogata, norma.abrogataDa AS abrogataDa,
                coalesce(node.abrogato, art.abrogato) AS passoAbrogato,
                coalesce(node.abrogatoDa, art.abrogatoDa) AS passoAbrogatoDa
@@ -296,7 +298,8 @@ RETURN norma.id AS normaId, norma.titolo AS normaTitolo, norma.anno AS anno,
        art.numero AS articolo, art.rubrica AS rubrica,
        art.titolo AS partizioneTitolo, art.capoRubrica AS partizioneCapo,
        node.numero AS comma, node.testo AS testo,
-       norma.urlDocumento AS urlDocumento,
+       coalesce(art.urlDocumento, norma.urlDocumento) AS urlDocumento,
+       art.paginaDocumento AS paginaDocumento,
        norma.abrogata AS abrogata, norma.abrogataDa AS abrogataDa,
        coalesce(node.abrogato, art.abrogato) AS passoAbrogato,
        coalesce(node.abrogatoDa, art.abrogatoDa) AS passoAbrogatoDa
@@ -323,7 +326,8 @@ RETURN norma.id AS normaId, norma.titolo AS normaTitolo, norma.anno AS anno,
        art.numero AS articolo, art.rubrica AS rubrica,
        art.titolo AS partizioneTitolo, art.capoRubrica AS partizioneCapo,
        null AS comma, art.testo AS testo,
-       norma.urlDocumento AS urlDocumento,
+       coalesce(art.urlDocumento, norma.urlDocumento) AS urlDocumento,
+       art.paginaDocumento AS paginaDocumento,
        norma.abrogata AS abrogata, norma.abrogataDa AS abrogataDa,
        art.abrogato AS passoAbrogato, art.abrogatoDa AS passoAbrogatoDa
 ORDER BY score DESC
@@ -888,7 +892,8 @@ def leggi_articolo(norma_id: str, numero: str) -> dict:
                toString(n.data) AS dataAtto,
                a.numero AS articolo, a.rubrica AS rubrica,
                a.titolo AS partizioneTitolo, a.capoRubrica AS partizioneCapo,
-               n.urlDocumento AS urlDocumento,
+               coalesce(a.urlDocumento, n.urlDocumento) AS urlDocumento,
+               a.paginaDocumento AS paginaDocumento,
                n.abrogata AS abrogata, n.abrogataDa AS abrogataDa,
                a.abrogato AS passoAbrogato, a.abrogatoDa AS passoAbrogatoDa,
                a.testoAggiornatoAl AS testoCoordinatoAl,
@@ -953,12 +958,24 @@ def leggi_articolo(norma_id: str, numero: str) -> dict:
     return righe[0]
 
 
-def url_documento(norma_id: str) -> str | None:
+def url_documento(norma_id: str, articolo: str | None = None) -> str | None:
     """URL del PDF originale sul portale, se la norma esiste e lo possiede.
 
     Non e' un tool per l'agente: serve al proxy del server web, che lo
     rinoltra al browser.
+
+    Con l'articolo, il PDF dove quell'articolo si legge davvero: il documento
+    della L-17-1974 e' la legge di emanazione, due pagine che rimandano agli
+    allegati, mentre i 480 articoli del Codice Penale nel grafo vengono dal
+    testo coordinato, che sul portale e' un altro documento.
     """
+    if articolo and articolo != "-":
+        righe = grafo().query("""
+            MATCH (n:Norma {id: $id})-[:HA_ARTICOLO]->(a:Articolo {numero: $art})
+            RETURN coalesce(a.urlDocumento, n.urlDocumento) AS url""",
+            {"id": norma_id, "art": str(articolo)})
+        if righe:
+            return righe[0]["url"]
     righe = grafo().query(
         "MATCH (n:Norma {id: $id}) RETURN n.urlDocumento AS url", {"id": norma_id})
     return righe[0]["url"] if righe else None

@@ -522,6 +522,7 @@ def _aggiungi_fonti_d_atto(fonti, viste):
             viste.add(chiave)
             fonti.append({"norma": f["norma"], "titoloNorma": f.get("titoloNorma"),
                           "articolo": articolo, "rubrica": f.get("rubrica") if articolo != "-" else None,
+                          "pagina": f.get("pagina") if articolo != "-" else None,
                           "comma": "-",
                           "testo": (f.get("rubrica") if articolo != "-" else None)
                                    or f.get("titoloNorma") or "",
@@ -857,6 +858,9 @@ def _fonti_da(nome_strumento, risultato):
                 # Il portale possiede il PDF originale di questo atto: il
                 # frontend puo' offrirne l'apertura.
                 "haDocumento": bool(r.get("urlDocumento")),
+                # La pagina del PDF dove l'articolo comincia, quando il testo
+                # viene da un testo coordinato: il sito apre il documento li'.
+                "pagina": r.get("paginaDocumento"),
                 "ancheIn": r.get("ancheIn") or [],
                 # L'atto successivo che modifica questo articolo: chi legge
                 # deve poterci arrivare, non solo il modello.
@@ -884,6 +888,7 @@ def _fonti_da(nome_strumento, risultato):
                     "rubrica": risultato.get("rubrica"),
                     "comma": c.get("numero"), "testo": c.get("testo"),
                     "haDocumento": bool(risultato.get("urlDocumento")),
+                    "pagina": risultato.get("paginaDocumento"),
                     "abrogata": bool(risultato.get("abrogata")),
                     "abrogataDa": risultato.get("abrogataDa") or [],
                     "passoAbrogato": bool(c.get("abrogato")
