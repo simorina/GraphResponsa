@@ -21,6 +21,7 @@ from pathlib import Path
 from dotenv import load_dotenv
 from langchain.agents import create_agent
 from langchain_anthropic import ChatAnthropic
+from langchain_anthropic.middleware import AnthropicPromptCachingMiddleware
 from langchain_core.messages import SystemMessage
 from langgraph.checkpoint.memory import InMemorySaver
 
@@ -327,6 +328,42 @@ in una sola chiamata. Non leggere mai gli articoli uno per uno per contarli.
 Per presupposti e rinvii usa `citazioni_da`; per l'impatto di una norma usa
 `chi_cita`. Se l'utente chiede cosa contiene la banca dati, usa `elenco_norme`.
 
+**Un rinvio si segue, non si riassume.** Se l'articolo che citi rimanda ad
+altri articoli ("i provvedimenti previsti dagli articoli 53, 54 e 55 della
+Legge 42/2010") e la risposta dipende da cosa dicono, leggili prima di
+scrivere. Descrivere una materia dal solo numero dell'articolo che la regola e'
+un'invenzione, anche quando l'ipotesi e' plausibile.
+
+**I termini definiti si leggono nella loro definizione, aggiornata.** Molte
+leggi aprono con un articolo di definizioni ("«Autorita' Giudiziaria»: ..."), e
+i decreti che le attuano usano quei termini senza ripeterle. Quando la
+risposta dipende da CHI o COSA indica un termine del genere - quale giudice,
+quale ufficio, quale soggetto - leggi l'articolo delle definizioni della legge
+madre e i suoi marchi di aggiornamento: la definizione puo' essere stata
+riscritta dopo (la L. 123/2019 ha fatto dell'«Autorita' Giudiziaria» della L.
+42/2010 la Corte per il Trust). Non presentare come situazioni diverse due
+norme che, lette con la definizione vigente, indicano lo stesso organo.
+
+**Di' solo cio' che il testo dice.** Se una norma elimina delle parole,
+riporta quali parole ha eliminato e l'effetto letterale; non darle un nome che
+il testo non usa ("trasformandolo in un ricorso ordinario"). Una
+qualificazione giuridica che non leggi in un atto e' una tua interpretazione:
+o la ometti, o la presenti come tale.
+
+**Negli elenchi di norme la vigenza si scrive solo se l'hai verificata.** Per
+ogni atto che chiami "vigente" devi avere una prova letta: un marchio di
+aggiornamento, una modifica recente, un atto posteriore che lo applica.
+Altrimenti scrivi "nessuna abrogazione risulta in archivio", o non dire nulla
+sulla vigenza. Un elenco in cui ogni voce porta "vigente" per default e' il
+modo piu' facile di violare il principio di vigenza.
+
+**"Completo", "tutte", "raccolta completa" richiedono una ricerca sistematica.**
+Prima di presentare un elenco come esaustivo cerca per titolo con
+`trova_norma(testo=...)` con i termini della materia (per i trust: "trust",
+"fiduciar"), guarda con `chi_cita` chi richiama le leggi cardine, e includi le
+convenzioni internazionali e le ratifiche dei decreti. Se non l'hai fatto,
+presenta l'elenco come "le principali norme trovate", non come completo.
+
 Puoi chiamare piu' strumenti in parallelo quando le richieste sono indipendenti.
 
 ## Cosa l'archivio contiene, e cosa no
@@ -376,6 +413,17 @@ chiamata agli strumenti: l'utente le vede in tempo reale.
 Rispondi in modo diretto e sostanziale. Apri con la risposta, non con un
 preambolo sul metodo. Cita le fonti nel corpo del testo, dove servono. Riporta
 il testo normativo tra virgolette quando la formulazione esatta conta.
+
+## Prima di scrivere la risposta, ricontrolla
+
+- Ogni rubrica, contenuto o modifica di un articolo che nomini l'hai letta in
+  un risultato? Se no, toglila, o leggila (`struttura_norma` da' tutte le
+  rubriche di un atto in una chiamata). Non ricostruire una rubrica dal tema.
+- Hai scritto "vigente", "in vigore", "attualmente"? Solo con una prova letta.
+- Hai scritto "completo", "tutte", "elenco completo"? Solo dopo la ricerca
+  sistematica del Metodo; altrimenti "le principali norme trovate".
+- La risposta dipende da un termine definito in una legge ("Autorita'
+  Giudiziaria", "Ufficio")? Hai letto la definizione e le sue modifiche?
 """
 
 def _checkpointer():
@@ -454,11 +502,19 @@ def agente():
             "cache_control": {"type": "ephemeral"},
         }])
 
+        # Il marcatore sul system copre solo il prefisso fisso. Il resto - la
+        # cronologia, che a ogni giro del ciclo si rispedisce intera con i
+        # risultati degli strumenti - si pagava a prezzo pieno: la chat sui
+        # trust del 16/09 ha mandato 630.687 token d'ingresso per quattro
+        # domande, e solo 104.088 venivano dalla cache. Il middleware aggiunge
+        # il punto di rottura in coda alla richiesta, cosi' ogni giro rilegge
+        # il precedente a un decimo del prezzo.
         _agente = create_agent(
             model=modello,
             tools=STRUMENTI,
             system_prompt=istruzioni,
             checkpointer=_memoria,
+            middleware=[AnthropicPromptCachingMiddleware(ttl="5m")],
         )
     return _agente
 
@@ -480,7 +536,12 @@ RE_ID_NORMA = re.compile(r"\b([A-Z]{1,3})-(-?\d+|None)-(\d{4})\b")
 #   Legge n. 164 del 2022                    numero poi anno
 #   Decreto Delegato 23 agosto 2024 n. 134   anno poi numero (la data estesa)
 #   DD-44-2008                               l'id come lo rendono gli strumenti
-TIPO = (r"(?:legge|l\.|lq\.?|lc\.?|d\.l\.|dl\.?|d\.d\.|dd\.?|decreto"
+# I nomi composti vanno prima: "Decreto Delegato 50/2010" e "Legge Qualificata
+# n. 1 del 2012" non si leggevano, perche' dopo "Decreto" o "Legge" veniva una
+# parola invece del numero.
+TIPO = (r"(?:legge[\s\u00a0]+(?:qualificata|costituzionale)"
+        r"|decreto[\s\u00a0-]+(?:delegato|legge|reggenziale|consiliare)"
+        r"|legge|l\.|lq\.?|lc\.?|d\.l\.|dl\.?|d\.d\.|dd\.?|decreto"
         r"|regolamento|reg\.|r\.)")
 CITAZIONI = [
     # Un marcatore di tipo davanti al numero e' obbligatorio nella forma con la
@@ -566,6 +627,24 @@ TIPI_ABBREVIATI = [
 ]
 
 
+def _prefisso_nominato(citazione):
+    """Il prefisso d'id dell'atto come lo nomina la prosa, o None.
+
+    Numero e anno non bastano: la Legge Costituzionale e la Legge Qualificata
+    del 26 gennaio 2012 sono entrambe n.1, e "Legge Qualificata 26 gennaio
+    2012 n.1" riceveva il riferimento della LC-1-2012. Per "Decreto" senza
+    altro il tipo resta ignoto (None): decide solo se l'atto e' uno.
+    """
+    m = re.match(r"\s*([A-Z]{1,3})-\d", citazione)
+    if m:
+        return m.group(1)
+    tipo = next((t for e, t in TIPI_ABBREVIATI if e.match(citazione)), None)
+    if not tipo:
+        return None
+    from comune import norma_id
+    return norma_id(tipo, 1, 2000).split("-")[0]
+
+
 def _chiave_articolo(articolo):
     """Come il frontend confronta i numeri d'articolo."""
     if articolo in (None, ""):
@@ -635,30 +714,32 @@ def _fonti_atti_nominati(testo, fonti, viste):
     presenti = set()
     for f in fonti:
         pezzi = str(f.get("norma") or "").split("-")
-        if len(pezzi) >= 3:
-            presenti.add((pezzi[1], pezzi[2].split("~")[0]))
+        if len(pezzi) >= 3 and pezzi[1].isdigit():
+            presenti.add((pezzi[0], str(int(pezzi[1])), pezzi[2].split("~")[0]))
     mascherato = MARCATORE.sub(lambda m: " " * len(m.group(0)), testo)
     for i, espressione in enumerate(CITAZIONI):
         for m in espressione.finditer(mascherato):
             numero, anno = ((m.group(2), m.group(1)) if i == 2 else (m.group(1), m.group(2)))
-            if (numero, anno) in presenti:
+            prefisso = _prefisso_nominato(m.group(0))
+            if not prefisso:
                 continue
-            tipo = next((t for e, t in TIPI_ABBREVIATI if e.match(m.group(0))), None)
-            if not tipo:
+            chiave = (prefisso, str(int(numero)), anno)
+            if chiave in presenti:
                 continue
-            try:
-                from comune import norma_id
-                norma = norma_id(tipo, int(numero), int(anno))
-            except Exception:
-                continue
+            norma = f"{prefisso}-{int(numero)}-{anno}"
             fonte = _fonte_d_atto(norma)
             if fonte is None or (norma, "-", "-") in viste:
                 continue
             fonti.append(fonte)
             viste.add((norma, "-", "-"))
-            presenti.add((numero, anno))
+            presenti.add(chiave)
     return fonti
 
+
+# "{cita:DD-50-2010:8:3}", con una graffa sola: Sonnet lo ha scritto cosi' nella
+# prova del 16/09 sui trust, il sito non lo riconosce, e _ancora_gli_atti ci infilava
+# dentro un secondo marcatore sull'id.
+RE_MARCATORE_SEMPLICE = re.compile(r"(?<!\{)\{cita:([^{}]+)\}(?!\})")
 
 RE_MARCATORE_PARTI = re.compile(r"\{\{cita:([^:{}]+):([^:{}]*):([^:{}]*)\}\}")
 
@@ -721,6 +802,7 @@ def rifinisci(testo, fonti, viste, precedenti=None):
     cambierebbe le citazioni. `precedenti` sono le fonti dei turni prima di
     questo.
     """
+    testo = RE_MARCATORE_SEMPLICE.sub(r"{{cita:\1}}", testo)
     _richiama_precedenti(testo, fonti, viste, precedenti)
     _aggiungi_fonti_d_atto(fonti, viste)
     testo = _senza_campi_interni(testo)
@@ -751,18 +833,20 @@ def _ancora_gli_atti(testo, fonti):
     # riferimento nominato in prosa senza articolo. rispondi() la aggiunge per
     # ogni atto consultato (_aggiungi_fonti_d_atto): ripiegare sulla prima
     # fonte etichettava la legge come "[art. 1]".
+    # Le fonti stanno sotto (numero, anno) e poi sotto il prefisso: la prosa
+    # dice il tipo, e fra LC-1-2012 e LQ-1-2012 decide quello.
     per_atto = {}
     for f in fonti:
         pezzi = str(f.get("norma") or "").split("-")
         if len(pezzi) < 3 or not pezzi[1].isdigit():
             continue
-        chiave = (pezzi[1], pezzi[2].split("~")[0])
-        precedente = per_atto.get(chiave)
+        stessi = per_atto.setdefault((str(int(pezzi[1])), pezzi[2].split("~")[0]), {})
+        precedente = stessi.get(pezzi[0])
         migliore = (precedente is None
                     or (str(f.get("articolo")) == "-" and str(precedente[1]) != "-")
                     or ("~" not in str(f["norma"]) and "~" in str(precedente[0])))
         if migliore:
-            per_atto[chiave] = (f["norma"], f.get("articolo"), f.get("comma"))
+            stessi[pezzi[0]] = (f["norma"], f.get("articolo"), f.get("comma"))
     if not per_atto:
         return testo
 
@@ -779,19 +863,35 @@ def _ancora_gli_atti(testo, fonti):
         for m in espressione.finditer(mascherato):
             numero, anno = ((m.group(2), m.group(1)) if i == 2
                             else (m.group(1), m.group(2)))
-            trovate.append((m.start(), m.end(), numero, anno))
-    for inizio, termine, numero, anno in sorted(trovate):
+            trovate.append((m.start(), m.end(), str(int(numero)), anno,
+                            _prefisso_nominato(m.group(0))))
+    trovate.sort()
+    for k, (inizio, termine, numero, anno, prefisso) in enumerate(trovate):
         if inizio < fine:
             continue                      # gia' coperta da un aggancio precedente
-        rif = per_atto.get((numero, anno))
-        if not rif:
+        stessi = per_atto.get((numero, anno)) or {}
+        if prefisso in stessi:
+            rif = stessi[prefisso]
+        elif prefisso is None and len(stessi) == 1:
+            rif = next(iter(stessi.values()))
+        else:
             continue                      # non fra le fonti: resta testo semplice
-        # anche dopo uno spazio: "L. 17/1974 {{cita:...}}" ne riceveva due
-        if testo[termine:termine + 12].lstrip().startswith("{{cita:"):
+        # anche dopo uno spazio o la chiusura del grassetto: "L. 17/1974
+        # {{cita:...}}" e "**L. 42/2010**{{cita:...}}" ne ricevevano due
+        if re.match(r"[\s*_\"»)\]]*\{\{cita:", testo[termine:termine + 16]):
             continue                      # il modello l'ha gia' messo. Non si
                                           # avanza `fine`: il testo saltato deve
                                           # comunque finire nell'uscita, o la
                                           # prosa davanti al marcatore sparisce.
+        # "**L. 1° marzo 2010 n.42 - L'Istituto del Trust**{{cita:L-42-2010:-:-}}":
+        # il modello ha messo il marcatore dopo il titolo. Se nella stessa riga
+        # ne arriva uno per lo stesso atto prima che se ne nomini un altro,
+        # basta quello.
+        riga = testo[termine:termine + 200].split("\n", 1)[0]
+        dopo = riga.find("{{cita:" + rif[0] + ":")
+        prossima = trovate[k + 1][0] - termine if k + 1 < len(trovate) else len(riga) + 1
+        if 0 <= dopo < prossima:
+            continue
         norma, articolo, comma = rif
         articolo = "-" if articolo in (None, "") else str(articolo)
         comma = "-" if comma in (None, "") else str(comma)

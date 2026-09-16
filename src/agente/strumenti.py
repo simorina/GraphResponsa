@@ -1021,7 +1021,8 @@ def struttura_norma(norma_id: str) -> dict:
 
 @tool
 def trova_norma(numero: int | None = None, anno: int | None = None,
-                tipo: str | None = None, testo: str | None = None) -> dict:
+                tipo: str | None = None, testo: str | None = None,
+                limite: int = 10) -> dict:
     """Individua una norma per tipo/numero/anno (es. Legge 140 del 2017) oppure
     per parole contenute nel titolo.
 
@@ -1033,6 +1034,8 @@ def trova_norma(numero: int | None = None, anno: int | None = None,
         anno: anno della norma
         tipo: es. "Legge", "Decreto Delegato"
         testo: parole del titolo, se non conosci numero e anno
+        limite: quanti atti restituire per ricerca nel titolo (default 10,
+            max 50): alzalo quando devi elencare tutte le norme di una materia
     """
     if numero is not None:
         righe = grafo().query("""
@@ -1065,8 +1068,8 @@ def trova_norma(numero: int | None = None, anno: int | None = None,
                    node.urlScheda AS urlScheda, node.urlDocumento AS urlDocumento,
                    articoli,
                    node.abrogata AS abrogata, node.abrogataDa AS abrogataDa
-            ORDER BY score DESC LIMIT 10
-        """, {"testo": _lucene(testo)})
+            ORDER BY score DESC LIMIT $limite
+        """, {"testo": _lucene(testo), "limite": min(max(1, int(limite)), 50)})
     else:
         return {"errore": "Serve almeno 'numero' oppure 'testo'."}
 

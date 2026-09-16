@@ -3,7 +3,7 @@
 Grafo Neo4j della normativa della Repubblica di San Marino, costruito per essere
 interrogato da un agente in modalità Graph RAG.
 
-**Stato aggiornato:** **247.393 nodi**, **314.001 relazioni**, **11.054 norme con testo
+**Stato aggiornato:** **247.397 nodi**, **314.205 relazioni**, **11.054 norme con testo
 integrale** su 11.136 scaricabili dal portale, distribuite su 16 tipologie di atto:
 leggi, decreti in tutte le loro forme, regolamenti, notifiche, ordinanze, statuti,
 errata corrige e verbali. Tutti i 162.826 commi hanno un embedding, e 433 norme,
@@ -94,10 +94,10 @@ Nel nostro Knowledge Graph, le rubriche svolgono due funzioni cruciali:
 |---|---|---|
 | **`:Comma`** | **`162.826`** | Unità atomica di testo, ricerca semantica e retrieval |
 | **`:Articolo`** | **`72.393`** | Articoli con rubriche, capi e collocazione tematica |
-| **`:Norma`** | **`12.173`** | Tutti gli atti normativi censiti: |
+| **`:Norma`** | **`12.177`** | Tutti gli atti normativi censiti: |
 | ↳ *con testo integrale (`caricata: true`)* | *`11.054`* | *Su 11.136 scaricabili dal portale, 16 tipologie* |
-| ↳ *stub citati (`caricata: false`)* | *`1.119`* | *Atti richiamati nei testi per tracciare i rinvii* |
-| **TOTALE NODI** | **`247.393`** | |
+| ↳ *stub citati (`caricata: false`)* | *`1.123`* | *Atti richiamati nei testi per tracciare i rinvii* |
+| **TOTALE NODI** | **`247.397`** | |
 
 ### Relazioni (Archi)
 
@@ -105,10 +105,10 @@ Nel nostro Knowledge Graph, le rubriche svolgono due funzioni cruciali:
 |---|---|---|---|
 | **`HA_COMMA`** | **`162.826`** | `Articolo ➔ Comma` | Contenimento strutturale |
 | **`HA_ARTICOLO`** | **`72.393`** | `Norma ➔ Articolo` | Contenimento strutturale |
-| **`CITA`** | **`56.490`** | `(Comma/Norma) ➔ Norma` | Rinvio normativo formale |
-| **`CITA_ARTICOLO`** | **`21.756`** | `Comma ➔ Articolo` | Rinvio puntuale ad articolo specifico risolto |
+| **`CITA`** | **`56.634`** | `(Comma/Norma) ➔ Norma` | Rinvio normativo formale |
+| **`CITA_ARTICOLO`** | **`21.816`** | `Comma ➔ Articolo` | Rinvio puntuale ad articolo specifico risolto |
 | **`ABROGA`** | **`536`** | `Norma ➔ Norma` | Abrogazione di un atto per intero, riconosciuta senza ambiguità |
-| **TOTALE ARCHI** | **`314.001`** | | |
+| **TOTALE ARCHI** | **`314.205`** | | |
 
 `CITA_ARTICOLO` era fermo a 16.763 finche' `RE_BERSAGLIO`, nel parser,
 pretendeva che il numero d'articolo fosse **adiacente** al nome dell'atto. Nel
@@ -125,10 +125,20 @@ Il guadagno vale per i caricamenti futuri; sul grafo esistente lo applica
 parser** invece di ricopiarle — se divergessero, il grafo smetterebbe di
 corrispondere a cio' che un caricamento pulito produrrebbe.
 
+**Il primo del mese.** «Legge 1° marzo 2010 n.42»: col giorno scritto da
+ordinale `RE_CITAZIONE` non riconosceva la data, e la citazione andava persa
+per intero. Erano 144 archi `CITA` e 60 `CITA_ARTICOLO`, e l'atto più colpito
+era proprio la legge sul trust: la L. 123/2019, che fa dell'«Autorità
+Giudiziaria» la Corte per il Trust, non risultava modificare l'art. 1 della
+L. 42/2010, e il DD 50/2010 non risultava citarla affatto. Il parser ora
+accetta `°`/`º`; `09_riallinea_citazioni.py` rilegge i testi che contengono
+l'ordinale e aggiunge gli archi che mancano, senza toccare gli esistenti (i
+quattro nodi in più sono stub citati).
+
 I `:Comma` erano 180.932 fino alla riparazione del parser: i **316 in più** sono
 il testo che si perdeva su 312 articoli, dove il buffer della rubrica non si
 chiudeva su `)` seguito da punteggiatura. Il conteggio dei nodi per etichetta
-somma a 259.566 e non a 247.393 perché ogni `:Norma` ne porta due — quella
+somma a 259.574 e non a 247.397 perché ogni `:Norma` ne porta due — quella
 generica e quella del tipo (`:Legge`, `:DecretoDelegato`, e così via).
 
 **I nodi `:Allegato` non ci sono più.** Erano 519 su 27 norme e portavano solo

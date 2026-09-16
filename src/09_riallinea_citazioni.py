@@ -84,11 +84,70 @@ def _finestra(testo, bersaglio, numero):
     return testo[:150]
 
 
+# Le citazioni d'atto che il parser di allora non leggeva. "Legge 1° marzo 2010
+# n.42": col giorno scritto da ordinale l'intera citazione andava persa, e con
+# lei l'arco CITA - quindi il comma restava fuori anche dal riallineamento qui
+# sotto, che parte dai commi che citano gia' qualcosa. Si rileggono i testi che
+# contengono l'ordinale e si aggiungono solo gli archi che mancano: quelli
+# presenti non si toccano (ON CREATE).
+Q_ATTI_ORDINALE = """
+MATCH (f:Norma)-[:HA_ARTICOLO]->(:Articolo)-[:HA_COMMA]->(c:Comma)
+WHERE c.testo CONTAINS '°' OR c.testo CONTAINS 'º'
+RETURN c.id AS comma, c.testo AS testo, f.id AS fonte
+"""
+Q_PREAMBOLI_ORDINALE = """
+MATCH (f:Norma) WHERE f.preambolo CONTAINS '°' OR f.preambolo CONTAINS 'º'
+RETURN f.id AS fonte, f.preambolo AS testo
+"""
+Q_CITA_ATTO = """
+UNWIND $citazioni AS c
+MATCH (x) WHERE (c.comma IS NOT NULL AND x:Comma AND x.id = c.comma)
+             OR (c.comma IS NULL AND x:Norma AND x.id = c.fonte)
+MERGE (target:Norma {id: c.targetId})
+  ON CREATE SET target.tipo = c.tipo, target.numero = c.numero,
+                target.anno = c.anno, target.caricata = false
+MERGE (x)-[r:CITA]->(target)
+  ON CREATE SET r.testoCitazione = c.testo, r.articoloCitato = c.articoloCitato,
+                r.commaCitato = c.commaCitato, r.origine = c.origine
+"""
+
+
+def citazioni_d_atto(g, scrivi):
+    lotto = []
+    for r in g.query(Q_ATTI_ORDINALE) + g.query(Q_PREAMBOLI_ORDINALE):
+        testo = " ".join((r["testo"] or "").split())
+        for c in _parse.estrai_citazioni(testo, r["fonte"]):
+            if c["anno"]:
+                lotto.append({**c, "comma": r.get("comma"), "fonte": r["fonte"],
+                              "targetId": norma_id(c["tipo"], c["numero"], c["anno"]),
+                              "origine": None if r.get("comma") else "preambolo"})
+    esistenti = set()
+    for i in range(0, len(lotto), 5000):
+        for t in g.query("""
+            UNWIND $c AS k
+            MATCH (x)-[:CITA]->(:Norma {id: k.targetId})
+            WHERE (k.comma IS NOT NULL AND x:Comma AND x.id = k.comma)
+               OR (k.comma IS NULL AND x:Norma AND x.id = k.fonte)
+            RETURN DISTINCT k.comma AS comma, k.fonte AS fonte, k.targetId AS t
+        """, {"c": lotto[i:i + 5000]}):
+            esistenti.add((t["comma"], t["fonte"], t["t"]))
+    mancanti = list({(c["comma"], c["fonte"], c["targetId"]): c for c in lotto
+                     if (c["comma"], c["fonte"], c["targetId"]) not in esistenti}.values())
+    print(f"  citazioni d'atto con l'ordinale nella data: {len(lotto):,} lette, "
+          f"{len(mancanti):,} archi CITA mancanti")
+    for c in mancanti[:8]:
+        print(f"    {c['comma'] or c['fonte']:<34} -> {c['targetId']}  ({c['testo']})")
+    if scrivi and mancanti:
+        g.query(Q_CITA_ATTO, {"citazioni": mancanti})
+        print(f"    scritti {len(mancanti):,}")
+
+
 def main():
     from agente.strumenti import grafo
 
     scrivi = "--scrivi" in sys.argv
     g = grafo()
+    citazioni_d_atto(g, scrivi)
 
     righe = g.query("""
         MATCH (c:Comma)-[:CITA]->(:Norma)

@@ -54,7 +54,10 @@ RE_CITAZIONE = re.compile(
     r"|Decreto\s+Delegato|Decreto\s+Legge|Decreto\s+Reggenziale"
     r"|Decreto\s+Consiliare|Decreto|Regolamento|Legge)"
     r"\s*"
-    r"(?:(?P<giorno>\d{1,2})\s+(?P<mese>gennaio|febbraio|marzo|aprile|maggio|giugno"
+    # "1° marzo 2010": il primo del mese si scrive con l'ordinale, e senza il
+    # simbolo qui la citazione intera andava persa - 120 nel corpus, 36 verso
+    # la Legge 1° marzo 2010 n.42 sul trust.
+    r"(?:(?P<giorno>\d{1,2})\s*[°º]?\s+(?P<mese>gennaio|febbraio|marzo|aprile|maggio|giugno"
     r"|luglio|agosto|settembre|ottobre|novembre|dicembre)\s+(?P<anno_data>\d{4})\s*)?"
     r"n\.\s*(?P<numero>\d+)"
     r"(?:\s*/\s*(?P<anno_slash>\d{4}))?",
@@ -280,6 +283,11 @@ def estrai_citazioni(testo, id_norma_corrente):
             "testo": re.sub(r"\s+", " ", m.group(0)).strip(),
         })
     return citazioni
+
+
+assert [(c["numero"], c["anno"], c["articoloCitato"]) for c in estrai_citazioni(
+    "L'articolo 1, comma 1, lettera b) della Legge 1° marzo 2010 n.42 è così modificato", "L-123-2019")
+] == [(42, 2010, "1")]
 
 
 def parse(id_norma, meta):

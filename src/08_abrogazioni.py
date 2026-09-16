@@ -151,7 +151,7 @@ _MESI_RE = ("gennaio|febbraio|marzo|aprile|maggio|giugno|luglio|agosto"
             "|settembre|ottobre|novembre|dicembre")
 RIF = (r"(?:n\.?\s*(\d+)\s*/\s*(\d{4})"
        r"|(\d{4})\s*,?\s*n\.?\s*(\d+)"
-       r"|n\.?\s*(\d+)\s+del\s+\d{1,2}\s+(?:" + _MESI_RE + r")\s+(\d{4}))")
+       r"|n\.?\s*(\d+)\s+del\s+\d{1,2}\s*[°º]?\s+(?:" + _MESI_RE + r")\s+(\d{4}))")
 
 
 def estremi(gruppi):
@@ -504,7 +504,7 @@ def data_discorde(testo, numero, anno, data_nodo):
         nodo = datetime.date.fromisoformat(str(data_nodo)[:10])
     except ValueError:
         return False
-    riferimento = (r"(\d{1,2})\s+(" + "|".join(MESI) + r")\s+(\d{4})\s*,?\s*n\.?\s*"
+    riferimento = (r"(\d{1,2})\s*[°º]?\s+(" + "|".join(MESI) + r")\s+(\d{4})\s*,?\s*n\.?\s*"
                    + str(numero) + r"\b")
     for m in re.finditer(riferimento, testo, re.I):
         if int(m.group(3)) != anno:
@@ -522,6 +522,7 @@ assert not data_discorde("Sono abrogati: - la Legge 29 settembre 2014 n. 147;", 
 assert not data_discorde("È abrogato il Decreto Delegato 7 gennaio 2019 n.1.", 1, 2019, "2019-01-07")
 assert not data_discorde("È abrogato il Decreto Delegato n.1/2019.", 1, 2019, "2019-01-07")
 assert not data_discorde("È abrogato il Regolamento 22 agosto 2025 n.15.", 15, 2025, None)
+assert data_discorde("È abrogata la Legge 1° marzo 2010 n.42.", 42, 2010, "2010-06-01")
 
 
 def decorrenza_non_maturata(testo, oggi=None):
