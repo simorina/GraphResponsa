@@ -1,5 +1,6 @@
 .env
 Neo4j-*.txt
+data
 data/raw/
 data/parsed/
 __pycache__/

@@ -111,6 +111,109 @@ for _testo, _atteso in _PROVE_BERSAGLIO:
     assert (_m.group(1) if _m else None) == _atteso, f"RE_BERSAGLIO: {_testo!r}"
 
 
+# --- Fine del dispositivo legislativo: formula di promulgazione ---
+#
+# Dopo l'ultimo articolo vero, l'atto chiude quasi sempre con "Dato/Data
+# dalla Nostra Residenza, addi'... d.F.R." seguito da "I CAPITANI REGGENTI" e
+# i due nomi. Cio' che segue - i Segretari di Stato, e spesso un Allegato -
+# non e' piu' dispositivo: e' un trattato, uno statuto, una tabella di
+# bilancio. Il riconoscitore normale non lo sa, e se l'allegato contiene a
+# sua volta intestazioni "Art. N" (una decisione UE, un trattato ONU, uno
+# statuto societario), le prende per nuovi articoli DELL'ATTO SAMMARINESE: il
+# comma dell'ultimo articolo vero arriva a superare il milione di caratteri
+# (misurato: DD-19-2019, DD-138-2018), e in altri casi l'allegato si
+# frammenta in articoli spuri (DC-52-2016 ne assorbe 20 da un trattato ONU
+# come se fossero suoi, DC-109-2015 duplica "Articolo unico" perche' la
+# decisione UE allegata ne ha uno proprio).
+#
+# Misurato sul corpus intero: 2.967 documenti su 11.134 (26,7%) hanno
+# quest'esatto problema. Restano fuori scope i decreti 1918-1943, che
+# chiudono con una formula diversa: allargare la regex per prenderli
+# aumenterebbe il rischio di falsi positivi altrove, e sono un numero
+# residuale (meno di 30 casi misurati).
+RE_PROMULGAZIONE = re.compile(
+    r"Dat[oa]\s+dalla\s+Nostra\s+Residenza.{0,250}?CAPITANI\s+REGGENTI",
+    re.I | re.S)
+FINESTRA_PROMULGAZIONE = 20  # righe di preavviso: tollera interruzioni di riga/pagina
+
+
+def _cerca_promulgazione(righe, i):
+    """
+    La formula di promulgazione inizia PROPRIO A QUESTA riga?
+
+    match(), non search(): con search() la finestra di preavviso (20 righe)
+    trovava la formula troppo presto, quando la riga corrente era ancora
+    testo vero dell'ultimo articolo e la formula stava solo qualche riga piu'
+    in la'. match() ancora l'inizio della frase alla riga corrente - le 20
+    righe di finestra servono solo a tollerare che "Dato"/"dalla Nostra
+    Residenza"/"CAPITANI REGGENTI" siano spezzati su piu' righe, non a
+    cercare la formula in anticipo.
+    """
+    finestra = " ".join(r.strip() for r in righe[i:i + FINESTRA_PROMULGAZIONE])
+    return bool(RE_PROMULGAZIONE.match(finestra))
+
+
+def _ha_struttura_propria(righe_resto):
+    """
+    L'allegato contiene a sua volta intestazioni 'Art. N'?
+
+    Si segnala soltanto (allegatoHaStrutturaPropria): non si prova a
+    strutturarlo, perche' sarebbero gli articoli di un documento diverso
+    (un trattato, uno statuto societario), non dell'atto sammarinese - vedi
+    L-115-2019, il cui Allegato A e' lo statuto di una societa' con una
+    numerazione propria che non ha nulla a che fare con la legge che lo
+    approva.
+    """
+    return any(RE_ARTICOLO.match(r.strip()) for r in righe_resto if r.strip())
+
+
+_PROVE_PROMULGAZIONE = [
+    # _cerca_promulgazione(righe, 0) replica esattamente come il ciclo
+    # principale la interroga: SOLO quando la riga corrente e' quella su cui
+    # ci si trova, mai "cerca piu' avanti" - la riga 0 di ogni fixture e'
+    # percio' la riga che il ciclo starebbe processando in quel momento, e
+    # deve essere l'inizio vero della formula (o di testo qualunque, per i
+    # casi negativi), non una riga di testo normativo che la precede.
+    ("caso semplice",
+     ["Dato dalla Nostra Residenza, addì 23 luglio 2015/1714 d.F.R", "",
+      "I CAPITANI REGGENTI", "Andrea Belluzzi – Roberto Venturini"], True),
+    ("interruzione di riga anomala fra 'Dato' e 'dalla Nostra Residenza'",
+     ["Dato", "dalla Nostra", "Residenza, addì 16 luglio 2019/1718 d.F.R.", "",
+      "I CAPITANI REGGENTI", "Nicola Selva - Michele Muratori"], True),
+    ("trattino normale invece di en-dash fra i nomi: nessuna differenza attesa",
+     ["Data dalla Nostra Residenza, addì 2 marzo 2020/1719 d.F.R", "",
+      "I CAPITANI REGGENTI", "Luca Boschi - Mariella Mularoni"], True),
+    ("nessuna formula: testo normativo qualunque, nessun taglio",
+     ["1. Il presente regolamento disciplina l'accesso agli atti.",
+      "2. Si applica a tutti gli uffici pubblici."], False),
+    # "Dato" nel senso comune ("dato atto di"), non l'incipit della formula:
+    # non deve agganciare solo perche' inizia con la stessa parola.
+    ("'Dato' usato in un senso diverso non e' la formula di chiusura",
+     ["Dato atto di quanto sopra deliberato, si procede.",
+      "Restano ferme le disposizioni ordinarie in materia di bilancio."], False),
+    # la riga corrente non e' l'inizio della formula (e' una voce di bilancio
+    # che nomina i Capitani Reggenti, misurata in L-115-2019): il ciclo
+    # principale non la incontrerebbe mai come "riga i" di questo controllo
+    # se non fosse gia' passato da un "Dato dalla Nostra Residenza" prima.
+    ("riga che non inizia con 'Dato'/'Data': mai la formula",
+     ["Assegni alle LL.EE. i Capitani Reggenti", "1-2-1230", " 178.000,00"], False),
+]
+for _nome, _righe_test, _atteso in _PROVE_PROMULGAZIONE:
+    assert _cerca_promulgazione(_righe_test, 0) == _atteso, f"RE_PROMULGAZIONE ({_nome}): {_righe_test!r}"
+
+_PROVE_STRUTTURA_ALLEGATO = [
+    ("caso L-115-2019: l'allegato e' uno statuto societario con Art. propri",
+     ["I CAPITANI REGGENTI", "Nicola Selva - Michele Muratori", "",
+      "Allegato \"A\" alla Legge 16 luglio 2019 n.115", "", "STATUTO DELLA SOCIETA'",
+      "Art.1", "(Denominazione)", "", "Art.9", "(Competenze)"], True),
+    ("allegato senza struttura propria (una decisione UE senza articoli qui)",
+     ["I CAPITANI REGGENTI", "Andrea Belluzzi - Roberto Venturini", "",
+      "IL SEGRETARIO DI STATO", "PER GLI AFFARI INTERNI", "Gian Carlo Venturini",
+      "", "DECISIONE DELLA COMMISSIONE", "del 6 marzo 2014"], False),
+]
+for _nome, _righe_test, _atteso in _PROVE_STRUTTURA_ALLEGATO:
+    assert _ha_struttura_propria(_righe_test) == _atteso, f"struttura allegato ({_nome}): {_righe_test!r}"
+
 
 def righe_pdf(path):
     doc = fitz.open(path)
@@ -282,6 +385,8 @@ def parse(id_norma, meta):
     rubrica_buffer = []
     preambolo = []
     iniziato = False
+    allegato_testo = None
+    allegato_ha_struttura_propria = False
 
     def chiudi_comma():
         """
@@ -354,6 +459,20 @@ def parse(id_norma, meta):
         if not riga:
             i += 1
             continue
+
+        # --- Fine del dispositivo: formula di promulgazione ---
+        # Da qui in poi non e' piu' testo dell'ultimo articolo: e' un
+        # allegato (trattato, statuto, tabella). Si chiude il comma in corso
+        # e si esce dal ciclo, cosi' il riconoscitore non rientra in
+        # modalita' "cerco Art. N" sul contenuto dell'allegato - che e' esatto
+        # il modo in cui DC-52-2016 finiva per assorbire i 20 articoli di un
+        # trattato ONU come fossero suoi.
+        if articolo_corrente is not None and _cerca_promulgazione(righe, i):
+            chiudi_comma()
+            resto = righe[i:]
+            allegato_testo = unisci(resto)
+            allegato_ha_struttura_propria = _ha_struttura_propria(resto)
+            break
 
         m_part = RE_PARTIZIONE.match(riga)
         m_art = RE_ARTICOLO.match(riga)
@@ -511,6 +630,8 @@ def parse(id_norma, meta):
         "citazioniPreambolo": citazioni_preambolo,
         "partizioni": partizioni,
         "articoli": articoli,
+        "allegatoPostPromulgazione": allegato_testo,
+        "allegatoHaStrutturaPropria": allegato_ha_struttura_propria,
     }
 
 
