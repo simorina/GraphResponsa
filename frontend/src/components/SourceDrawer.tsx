@@ -16,9 +16,11 @@ interface SourceDrawerProps {
  */
 function urlDocumento(source: Fonte): string {
   const articolo = String(source.articolo ?? '-');
-  const query = articolo && articolo !== '-' ? `?articolo=${encodeURIComponent(articolo)}` : '';
+  // L'articolo nel percorso, non in ?articolo=: la cache di CloudFront su
+  // /documenti/* ignora i parametri e confonderebbe l'articolo con l'atto.
+  const percorso = articolo && articolo !== '-' ? `/${encodeURIComponent(articolo)}` : '';
   const pagina = source.pagina ? `#page=${source.pagina}` : '';
-  return `/documenti/${encodeURIComponent(source.norma)}${query}${pagina}`;
+  return `/documenti/${encodeURIComponent(source.norma)}${percorso}${pagina}`;
 }
 
 export const SourceDrawer: React.FC<SourceDrawerProps> = ({ source, onClose }) => {

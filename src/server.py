@@ -123,6 +123,15 @@ def stato():
 
 # ------------------------------------------------------------------ documenti
 
+@app.get("/documenti/{norma_id}/{articolo}")
+def documento_articolo(norma_id: str, articolo: str):
+    """Il PDF dove si legge l'articolo. L'articolo sta nel percorso e non in
+    `?articolo=`: la cache di CloudFront su /documenti/* ignora i parametri, e
+    ogni articolo del Codice Penale avrebbe ricevuto per un giorno la legge di
+    emanazione, messa in cache per l'atto."""
+    return documento(norma_id, articolo)
+
+
 @app.get("/documenti/{norma_id}")
 def documento(norma_id: str, articolo: str | None = None):
     """
