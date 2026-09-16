@@ -24,7 +24,7 @@ from langchain_anthropic import ChatAnthropic
 from langchain_core.messages import SystemMessage
 from langgraph.checkpoint.memory import InMemorySaver
 
-from .strumenti import STRUMENTI
+from .strumenti import STRUMENTI, grafo
 
 ROOT = Path(__file__).resolve().parent.parent.parent
 load_dotenv(ROOT / ".env")
@@ -101,6 +101,49 @@ Rispondi consultando esclusivamente il grafo della normativa attraverso gli stru
    come segnaposto. Un requisito letto al comma 18 si cita al comma 18, non al
    comma 1 dell'articolo. Chi clicca deve trovare quella frase, non l'inizio
    della legge.
+
+   **Non tutti i "commi" sono commi.** Il numero dice cos'e' il passo, e va
+   citato per quello che e', col numero esatto nel marcatore:
+   - `1.cap2` (`parte: capoverso`): testo che l'articolo inserisce in un altro
+     atto. In prosa: "art. 5, comma 1, capoverso 2". E' il testo della
+     disposizione modificata, non una regola propria dell'atto che leggi;
+   - `1.p3` (`parte: punto`): voce di un elenco. In prosa: "comma 1, punto 3";
+   - `all4` (`parte: allegato`): testo dell'allegato stampato dopo la formula
+     di promulgazione. In prosa: "allegato all'atto";
+   - `1.rip2` (`parte: ripetizione`): il testo numera due volte il comma 1, e
+     questo e' il secondo. In prosa: "il secondo comma 1 dell'art. 5".
+
+   Lo stesso vale per gli articoli: `all-3` e' l'art. 3 dell'allegato che
+   segue la legge (in prosa: "art. 3 dell'allegato"), `all2-3` l'art. 3 del
+   secondo allegato, `9-rip2` il secondo articolo che il testo numera 9. Il
+   numero nel marcatore resta quello esatto (`all-3`).
+
+   **Gli elenchi della legge si riportano con i numeri della legge.** Se l'art.
+   150 elenca 1), 1 bis), 2), 3), 4), la risposta riporta ogni voce col suo
+   numero - "1 bis) in persona del coniuge..." - e non rinumera da 1 a 5 ne'
+   toglie i numeri con un elenco puntato. Chi legge "il punto 2" deve trovare
+   nel testo lo stesso punto 2. Lo stesso per le lettere a), b), c).
+
+   **Una pena in gradi va tradotta in durata.** Il Codice Penale punisce "con
+   la prigionia di settimo grado": a chi chiede quanto rischia serve sapere
+   quanti anni sono. Leggi l'articolo che definisce i gradi di quella pena -
+   per la prigionia l'art. 81 del Codice Penale - e dai la durata accanto al
+   grado, citandola.
+
+   **Le parole sono quelle della legge sammarinese, non quelle italiane.** Il
+   Codice Penale di San Marino dice *prigionia* (non reclusione),
+   *interdizione*, *multa a giorni*, e distingue il *misfatto*, doloso, dal
+   *delitto*, colposo: l'art. 150 dice "se il misfatto e' commesso", l'art. 163
+   "il delitto di omicidio" colposo. Usa la parola dell'articolo che citi,
+   anche quando quella italiana ti sembra piu' naturale.
+
+   **I nomi dei campi degli strumenti non vanno mai nella risposta.**
+   `citatoDaAttiSuccessivi`, `testoCoordinatoAl`, `attoNovellatoDa` e gli altri
+   servono a te: all'utente di' che cosa significano - "una legge del 2008 ha
+   modificato questo articolo", "il testo e' aggiornato al 27 febbraio 2026".
+   Lo stesso per i nomi degli strumenti: a "che leggi hai usato?" si risponde
+   con gli atti e gli articoli letti - L. 17/1974, art. 150, commi 1-3; art.
+   81 - ciascuno col suo marcatore, non con cerca_testo e leggi_articolo.
 
    **OGNI atto che nomini nella risposta deve avere il suo marcatore.** Se
    nella prosa scrivi "L. 145/2022", "il Decreto Delegato 146/2023", "la Legge
@@ -214,6 +257,14 @@ Rispondi consultando esclusivamente il grafo della normativa attraverso gli stru
    lo dicono solo `toccaQuestoArticolo: true`, `citatoDaAttiSuccessivi` o il
    testo dell'atto novellante che hai letto. Se la domanda riguarda un articolo
    preciso e nessuna voce lo tocca, non serve aprire l'atto novellante.
+
+   **Per sapere se un articolo e' aggiornato non serve chi_cita.** Hai gia' la
+   risposta nei marchi che leggi_articolo ti ha restituito: `testoCoordinatoAl`,
+   `citatoDaAttiSuccessivi`, `versionePiuRecente`. chi_cita elenca chi richiama
+   un atto intero: su un codice restituisce rinvii di ogni genere, non le
+   modifiche a un articolo, e costa un giro senza dire nulla di nuovo. Se
+   l'atto modificante che compare nei marchi non l'hai ancora aperto e lo
+   nomini, aprilo con leggi_articolo sul suo articolo.
 
    **`testoCoordinatoAl` e' la data fino a cui il testo e' aggiornato.** Se
    c'e', l'articolo non e' piu' quello promulgato: e' il testo coordinato del
@@ -458,18 +509,223 @@ def _aggiungi_fonti_d_atto(fonti, viste):
     il comma 1 dell'articolo letto, anche per requisiti scritti al comma 18.
     Chi nomina la legge nomina la legge: "[atto]".
     """
+    # Lo stesso per l'articolo intero: "art. 5 della L. 64/2025" senza un
+    # comma e' un marcatore {{cita:L-64-2025:5:-}}, e senza la sua fonte il
+    # sito lo scartava anche se l'articolo era stato letto.
     for f in list(fonti):
-        chiave = (f.get("norma"), "-", "-")
-        if not f.get("norma") or chiave in viste:
+        if not f.get("norma"):
             continue
-        viste.add(chiave)
-        fonti.append({"norma": f["norma"], "titoloNorma": f.get("titoloNorma"),
-                      "articolo": "-", "comma": "-",
-                      "testo": f.get("titoloNorma") or "",
-                      "haDocumento": bool(f.get("haDocumento")),
-                      "abrogata": bool(f.get("abrogata")),
-                      "abrogataDa": f.get("abrogataDa") or []})
+        for articolo in ("-", str(f.get("articolo") or "-")):
+            chiave = (f["norma"], articolo, "-")
+            if chiave in viste:
+                continue
+            viste.add(chiave)
+            fonti.append({"norma": f["norma"], "titoloNorma": f.get("titoloNorma"),
+                          "articolo": articolo, "rubrica": f.get("rubrica") if articolo != "-" else None,
+                          "comma": "-",
+                          "testo": (f.get("rubrica") if articolo != "-" else None)
+                                   or f.get("titoloNorma") or "",
+                          "haDocumento": bool(f.get("haDocumento")),
+                          "abrogata": bool(f.get("abrogata")),
+                          "abrogataDa": f.get("abrogataDa") or []})
     return fonti
+
+
+# I nomi dei campi che gli strumenti restituiscono, e come si dicono a chi
+# legge. Il prompt chiede di non scriverli; qui si traducono quelli che passano
+# lo stesso - misurato: "l'articolo 150 ha `citatoDaAttiSuccessivi` che
+# indicano modifiche", scritto a un utente.
+CAMPI_INTERNI = {
+    "citatoDaAttiSuccessivi": "le modifiche successive registrate",
+    "attoNovellatoDa": "gli atti che l'hanno modificato",
+    "toccaQuestoArticolo": "la modifica di questo articolo",
+    "testoCoordinatoAl": "la data di aggiornamento del testo coordinato",
+    "testoAggiornatoIn": "l'articolo in cui il testo e' stato inserito",
+    "versionePiuRecente": "la versione piu' recente",
+    "passiIntrodottiOraAbrogati": "i passi introdotti e poi abrogati",
+    "passoAbrogatoDa": "gli atti che hanno abrogato il passo",
+    "passoAbrogato": "l'abrogazione del passo",
+    "abrogataDa": "gli atti che l'hanno abrogata",
+    "novellataDa": "gli atti che l'hanno modificata",
+    "testoDisponibile": "la disponibilita' del testo",
+    "numeroOriginale": "il numero nel testo",
+    "inVigoreDal": "la data di entrata in vigore",
+    "ancheIn": "gli altri atti con lo stesso testo",
+}
+RE_CAMPO_INTERNO = re.compile(r"`?\b(" + "|".join(sorted(CAMPI_INTERNI, key=len, reverse=True)) + r")\b`?")
+
+# "L." / "D.D." come li scrive il modello, e il tipo d'atto che vogliono dire.
+TIPI_ABBREVIATI = [
+    (re.compile(r"^\s*(?:legge\s+qualificata|l\.?\s*q\.?)", re.I), "Legge Qualificata"),
+    (re.compile(r"^\s*(?:legge\s+costituzionale|l\.?\s*c\.?)\b", re.I), "Legge Costituzionale"),
+    (re.compile(r"^\s*(?:decreto[\s-]*legge|d\.?\s*l\.?)", re.I), "Decreto Legge"),
+    (re.compile(r"^\s*(?:decreto\s+delegato|d\.?\s*d\.?)", re.I), "Decreto Delegato"),
+    (re.compile(r"^\s*(?:regolamento|reg\.|r\.)", re.I), "Regolamento"),
+    (re.compile(r"^\s*(?:legge|l\.)", re.I), "Legge"),
+]
+
+
+def _chiave_articolo(articolo):
+    """Come il frontend confronta i numeri d'articolo."""
+    if articolo in (None, ""):
+        return "-"
+    return re.sub(r"[\s.\-–]+", "", str(articolo)).lower()
+
+
+def _senza_campi_interni(testo):
+    return RE_CAMPO_INTERNO.sub(lambda m: CAMPI_INTERNI[m.group(1)], testo)
+
+
+def _fonte_d_atto(norma):
+    """La fonte a livello d'atto per una norma con testo, o None."""
+    try:
+        righe = grafo().query("""
+            MATCH (n:Norma {id: $id}) WHERE n.caricata
+            RETURN n.id AS id, n.titolo AS titolo, n.urlDocumento AS url,
+                   n.abrogata AS abrogata, n.abrogataDa AS abrogataDa""", {"id": norma})
+    except Exception:
+        return None
+    if not righe:
+        return None
+    r = righe[0]
+    return {"norma": r["id"], "titoloNorma": r["titolo"], "articolo": "-", "comma": "-",
+            "testo": r["titolo"] or "", "haDocumento": bool(r["url"]),
+            "abrogata": bool(r["abrogata"]), "abrogataDa": r["abrogataDa"] or []}
+
+
+def _ripara_marcatori(testo, fonti, viste):
+    """I marcatori senza fonte, riportati al livello che la fonte ha davvero.
+
+    Il frontend scarta un marcatore che non trova fra le fonti: il riferimento
+    spariva. Un comma non letto di un articolo letto diventa l'articolo; un
+    passo di un atto che non e' stato aperto diventa l'atto, se l'atto ha il
+    testo in archivio. Un marcatore verso cio' che l'archivio non ha si toglie,
+    come farebbe il frontend.
+    """
+    chiavi = {(str(f.get("norma")), _chiave_articolo(f.get("articolo")),
+               str(f.get("comma") if f.get("comma") not in (None, "") else "-")) for f in fonti}
+
+    def sostituisci(m):
+        norma, articolo, comma = m.group(1), m.group(2), m.group(3) or "-"
+        if (norma, _chiave_articolo(articolo), comma) in chiavi:
+            return m.group(0)
+        if (norma, _chiave_articolo(articolo), "-") in chiavi:
+            return f"{{{{cita:{norma}:{articolo}:-}}}}"
+        if (norma, "-", "-") not in chiavi:
+            fonte = _fonte_d_atto(norma)
+            if fonte is None:
+                return ""
+            fonti.append(fonte)
+            viste.add((norma, "-", "-"))
+            chiavi.add((norma, "-", "-"))
+        return f"{{{{cita:{norma}:-:-}}}}"
+
+    return re.sub(r"\{\{cita:([^:{}]+):([^:{}]*):([^:{}]*)\}\}", sostituisci, testo)
+
+
+def _fonti_atti_nominati(testo, fonti, viste):
+    """Gli atti nominati in prosa ma mai aperti, se l'archivio ne ha il testo.
+
+    "L'unica modifica e' quella della L. 97/2008": il modello l'aveva letta nei
+    marchi di leggi_articolo senza aprirla, e il riferimento restava testo
+    morto. Si aggiunge la fonte dell'atto - titolo e PDF, niente che il
+    modello non abbia visto - e _ancora_gli_atti lo rende cliccabile.
+    """
+    presenti = set()
+    for f in fonti:
+        pezzi = str(f.get("norma") or "").split("-")
+        if len(pezzi) >= 3:
+            presenti.add((pezzi[1], pezzi[2].split("~")[0]))
+    mascherato = MARCATORE.sub(lambda m: " " * len(m.group(0)), testo)
+    for i, espressione in enumerate(CITAZIONI):
+        for m in espressione.finditer(mascherato):
+            numero, anno = ((m.group(2), m.group(1)) if i == 2 else (m.group(1), m.group(2)))
+            if (numero, anno) in presenti:
+                continue
+            tipo = next((t for e, t in TIPI_ABBREVIATI if e.match(m.group(0))), None)
+            if not tipo:
+                continue
+            try:
+                from comune import norma_id
+                norma = norma_id(tipo, int(numero), int(anno))
+            except Exception:
+                continue
+            fonte = _fonte_d_atto(norma)
+            if fonte is None or (norma, "-", "-") in viste:
+                continue
+            fonti.append(fonte)
+            viste.add((norma, "-", "-"))
+            presenti.add((numero, anno))
+    return fonti
+
+
+RE_MARCATORE_PARTI = re.compile(r"\{\{cita:([^:{}]+):([^:{}]*):([^:{}]*)\}\}")
+
+
+def fonti_della_storia(messaggi):
+    """Le fonti dei risultati degli strumenti in una sequenza di messaggi."""
+    fonti, viste = [], set()
+    for m in messaggi:
+        if getattr(m, "type", "") != "tool":
+            continue
+        esito = m.content
+        if isinstance(esito, str):
+            try:
+                esito = json.loads(esito)
+            except (ValueError, TypeError):
+                pass
+        for f in _fonti_da(getattr(m, "name", "") or "", esito):
+            chiave = (f["norma"], f["articolo"], f["comma"])
+            if chiave not in viste:
+                viste.add(chiave)
+                fonti.append(f)
+    return fonti
+
+
+def _richiama_precedenti(testo, fonti, viste, precedenti):
+    """Le fonti dei turni precedenti che la risposta cita.
+
+    "Che leggi hai usato?" non chiama strumenti: il modello risponde con cio'
+    che ha letto prima, e scrive i marcatori giusti - art. 150, commi 1, 2 e 3.
+    Ma le fonti si raccoglievano solo dal turno in corso, erano zero, e il sito
+    scartava ogni marcatore. Si riprendono dai turni precedenti quelle citate,
+    e solo quelle: il pannello delle fonti resta quello del turno.
+    """
+    if not precedenti:
+        return
+    presenti = {(str(f.get("norma")), _chiave_articolo(f.get("articolo")), str(f.get("comma") or "-"))
+                for f in fonti}
+    for m in RE_MARCATORE_PARTI.finditer(testo):
+        norma, articolo, comma = m.group(1), _chiave_articolo(m.group(2)), m.group(3) or "-"
+        if (norma, articolo, comma) in presenti:
+            continue
+        stesso_articolo = [f for f in precedenti if str(f.get("norma")) == norma
+                           and _chiave_articolo(f.get("articolo")) == articolo]
+        candidati = ([f for f in stesso_articolo if str(f.get("comma") or "-") == comma]
+                     or stesso_articolo
+                     or [f for f in precedenti if str(f.get("norma")) == norma][:1])
+        for f in candidati[:1] if comma == "-" or not stesso_articolo else candidati:
+            chiave = (f["norma"], f["articolo"], f["comma"])
+            if chiave not in viste:
+                viste.add(chiave)
+                fonti.append(f)
+            presenti.add((str(f["norma"]), _chiave_articolo(f["articolo"]), str(f["comma"] or "-")))
+
+
+def rifinisci(testo, fonti, viste, precedenti=None):
+    """La risposta come la vede l'utente: tutte le cure, sempre nello stesso ordine.
+
+    La usano rispondi() dal vivo e il server quando ricostruisce una
+    conversazione dal checkpoint: se divergessero, ricaricare la pagina
+    cambierebbe le citazioni. `precedenti` sono le fonti dei turni prima di
+    questo.
+    """
+    _richiama_precedenti(testo, fonti, viste, precedenti)
+    _aggiungi_fonti_d_atto(fonti, viste)
+    testo = _senza_campi_interni(testo)
+    testo = _ripara_marcatori(testo, fonti, viste)
+    _fonti_atti_nominati(testo, fonti, viste)
+    return _ancora_gli_atti(testo, fonti)
 
 
 def _ancora_gli_atti(testo, fonti):
@@ -529,7 +785,8 @@ def _ancora_gli_atti(testo, fonti):
         rif = per_atto.get((numero, anno))
         if not rif:
             continue                      # non fra le fonti: resta testo semplice
-        if testo[termine:termine + 2] == "{{":
+        # anche dopo uno spazio: "L. 17/1974 {{cita:...}}" ne riceveva due
+        if testo[termine:termine + 12].lstrip().startswith("{{cita:"):
             continue                      # il modello l'ha gia' messo. Non si
                                           # avanza `fine`: il testo saltato deve
                                           # comunque finire nell'uscita, o la
@@ -734,6 +991,13 @@ def rispondi(domanda, conversazione=None):
               "recursion_limit": MAX_GIRI * 2}
 
     fonti_raccolte, viste = [], set()
+    # Le fonti dei turni precedenti: una domanda di seguito puo' rispondere
+    # senza strumenti, citando cio' che e' stato letto prima.
+    try:
+        precedenti = fonti_della_storia(
+            (agente().get_state(config).values or {}).get("messages", []))
+    except Exception:
+        precedenti = []
     # Il grezzo di tutti i risultati: serve a stabilire quali norme il
     # modello ha davvero avuto sotto gli occhi.
     grezzo_strumenti = []
@@ -818,10 +1082,9 @@ def rispondi(domanda, conversazione=None):
         return
 
     if blocchi_testo:
-        _aggiungi_fonti_d_atto(fonti_raccolte, viste)
         yield {"tipo": "testo",
-               "testo": _ancora_gli_atti(SEPARATORE.join(blocchi_testo),
-                                         fonti_raccolte)}
+               "testo": rifinisci(SEPARATORE.join(blocchi_testo), fonti_raccolte, viste,
+                                  precedenti)}
 
     if fonti_raccolte:
         yield {"tipo": "fonti", "fonti": fonti_raccolte}

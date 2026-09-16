@@ -268,7 +268,7 @@ def conversazione(conversazione: str, utente: Utente = Depends(utente_corrente))
     if not archivio.appartiene(utente.id, conversazione):
         raise HTTPException(status_code=403, detail="Conversazione non tua.")
 
-    from agente.agente import _ancora_gli_atti, _fonti_da, agente
+    from agente.agente import _fonti_da, agente, rifinisci
     stato = agente().get_state({"configurable": {"thread_id": conversazione}})
     messaggi = []
     # Le fonti si ricostruiscono dai ToolMessage del checkpoint, esattamente
@@ -277,6 +277,9 @@ def conversazione(conversazione: str, utente: Utente = Depends(utente_corrente))
     # le citazioni sparivano dalla risposta, che restava giusta ma non piu'
     # verificabile. Il testo non basta: la citazione e' testo PIU' fonte.
     fonti, viste = [], set()
+    # Le fonti dei turni gia' passati: una risposta di seguito le cita senza
+    # rileggerle, come dal vivo (rifinisci).
+    precedenti = []
     for m in (stato.values or {}).get("messages", []):
         tipo = getattr(m, "type", "")
         if tipo == "tool":
@@ -305,8 +308,9 @@ def conversazione(conversazione: str, utente: Utente = Depends(utente_corrente))
             # Lo stesso ancoraggio del percorso dal vivo: il checkpoint
             # conserva il testo grezzo del modello, non quello gia' ancorato.
             messaggi.append({"role": ruolo,
-                             "content": _ancora_gli_atti(contenuto, fonti),
+                             "content": rifinisci(contenuto, fonti, viste, precedenti),
                              "fonti": fonti})
+            precedenti = precedenti + [f for f in fonti if f not in precedenti]
             fonti, viste = [], set()
         else:
             messaggi.append({"role": ruolo, "content": contenuto})

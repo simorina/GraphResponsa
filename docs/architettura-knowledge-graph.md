@@ -3,11 +3,11 @@
 Grafo Neo4j della normativa della Repubblica di San Marino, costruito per essere
 interrogato da un agente in modalità Graph RAG.
 
-**Stato aggiornato:** **254.878 nodi**, **321.443 relazioni**, **11.054 norme con testo
+**Stato aggiornato:** **247.393 nodi**, **314.001 relazioni**, **11.054 norme con testo
 integrale** su 11.136 scaricabili dal portale, distribuite su 16 tipologie di atto:
 leggi, decreti in tutte le loro forme, regolamenti, notifiche, ordinanze, statuti,
-errata corrige e verbali. Tutti i 171.647 commi hanno un embedding, e 425 norme,
-227 articoli e 69 commi portano una marcatura di abrogazione.
+errata corrige e verbali. Tutti i 162.826 commi hanno un embedding, e 433 norme,
+231 articoli e 68 commi portano una marcatura di abrogazione.
 
 ---
 
@@ -63,6 +63,8 @@ erDiagram
         string testo "Testo integrale atomico"
         floatArray embedding "Vettore Voyage-4 1024d"
         boolean numerazioneAnomala "Flag duplicati ufficiali"
+        string parte "capoverso, punto, allegato: non un comma proprio"
+        string numeroOriginale "Il numero che la parte aveva nel testo"
         boolean commaImplicito "Flag comma non numerato"
         boolean abrogato "Soppresso dentro un atto vivo"
         stringArray abrogatoDa "Gli atti che l'hanno soppresso"
@@ -90,23 +92,23 @@ Nel nostro Knowledge Graph, le rubriche svolgono due funzioni cruciali:
 
 | Entità / Label | Quantità | Ruolo nel Modello |
 |---|---|---|
-| **`:Comma`** | **`171.647`** | Unità atomica di testo, ricerca semantica e retrieval |
-| **`:Articolo`** | **`71.057`** | Articoli con rubriche, capi e collocazione tematica |
+| **`:Comma`** | **`162.826`** | Unità atomica di testo, ricerca semantica e retrieval |
+| **`:Articolo`** | **`72.393`** | Articoli con rubriche, capi e collocazione tematica |
 | **`:Norma`** | **`12.173`** | Tutti gli atti normativi censiti: |
 | ↳ *con testo integrale (`caricata: true`)* | *`11.054`* | *Su 11.136 scaricabili dal portale, 16 tipologie* |
 | ↳ *stub citati (`caricata: false`)* | *`1.119`* | *Atti richiamati nei testi per tracciare i rinvii* |
-| **TOTALE NODI** | **`254.878`** | |
+| **TOTALE NODI** | **`247.393`** | |
 
 ### Relazioni (Archi)
 
 | Relazione | Quantità | Direzione | Significato |
 |---|---|---|---|
-| **`HA_COMMA`** | **`171.647`** | `Articolo ➔ Comma` | Contenimento strutturale |
-| **`HA_ARTICOLO`** | **`71.057`** | `Norma ➔ Articolo` | Contenimento strutturale |
-| **`CITA`** | **`56.491`** | `(Comma/Norma) ➔ Norma` | Rinvio normativo formale |
-| **`CITA_ARTICOLO`** | **`21.725`** | `Comma ➔ Articolo` | Rinvio puntuale ad articolo specifico risolto |
-| **`ABROGA`** | **`523`** | `Norma ➔ Norma` | Abrogazione di un atto per intero, riconosciuta senza ambiguità |
-| **TOTALE ARCHI** | **`321.443`** | | |
+| **`HA_COMMA`** | **`162.826`** | `Articolo ➔ Comma` | Contenimento strutturale |
+| **`HA_ARTICOLO`** | **`72.393`** | `Norma ➔ Articolo` | Contenimento strutturale |
+| **`CITA`** | **`56.490`** | `(Comma/Norma) ➔ Norma` | Rinvio normativo formale |
+| **`CITA_ARTICOLO`** | **`21.756`** | `Comma ➔ Articolo` | Rinvio puntuale ad articolo specifico risolto |
+| **`ABROGA`** | **`536`** | `Norma ➔ Norma` | Abrogazione di un atto per intero, riconosciuta senza ambiguità |
+| **TOTALE ARCHI** | **`314.001`** | | |
 
 `CITA_ARTICOLO` era fermo a 16.763 finche' `RE_BERSAGLIO`, nel parser,
 pretendeva che il numero d'articolo fosse **adiacente** al nome dell'atto. Nel
@@ -126,7 +128,7 @@ corrispondere a cio' che un caricamento pulito produrrebbe.
 I `:Comma` erano 180.932 fino alla riparazione del parser: i **316 in più** sono
 il testo che si perdeva su 312 articoli, dove il buffer della rubrica non si
 chiudeva su `)` seguito da punteggiatura. Il conteggio dei nodi per etichetta
-somma a 267.051 e non a 254.878 perché ogni `:Norma` ne porta due — quella
+somma a 259.566 e non a 247.393 perché ogni `:Norma` ne porta due — quella
 generica e quella del tipo (`:Legge`, `:DecretoDelegato`, e così via).
 
 **I nodi `:Allegato` non ci sono più.** Erano 519 su 27 norme e portavano solo
@@ -344,12 +346,154 @@ Lato agente:
   testo;
 - il prompt vieta di usare l'art. 1 come marcatore di un'intera legge.
 
-I **commi a numero doppio** dell'art. 5 (`1`, `1`, `2`…: la frase introduttiva e
-il comma 1 del 3-bis citato) non sono stati rinumerati. Gli articoli con numeri
-di comma ripetuti sono 4.188, quasi tutti novelle che riportano commi altrui, e
-rinumerarli nel parser cambierebbe id, vettori e citazioni di migliaia di
-commi. Con `testoAggiornatoIn` l'agente cita l'articolo di destinazione, che ha
-la numerazione pulita.
+I commi dell'art. 5 numerati `1`, `1`, `2`… (la frase introduttiva, poi il
+comma 1 del 3-bis citato) erano uno dei 4.188 articoli con numeri di comma
+ripetuti: se ne occupa la sezione seguente.
+
+### Commi, capoversi, punti, allegati: la numerazione dentro l'articolo
+
+Un articolo su diciassette aveva due commi con lo stesso numero. Il numero
+doppio era il sintomo di cinque difetti diversi, misurati sul grafo prima di
+toccarlo. `src/commi.py` li corregge dopo la lettura del parser:
+
+| Difetto | Nel grafo, dopo | Cosa diventa |
+|---|---|---|
+| Rubrica senza parentesi né punto (*«Denuncia»*, *«Entrata in vigore»*) letta come comma implicito `1`, seguito dal vero comma 1 | 1.252 rubriche recuperate | torna `Articolo.rubrica`, il comma si cancella |
+| Numero di pagina o frammento numerico rimasto solo su una riga | 712 commi tolti | si cancella |
+| Testo citato da una novella (*«è così sostituito: “1. … 2. …”»*), i cui commi ripartono da 1 | 7.194 capoversi | **capoversi** del comma che li introduce: `1.cap2` |
+| Elenco numerato dentro un comma (*«in modo da essere: 1. … 2. …»*) | 1.496 punti | **punti**: `1.p2` |
+| Allegato stampato dopo la formula di promulgazione, con la sua numerazione (quasi sempre il trattato ratificato) | 14.497 parti, in 380 articoli | **parti d'allegato**: `all3` |
+
+Gli articoli con commi a numero doppio sono passati da **4.188 a zero**, gli
+articoli con rubrica da 33.534 a 35.271. I numeri della tabella sono quelli del
+primo giro; il secondo e il terzo hanno aggiunto capoversi, punti e allegati, e
+il conto finale è 7.597 capoversi, 1.758 punti, 14.888 parti d'allegato e
+1.858 ripetizioni.
+
+Quando nessuna forma si riconosce - il refuso della legge stessa, sette commi
+e poi di nuovo un comma 1 - il secondo diventa `1.rip2` (`parte:
+ripetizione`): non si inventa un numero che il testo non ha, ma il comma ha un
+nome suo.
+
+Le forme nuove portano `Comma.parte` (`capoverso`, `punto`, `allegato`, `ripetizione`) e
+`Comma.numeroOriginale`, il numero che avevano nel testo. Il testo non cambia:
+cambiano numero e id.
+
+**Come si riconosce il testo citato.** Il blocco comincia dopo un comma che
+annuncia la novella (*«così sostituito»*, *«come segue»*, *«è aggiunto il
+seguente»*) e lascia aperte le virgolette. Finisce sul comma che le richiude
+tutte: le virgolette si contano lungo i commi, così *«…”; “Art. 54»* non
+interrompe il blocco. Il blocco comincia anche quando l'annuncio è finito nella
+rubrica e il primo comma apre direttamente le virgolette (*«“Art. 120 bis
+(Norme di coordinamento)»*). Senza virgolette di chiusura vale la numerazione:
+il blocco è la sequenza 1, 2, 3… che segue, ma solo se arriva in fondo
+all'articolo o se subito dopo riprendono i commi veri. In ogni caso la
+numerazione del blocco deve ripartire: un numero doppio è meglio di un comma
+vero scambiato per testo citato. Un elenco segue un comma chiuso dai due punti,
+parte da 1 e va di uno in uno.
+
+**Frammenti di tabella.** *«sanzione da L.10»* / *«00 0 a L.50»*: l'estrazione
+ha spezzato un importo, e la riga *«00 0»* è diventata un comma `0`, che
+nessuna legge numera. Il frammento torna in coda al comma da cui viene. È
+l'unico caso in cui il testo di un comma cambia, e il suo vettore e le sue
+citazioni si ricalcolano.
+
+La funzione è **idempotente**: riapplicata a commi già riordinati riparte dai
+numeri del testo (`numeroOriginale`), e le regole aggiunte in un secondo
+momento si sono applicate così, sopra la prima migrazione.
+
+**Perché i capoversi.** È la forma con cui il diritto cita il testo inserito da
+una novella: *art. 5, comma 1, capoverso 2*. Tenerli come nodi separati
+conserva la ricerca precisa, e il numero univoco ha un effetto oltre
+l'etichetta: `08` segna un comma abrogato cercandone il numero, e *«il comma 2
+dell'art. 5 è abrogato»* poteva colpire il comma 2 dell'articolo citato.
+
+**Testo perso.** Nove articoli di tre atti (otto del `D-122/1985` e del
+`D-123/1982`, uno di un'errata corrige) venivano dalla struttura dedotta del
+parser, che dava lo stesso id a commi diversi: il caricamento li aveva fusi, e
+il testo di 70 commi era sparito dal grafo. Sono stati ricostruiti dal JSON.
+
+`02_parse.py` applica il riordino ai caricamenti nuovi. `src/14_rinumera_commi.py`
+l'ha applicato al grafo partendo da `data/parsed`, con alcune regole:
+- nel grafo i nodi restano quelli: si rinominano, e vettori, citazioni e
+  marcature restano con loro;
+- tocca un articolo solo se nel grafo ha ancora gli stessi commi del JSON;
+- lascia fuori i testi coordinati, la cui numerazione viene dal coordinato;
+- prima di scrivere salva un backup: nodi cancellati con vettori e archi,
+  rinomine, rubriche e JSON originali.
+
+Rilanciato su dieci atti, il parser produce gli stessi id della migrazione.
+
+I refusi, le novelle senza virgolette riconoscibili e i trattati senza formula
+sono stati coperti in un secondo e un terzo giro: altre virgolette (`―` `‖`
+dei PDF mal codificati, `''`), elenchi aperti da una voce o seguiti dal numero
+di pagina, *«Allegato …»* in coda al comma o *«Article 1»* inglese come inizio
+dell'allegato, e infine `.ripN`.
+
+### Articoli fusi: due articoli, un nodo
+
+Il numero doppio c'era anche un livello sopra, e faceva più danni. **Nel
+JSON di 381 atti caricati due articoli avevano lo stesso id**, e 03 fa MERGE
+sull'id: finivano nello stesso nodo, con la rubrica e il testo del secondo
+sopra quelli del primo e i commi dei due mescolati. Dove anche gli id dei commi
+coincidevano, il testo del primo era perso. `src/articoli.py` lo corregge dopo
+la lettura del parser:
+
+  - **allegato dopo la firma** con numerazione propria (il regolamento della
+    `L-84/1981`, i trattati dopo il decreto di ratifica): gli articoli dopo la
+    formula prendono il prefisso `all-`, oppure `all2-`, `all3-` quando gli
+    allegati che ripartono sono più d'uno, come nelle reiterazioni che tengono
+    più decreti nello stesso PDF. È l'idea di `13_atto_composto.py`, senza il
+    nome della sezione;
+  - **intestazione incollata in coda a un comma** (*«Comma soppresso. Art.
+    2-bis (Procedura attivazione posti)»*, e poi 1, 2, 3): diventa un articolo.
+    Serve che stia dopo la fine di una frase, abbia la rubrica fra parentesi,
+    sia fuori da una citazione e che il comma dopo riparta da 1: *«…all'art.
+    12»* in coda a una frase è un rinvio;
+  - **refuso**, due *«Art. 9»*: il secondo è `9-rip2`.
+
+Il numero del testo resta in `Articolo.numeroOriginale`, e 03 conta le
+ripetizioni su quello: un atto rifiutato per numerazione patologica resta
+rifiutato anche se i prefissi lo rendono univoco.
+
+`src/15_ricostruisci_articoli.py` ha ricaricato questi atti **dal PDF**, con il
+parser attuale, e non dal JSON: 137 di quei JSON venivano da versioni
+precedenti del parser, che li leggevano peggio. Il `D-11-2000`, per esempio,
+aveva come art. 1 una riga della tabella di sanzioni. Per ogni atto 15:
+- cancella articoli e commi, lasciando il nodo della norma e le citazioni del
+  preambolo;
+- li ricrea con le query di 03;
+- rimette i vettori dove il testo è identico;
+- ricalcola le citazioni e ricollega gli archi di novella dei testi coordinati;
+- riscrive il JSON.
+
+Restano fuori sei atti con testo coordinato e i dieci Statuti antichi: la
+regola è saltare ogni atto che la lettura nuova impoverisce oltre il 10%. Il
+backup tiene gli articoli di prima con tutti gli archi, e il vettore dei soli
+commi il cui testo non torna.
+
+**Gli Statuti erano caricati due volte.** Non vengono dal parser, e dieci di
+loro portano ogni rubrica due volte, con due forme di id (`S-1-1600_artI` e
+`S-1-1600_I`) e lo stesso numero di commi. Da qui il testo *«dimezzato»* della
+lettura nuova, che era il testo giusto. Le due copie non sono identiche: una
+estrazione salta righe. Sul PDF, con le coppie di parole consecutive, la copia
+`_art` ne ritrova il 98-100% e l'altra il 97-98%. `src/16_statuti_doppi.py`
+toglie la seconda: 383 articoli e 7.882 commi, nessuno con archi.
+
+**L'articolo d'allegato ha il suo titolo.** Il parser gli dava il contesto
+dell'ultimo Titolo della legge, e l'art. 1 del regolamento della `L-84/1981`
+risultava *«Titolo II»*. Leggendo quegli articoli l'agente ha contato *«undici
+allegati»* dove c'era un regolamento di undici articoli. Ora `Articolo.titolo`
+è *«Allegato»*, oppure *«Allegato 2»* quando gli allegati sono più d'uno.
+
+**Le citazioni sanno dell'allegato.** *«Il comma 3 dell'articolo 58
+dell'Allegato A alla Legge n.188/2011 è abrogato»* va all'articolo `all-58`,
+non all'art. 58 della legge. Finché i due articoli erano fusi il comma si
+trovava per caso, e separandoli tre marcature d'abrogazione erano rimaste senza
+bersaglio. `RE_BERSAGLIO` accetta ora *«dell'Allegato A»* fra l'articolo e
+l'atto, e il numero diventa `all-N`: nel parser, in `09` e in `08`. Vale per
+gli atti con un solo allegato numerato; con più allegati il bersaglio resta
+scartato.
 
 ### Un atto con più numerazioni: la legge di registro
 
@@ -592,7 +736,8 @@ flowchart TD
 
     subgraph P["2. Parsing Strutturale Deterministico"]
         C --> E["02_parse.py (PyMuPDF / regex)"]
-        E --> F["data/parsed/&lt;id&gt;.json"]
+        E --> E2["commi.py: rubriche, capoversi, punti, allegati"]
+        E2 --> F["data/parsed/&lt;id&gt;.json"]
         F --> G["Articoli, Commi, Rubriche, Citazioni puntuali"]
     end
 
@@ -816,7 +961,7 @@ l'indice l'aveva classificato per primo. Corretto con `OPTIONAL MATCH` e
 ## 6. Riconciliazione delle Anomalie Giuridiche Reali
 
 1. **Gestione Duplicate/Novelle (`numerazioneAnomala`):**
-   * Alcune leggi storiche contengono commi con lo stesso numero o derivanti da novelle legislative (es. due commi 2 in un articolo). Il loader non sovrascrive né perde testo: aggiunge un suffisso deterministico (`/c-2`, `/c-2-2`) e applica il flag `numerazioneAnomala = true`.
+   * Il testo citato dalle novelle, gli elenchi numerati e gli allegati dopo la firma non sono più commi con numeri ripetuti: diventano capoversi (`1.cap2`), punti (`1.p2`) e parti d'allegato (`all3`), vedi *«Commi, capoversi, punti, allegati»*. Quando due commi hanno davvero lo stesso numero (es. due commi 2 nella legge stessa) il testo non si perde: l'id prende un suffisso deterministico (`/c-2`, `/c-2-2`) e il comma il flag `numerazioneAnomala = true`.
 2. **Commi Impliciti (`commaImplicito`):**
    * Per le leggi storiche antecedenti al 2000 prive di commi numerati, il testo dell'articolo viene conservato in un comma implicito marcato con `commaImplicito = true`.
 3. **Gestione Multi-Label Idempotente:**

@@ -27,6 +27,8 @@ import fitz
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from comune import PREFISSI, norma_id  # noqa: E402
+from articoli import ristruttura_articoli  # noqa: E402
+from commi import ristruttura  # noqa: E402
 
 ROOT = Path(__file__).resolve().parent.parent
 RAW = ROOT / "data" / "raw"
@@ -80,7 +82,7 @@ RE_CITAZIONE = re.compile(
 _TOKEN = (r"(?:e|ed|primo|second[oa]|terz[oa]|quart[oa]|quint[oa]|sest[oa]|ultim[oa]"
           r"|penultim[oa]|comm[ai]|capo|cap|titolo|sezione|letter[ae]|lett|punt[oi]"
           r"|numero|n|bis|ter|quater|del|dello|della|dei|degli|delle|dal|dalla"
-          r"|[IVXLC]+|\d+|[a-z]\))")
+          r"|dell|allegato|[IVXLC]+|\d+|[a-z]\)|[a-z](?![a-z]))")
 _FILLER = r"(?:[\s,;.')]*" + _TOKEN + r"){0,8}[\s,;.')]*"
 RE_BERSAGLIO = re.compile(
     r"(?:artt?\.?|articol[oi])\s*(\d+)"
@@ -105,10 +107,24 @@ _PROVE_BERSAGLIO = [
     ("l'articolo 7 stabilisce i criteri applicabili alla ", None),
     ("secondo quanto disposto nella ", None),
     ("l'articolo 3 e' abrogato. Si applica la ", None),
+    ("all'articolo 14 dell'Allegato A della ", "14"),
+    ("l'articolo 58, comma 3, dell'Allegato A alla ", "58"),
 ]
 for _testo, _atteso in _PROVE_BERSAGLIO:
     _m = RE_BERSAGLIO.search(_testo)
     assert (_m.group(1) if _m else None) == _atteso, f"RE_BERSAGLIO: {_testo!r}"
+
+# "l'articolo 14 dell'Allegato A alla Legge n.188/2011": l'articolo e' quello
+# dell'allegato, che articoli.py numera "all-14". Agganciarlo all'art. 14 della
+# legge sarebbe sbagliato; prima della separazione degli articoli fusi era
+# ambiguo, perche' i due stavano nello stesso nodo.
+RE_IN_ALLEGATO = re.compile(r"\bdell['’]\s*allegat", re.I)
+
+
+def articolo_citato(bersaglio):
+    """Il numero d'articolo agganciato da RE_BERSAGLIO, con l'allegato se c'e'."""
+    numero = bersaglio.group(1)
+    return f"all-{numero}" if RE_IN_ALLEGATO.search(bersaglio.group(0)) else numero
 
 
 
@@ -249,7 +265,7 @@ def estrai_citazioni(testo, id_norma_corrente):
 
         prima = testo[max(0, m.start() - 90):m.start()]
         bersaglio = RE_BERSAGLIO.search(prima)
-        art_citato = bersaglio.group(1) if bersaglio else None
+        art_citato = articolo_citato(bersaglio) if bersaglio else None
         comma_citato = bersaglio.group(2) if bersaglio else None
 
         if anno and norma_id(tipo, numero, anno) == id_norma_corrente:
@@ -492,6 +508,20 @@ def parse(id_norma, meta):
             "commaImplicito": True,
         })
         art["rubrica"] = None
+
+    # Articoli con lo stesso numero - allegati dopo la firma, intestazioni
+    # incollate in coda a un comma, refusi: articoli.py. Poi i commi: rubriche
+    # lette come commi, numeri di pagina, testo citato dalle novelle, elenchi,
+    # allegati: commi.py. Rinumerano e rinominano, quindi vanno prima delle
+    # citazioni, che portano l'id del comma.
+    articoli = ristruttura_articoli(id_norma, articoli)
+    for art in articoli:
+        art.pop("origine", None)
+    for art in articoli:
+        ristruttura(art)
+        for c in art["commi"]:
+            c.pop("origine", None)
+            c.pop("assorbiti", None)
 
     # Citazioni: per comma, con l'indicazione del comma di origine.
     for art in articoli:

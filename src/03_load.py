@@ -66,6 +66,7 @@ UNWIND $articoli AS a
 MATCH (n:Norma {id: $normaId})
 MERGE (art:Articolo {id: a.id})
 SET art.numero = a.numero, art.rubrica = a.rubrica, art.ordine = a.ordine,
+    art.numeroOriginale = a.numeroOriginale,
     art.testo = a.testo,
     art.titolo = a.titolo, art.titoloRubrica = a.titoloRubrica,
     art.capo = a.capo, art.capoRubrica = a.capoRubrica
@@ -75,7 +76,8 @@ UNWIND a.commi AS c
 MERGE (cm:Comma {id: c.id})
 SET cm.numero = c.numero, cm.testo = c.testo, cm.ordine = c.ordine,
     cm.numerazioneAnomala = c.numerazioneAnomala,
-    cm.commaImplicito = c.commaImplicito
+    cm.commaImplicito = c.commaImplicito,
+    cm.parte = c.parte, cm.numeroOriginale = c.numeroOriginale
 MERGE (art)-[:HA_COMMA]->(cm)
 """
 
@@ -164,7 +166,9 @@ def motivo_scarto(dati):
     # veri, quindi il recupero automatico sbaglierebbe piu' di quanto ripari.
     # Meglio dichiararlo e lasciarlo a un riconoscitore che sappia leggere gli
     # allegati.
-    numeri = [str(a.get("numero")) for a in dati.get("articoli") or []]
+    # Sul numero del testo, non su quello reso univoco da articoli.py: i
+    # prefissi d'allegato non devono far passare un atto patologico.
+    numeri = [str(a.get("numeroOriginale") or a.get("numero")) for a in dati.get("articoli") or []]
     if numeri:
         piu_ripetuto = max(numeri.count(n) for n in set(numeri))
         if piu_ripetuto > MAX_RIPETIZIONI_NUMERO:
@@ -202,12 +206,16 @@ def prepara(dati):
         # i numeri ripetuti (novelle e refusi della legge).
         commi = [{"id": c["id"], "numero": c["numero"], "testo": c["testo"],
                   "ordine": i, "numerazioneAnomala": c.get("numerazioneAnomala", False),
-                  "commaImplicito": c.get("commaImplicito", False)}
+                  "commaImplicito": c.get("commaImplicito", False),
+                  "parte": c.get("parte"), "numeroOriginale": c.get("numeroOriginale")}
                  for i, c in enumerate(a.get("commi") or [])]
         ctx = contesto.get(a.get("partizioneId")) or {
             "titolo": None, "titoloRubrica": None, "capo": None, "capoRubrica": None}
+        if a.get("allegato"):
+            ctx = {"titolo": a["allegato"], "titoloRubrica": None, "capo": None, "capoRubrica": None}
         articoli.append({
             "id": a["id"], "numero": a["numero"], "rubrica": a.get("rubrica"),
+            "numeroOriginale": a.get("numeroOriginale"),
             "ordine": a.get("ordine", 0), **ctx,
             "testo": " ".join(c["testo"] for c in a.get("commi") or []),
             "commi": commi,

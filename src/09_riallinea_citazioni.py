@@ -63,7 +63,7 @@ def bersagli(testo, id_corrente):
         bersaglio = norma_id(tipo, int(m.group("numero")), int(anno))
         if bersaglio == id_corrente:
             continue          # autocitazione
-        voce = (bersaglio, colpito.group(1))
+        voce = (bersaglio, _parse.articolo_citato(colpito))
         if voce not in fuori:
             fuori.append(voce)
     return fuori

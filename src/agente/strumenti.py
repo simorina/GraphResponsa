@@ -892,7 +892,7 @@ def leggi_articolo(norma_id: str, numero: str) -> dict:
                n.abrogata AS abrogata, n.abrogataDa AS abrogataDa,
                a.abrogato AS passoAbrogato, a.abrogatoDa AS passoAbrogatoDa,
                a.testoAggiornatoAl AS testoCoordinatoAl,
-               collect({numero: c.numero, testo: c.testo,
+               collect({numero: c.numero, testo: c.testo, parte: c.parte,
                         abrogato: c.abrogato, abrogatoDa: c.abrogatoDa}) AS commi
     """, {"norma_id": norma_id, "numero": str(numero)})
     if not righe:
@@ -1173,7 +1173,11 @@ def citazioni_da(norma_id: str) -> dict:
 def chi_cita(norma_id: str) -> dict:
     """Restituisce le norme dell'archivio che richiamano quella indicata.
 
-    Serve per capire l'impatto di una norma o chi ne dipende.
+    Serve per capire l'impatto di una norma o chi ne dipende. NON serve a
+    sapere se un articolo e' stato modificato: per quello bastano i marchi di
+    leggi_articolo (citatoDaAttiSuccessivi, versionePiuRecente,
+    testoCoordinatoAl). Su un atto molto citato, come un codice, restituisce
+    rinvii di ogni genere e nessuno riguarda per forza l'articolo che ti serve.
 
     Args:
         norma_id: id della norma, es. "L-140-2017"

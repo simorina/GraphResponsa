@@ -166,11 +166,14 @@ def qualifica(articoli, norma, sezione, partizione_id):
     """Numeri e id resi univoci dentro l'atto: "reg-1", ".../art-reg-1/c-1"."""
     for a in articoli:
         numero = f"{sezione['prefisso']}-{a['numero']}"
+        vecchio = a["id"]
         a["numero"] = numero
         a["id"] = f"{norma}/art-{numero}"
         a["partizioneId"] = partizione_id
-        for k, c in enumerate(a["commi"], 1):
-            c["id"] = f"{a['id']}/c-{k}"
+        # Il suffisso del comma resta quello del parser (commi.ristruttura):
+        # cambia solo l'articolo, cosi' capoversi e punti tengono il loro nome.
+        for c in a["commi"]:
+            c["id"] = a["id"] + c["id"][len(vecchio):]
         # Le citazioni portano l'id del comma: si ricalcolano sugli id nuovi
         # con la stessa funzione del parser.
         a["citazioni"] = []
