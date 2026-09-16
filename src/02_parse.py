@@ -39,7 +39,55 @@ MESI = {
 }
 
 RE_PARTIZIONE = re.compile(r"^(TITOLO|CAPO|SEZIONE)\s+([IVXLC]+)\s*$", re.I)
-RE_ARTICOLO = re.compile(r"^(?:Art\.|Articolo)\s*(\d+|[Uu]nico)\.?\s*(bis|ter|quater|quinquies|sexies|septies|octies|nonies|decies)?\s*[-:.]?\s*$", re.I)
+# Intestazione d'articolo su riga propria. Oltre a "Art. 5", "Art. 5 bis",
+# "Articolo unico", accetta tre grafie misurate sul corpus
+# (scripts/diag_varianti.py, solo righe il cui numero prosegue la sequenza):
+#   "Art 19", "Art 4."        senza punto dopo Art    151 righe,  99 documenti
+#   "Art. 23 (23)", "Art. 54. (10)"  richiamo di nota    84 righe,   8 documenti
+#   "Art. 12°", "Articolo 7°"  simbolo di grado          27 righe,   3 documenti
+# Il richiamo di nota e il grado non entrano nel numero. La rubrica sulla stessa
+# riga ("Art. 21 - Rubrica") resta fuori: il "$" finale la esclude.
+#
+# "Art. 5-bis" (trattino) resta fuori di proposito. Accettarlo recupera 186
+# articoli veri in 91 documenti, ma in 41 documenti le intestazioni sono quelle
+# di articoli CITATI da una novella ("Dopo l'articolo 44 e' inserito: Art.
+# 44-bis ...") e diventerebbero articoli spuri del decreto che le cita. Serve
+# prima un controllo sulla sequenza in parse().
+RE_ARTICOLO = re.compile(
+    r"^(?:Art\.?|Articolo)\s*(\d+|[Uu]nico)\s*[°º]?\.?\s*"
+    r"(bis|ter|quater|quinquies|sexies|septies|octies|nonies|decies)?\.?\s*"
+    r"(?:\(\d+\))?\s*[-:.]?\s*$", re.I)
+
+_PROVE_ARTICOLO = [
+    ("Art. 5", "5"),
+    ("Articolo unico", "unico"),
+    ("Art. 5 bis", "5 bis"),
+    # senza punto
+    ("Art 19", "19"),
+    ("Art 4.", "4"),
+    ("Art 7 - L'imposta e' dovuta", None),       # rubrica/testo sulla riga: fuori scope
+    # richiamo di nota
+    ("Art. 23 (23)", "23"),
+    ("Art. 54. (10)", "54"),
+    ("Art. 106.(12)", "106"),
+    ("Art. 3 (Oggetto)", None),                   # rubrica sulla riga, non nota
+    # grado
+    ("Art. 12°", "12"),
+    ("Articolo 7°", "7"),
+    ("Art 11° - I due segretari terranno il registro", None),
+    ("Art. 12° bis", "12 bis"),
+    # trattino prima del suffisso: escluso finche' non c'e' il controllo sulle novelle
+    ("Art.1-bis", None),
+    # trattino lungo finale: in L-59-2016 "Articolo 9 –" e' una voce del sommario
+    ("Articolo 9 –", None),
+    # riferimento nel testo, non intestazione
+    ("Art. 24 della legge 18 febbraio 1998 n.30", None),
+    ("Arte 5", None),
+]
+for _riga, _atteso in _PROVE_ARTICOLO:
+    _m = RE_ARTICOLO.match(_riga)
+    _numero = (_m.group(1).lower() + (f" {_m.group(2).lower()}" if _m.group(2) else "")) if _m else None
+    assert _numero == _atteso, f"RE_ARTICOLO: {_riga!r} -> {_numero!r}"
 RE_COMMA = re.compile(r"^(\d+)\.\s*$")
 RE_COMMA_INLINE = re.compile(r"^(\d+)\.\s+(\S.*)$")
 
