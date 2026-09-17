@@ -50,19 +50,57 @@ RE_CITAZIONE = re.compile(
     # L'ordine conta: le alternative vanno dalla piu' specifica alla piu'
     # generica. Con "Legge" davanti, "Decreto Legge n.89/2014" veniva letto
     # come "Legge n.89/2014" e la norma finiva sotto l'id sbagliato.
+    #
+    # Forme che si perdevano, misurate sul corpus il 17/09 (circa 2.300
+    # citazioni): la virgola fra anno e numero ("27 febbraio 1947, n. 2",
+    # 1.444), le abbreviazioni ("D.D. n.128/2013", "L.40/1998", 572), il
+    # plurale ("Leggi 28 giugno 1974 n. 46", 221), "del" davanti alla data
+    # ("Decreto del 24 marzo 1993 n.50", 118), "Decreto Consigliare" e
+    # "Decreto-Legge". Il tipo abbreviato lo scioglie tipo_citato().
+    r"(?<![A-Za-z\u00c0-\u00ff])"
     r"(?P<tipo>Legge\s+Costituzionale|Legge\s+Qualificata"
-    r"|Decreto\s+Delegato|Decreto\s+Legge|Decreto\s+Reggenziale"
-    r"|Decreto\s+Consiliare|Decreto|Regolamento|Legge)"
-    r"\s*"
+    r"|Decreto\s+Delegato|Decreto(?:\s*[-–—]\s*|\s+)Legge|Decreto\s+Reggenziale"
+    r"|Decreto\s+Consi(?:g)?liare|Decreto|Regolamento|Leggi|Legge"
+    r"|L\.\s?C\.|L\.\s?Q\.|D\.\s?D\.|D\.\s?L\.|D\.\s?C\.|L\.)"
+    r"\s*(?:del\s+)?"
     # "1° marzo 2010": il primo del mese si scrive con l'ordinale, e senza il
     # simbolo qui la citazione intera andava persa - 120 nel corpus, 36 verso
     # la Legge 1° marzo 2010 n.42 sul trust.
     r"(?:(?P<giorno>\d{1,2})\s*[°º]?\s+(?P<mese>gennaio|febbraio|marzo|aprile|maggio|giugno"
-    r"|luglio|agosto|settembre|ottobre|novembre|dicembre)\s+(?P<anno_data>\d{4})\s*)?"
-    r"n\.\s*(?P<numero>\d+)"
+    r"|luglio|agosto|settembre|ottobre|novembre|dicembre)\s+(?P<anno_data>\d{4})\s*,?\s*)?"
+    # "n." puo' mancare solo nella forma con la barra ("L. 40/1998"):
+    # citazione_leggibile() scarta il resto.
+    r"(?P<n>n\s*[.°º]\s*[°º]?\s*)?(?P<numero>\d+)"
     r"(?:\s*/\s*(?P<anno_slash>\d{4}))?",
     re.I,
 )
+
+ABBREVIAZIONI = {
+    "l.": "Legge", "leggi": "Legge", "l.c.": "Legge Costituzionale",
+    "l.q.": "Legge Qualificata", "d.d.": "Decreto Delegato",
+    "d.l.": "Decreto Legge", "d.c.": "Decreto Consiliare",
+}
+
+
+def tipo_citato(m):
+    """Il tipo d'atto di una citazione, per esteso."""
+    grezzo = " ".join(m.group("tipo").split())
+    return ABBREVIAZIONI.get(re.sub(r"\s", "", grezzo).lower(), grezzo.title())
+
+
+def citazione_leggibile(m):
+    """L'anno della citazione, None se non si puo' identificare la norma, o
+    False se il riscontro non e' una citazione.
+
+    Senza "n." si accetta solo numero/anno con un anno plausibile: "Legge 5"
+    o "L. 30/40" non citano nulla.
+    """
+    anno = m.group("anno_slash") or m.group("anno_data")
+    if not m.group("n"):
+        if not m.group("anno_slash") or not 1600 <= int(m.group("anno_slash")) <= 2099:
+            return False
+    return int(anno) if anno else None
+
 
 # "articolo 10 della Legge ..." -> il bersaglio della citazione precede la norma.
 #
@@ -254,17 +292,37 @@ def struttura_dedotta(id_norma, righe):
     return [art], preambolo
 
 
-def estrai_citazioni(testo, id_norma_corrente):
+# Cio' che puo' precedere l'intestazione di un atto nel suo preambolo: niente,
+# un numero di pagina, "REPUBBLICA DI SAN MARINO".
+RE_PRIMA_INTESTAZIONE = re.compile(r"\s*(?:\d+\s+)?(?:repubblica\s+di\s+san\s+marino\s*)?", re.I)
+
+
+def estrai_citazioni(testo, id_norma_corrente, preambolo=False):
     """
     Trova i riferimenti ad altre norme nel testo.
     Scarta l'autocitazione: una legge che cita se stessa non e' una dipendenza.
+
+    Nel preambolo scarta anche l'intestazione dell'atto stesso. Il preambolo
+    comincia spesso con "DECRETO 20 settembre 2004 n. 119": se l'archivio
+    tiene l'atto come Decreto Consiliare (DC-119-2004), l'id letto (D-119-2004)
+    e' diverso e la riga diventava la citazione di un atto che non esiste - 724
+    archi il 17/09. Si riconosce dalla posizione - in apertura, al piu' dopo
+    "REPUBBLICA DI SAN MARINO" - e da numero e anno uguali: un errata corrige
+    che cita l'atto che corregge, stesso numero e stesso anno, lo fa dopo
+    "ERRATA CORRIGE AL" e resta.
     """
+    proprio = re.match(r"^[A-Z]+-(\d+)-(\d{4})", id_norma_corrente or "")
     citazioni = []
     for m in RE_CITAZIONE.finditer(testo):
-        tipo = re.sub(r"\s+", " ", m.group("tipo")).strip().title()
+        anno = citazione_leggibile(m)
+        if anno is False:
+            continue
+        tipo = tipo_citato(m)
         numero = int(m.group("numero"))
-        anno = m.group("anno_slash") or m.group("anno_data")
-        anno = int(anno) if anno else None
+
+        if (preambolo and proprio and RE_PRIMA_INTESTAZIONE.fullmatch(testo[:m.start()])
+                and (str(numero), str(anno)) == proprio.groups()):
+            continue  # intestazione dell'atto stesso
 
         prima = testo[max(0, m.start() - 90):m.start()]
         bersaglio = RE_BERSAGLIO.search(prima)
@@ -288,6 +346,40 @@ def estrai_citazioni(testo, id_norma_corrente):
 assert [(c["numero"], c["anno"], c["articoloCitato"]) for c in estrai_citazioni(
     "L'articolo 1, comma 1, lettera b) della Legge 1° marzo 2010 n.42 è così modificato", "L-123-2019")
 ] == [(42, 2010, "1")]
+
+
+_PROVE_CITAZIONE = [
+    ("la Legge 17 marzo 2005, n. 37 e' abrogata", ("Legge", 37, 2005)),
+    ("ai sensi della Legge del 17 marzo 2005 n. 37", ("Legge", 37, 2005)),
+    ("le Leggi 17 marzo 2005 n.38 e", ("Legge", 38, 2005)),
+    ("ex art.4 del D.D. n.128/2013 nei", ("Decreto Delegato", 128, 2013)),
+    ("come previsto dalla L.40/1998", ("Legge", 40, 1998)),
+    ("il D.L. 36/2011 ha", ("Decreto Legge", 36, 2011)),
+    ("la L. C. n. 185/2005", ("Legge Costituzionale", 185, 2005)),
+    ("Decreto Consigliare del 30 giugno 1934, n.8", ("Decreto Consigliare", 8, 1934)),
+    ("il Decreto-Legge n. 89/2014", ("Decreto-Legge", 89, 2014)),
+    ("Legge 5 dicembre 2011 n.189", ("Legge", 189, 2011)),
+    ("la Legge 5 e la tabella L. 30/40", None),
+    ("nel decreto 12 marzo 2020 recante", None),
+    ("dell'art. 3 del. 5/2020", None),
+]
+for _testo, _atteso in _PROVE_CITAZIONE:
+    _c = estrai_citazioni(_testo, "X-1-1900")
+    _letto = (_c[0]["tipo"], _c[0]["numero"], _c[0]["anno"]) if _c and _c[0]["anno"] else None
+    assert _letto == _atteso, f"RE_CITAZIONE: {_testo!r} -> {_letto}"
+assert norma_id("Decreto Consigliare", 8, 1934) == "DC-8-1934"
+assert norma_id("Decreto-Legge", 89, 2014) == "DL-89-2014"
+assert estrai_citazioni("DECRETO 20 settembre 2004 n. 119 REPUBBLICA DI SAN MARINO", "DC-119-2004", preambolo=True) == []
+assert estrai_citazioni("REPUBBLICA DI SAN MARINO DECRETO – LEGGE 31 gennaio 2007 n.10 Noi Capitani",
+                        "D-10-2007", preambolo=True) == []
+assert estrai_citazioni("1 REPUBBLICA DI SAN MARINO DECRETO - LEGGE 2 maggio 2011 n.73 Noi",
+                        "DL-73-2011", preambolo=True) == []
+assert len(estrai_citazioni("REPUBBLICA DI SAN MARINO ERRATA CORRIGE AL DECRETO DELEGATO 14 FEBBRAIO 2008 N.29",
+                            "EC-29-2008", preambolo=True)) == 1
+assert len(estrai_citazioni("Regolamento 7 Marzo 1914 per l'applicazione della superiore Legge. (Legge 7 Marzo 1914 N. 4)",
+                            "R-4-1914", preambolo=True)) == 1
+assert [c["tipo"] for c in estrai_citazioni("del Decreto – Legge n. 93/2017", "X-1-1900")] == ["Decreto – Legge"]
+assert norma_id("Decreto – Legge", 93, 2017) == "DL-93-2017"
 
 
 def parse(id_norma, meta):
@@ -541,7 +633,7 @@ def parse(id_norma, meta):
                 art["citazioni"].append(cit)
 
     testo_preambolo = unisci(preambolo)
-    citazioni_preambolo = estrai_citazioni(testo_preambolo, id_norma)
+    citazioni_preambolo = estrai_citazioni(testo_preambolo, id_norma, preambolo=True)
 
     return {
         **meta,

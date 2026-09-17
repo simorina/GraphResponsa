@@ -1117,15 +1117,27 @@ def main():
     # "ABROGATO - Decreto Delegato..." e' la marcatura redazionale dell'archivio
     # di Stato. STARTS WITH e non CONTAINS: "referendum abrogativo" ricorre in
     # una quarantina di titoli e non significa che l'atto sia caduto.
-    dal_titolo = {r["id"] for r in g.query("""
-        MATCH (n:Norma) WHERE toUpper(n.titolo) STARTS WITH 'ABROGAT'
-        RETURN n.id AS id
-    """)}
+    #
+    # Lo stesso archivio premette "DECADUTO - " ai decreti che hanno perso
+    # efficacia: 38 atti, fino al 17/09 dati per vivi perche' qui
+    # si cercava solo "ABROGAT". Anche loro sono caduti per intero; `decaduto`
+    # dice come, e il titolo lo porta scritto. "ABGROGATO" e' un refuso del
+    # portale (DD-37-2019).
+    dal_titolo, decaduti = set(), set()
+    for r in g.query("""
+        MATCH (n:Norma)
+        WHERE toUpper(n.titolo) STARTS WITH 'ABROGAT' OR toUpper(n.titolo) STARTS WITH 'ABGROGAT'
+           OR toUpper(n.titolo) STARTS WITH 'DECADUT'
+        RETURN n.id AS id, toUpper(n.titolo) STARTS WITH 'DECADUT' AS decaduto
+    """):
+        dal_titolo.add(r["id"])
+        if r["decaduto"]:
+            decaduti.add(r["id"])
     tutte = dai_commi | dal_titolo
 
     print(f"\n  coppie fonte->bersaglio: {len(unici)}")
     print(f"  abrogate secondo i commi:  {len(dai_commi):>4}")
-    print(f"  abrogate secondo il titolo:{len(dal_titolo):>4}")
+    print(f"  abrogate secondo il titolo:{len(dal_titolo):>4}  (di cui decadute {len(decaduti)})")
     print(f"  in comune:                 {len(dai_commi & dal_titolo):>4}")
     print(f"  ABROGATE IN TUTTO:         {len(tutte):>4}")
 
@@ -1179,10 +1191,14 @@ def main():
     # l'arco costerebbe un MATCH in piu' su ogni ricerca. Si ricalcolano da capo
     # a ogni esecuzione, cosi' lo script resta idempotente.
     g.query("""MATCH (n:Norma) WHERE n.abrogata IS NOT NULL OR n.abrogataDa IS NOT NULL
-               REMOVE n.abrogata, n.abrogataDa""")
+                                  OR n.decaduto IS NOT NULL
+               REMOVE n.abrogata, n.abrogataDa, n.decaduto""")
     g.query("""
         UNWIND $ids AS id MATCH (n:Norma {id: id}) SET n.abrogata = true
     """, {"ids": sorted(tutte)})
+    g.query("""
+        UNWIND $ids AS id MATCH (n:Norma {id: id}) SET n.decaduto = true
+    """, {"ids": sorted(decaduti)})
     g.query("""
         MATCH (f:Norma)-[:ABROGA]->(b:Norma)
         WITH b, collect(DISTINCT f.id) AS fonti

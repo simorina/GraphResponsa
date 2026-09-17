@@ -15,7 +15,9 @@ degrada a vuoto e il server continua a funzionare da solo.
 import json
 import logging
 import mimetypes
+import queue
 import sys
+import threading
 import urllib.error
 import urllib.request
 import zipfile
@@ -41,6 +43,10 @@ WEB = ROOT / "web"
 FRONTEND_DIST = ROOT / "frontend" / "dist"
 
 registro = logging.getLogger("graphresponsa")
+
+# Secondi di silenzio dopo cui /chat manda un commento SSE: CloudFront chiude
+# le connessioni mute dopo 120.
+BATTITO = 15
 
 app = FastAPI(title="graphResponsa")
 
@@ -227,12 +233,24 @@ def chat(d: Domanda, utente: Utente = Depends(utente_corrente)):
 
     archivio.annota_conversazione(utente.id, conversazione, d.domanda)
 
-    def eventi():
+    # La consultazione gira in un thread e gli eventi passano da una coda.
+    #
+    # La risposta arriva intera alla fine, e mentre il modello la scrive dal
+    # server non esce nulla: CloudFront chiude una connessione muta dopo 120
+    # secondi, e con Sonnet una risposta lunga ne chiede piu' di uno. Ogni
+    # BATTITO secondi di silenzio parte un commento SSE (": attesa"), che il
+    # sito ignora e che tiene viva la connessione.
+    #
+    # Il thread registra i consumi da se': se chi chiede chiude la pagina a
+    # meta', la consultazione arriva in fondo comunque, e la spesa - che prima
+    # andava persa insieme al generatore - finisce nei tetti.
+    coda: queue.Queue = queue.Queue()
+    FINE = object()
+
+    def consulta():
         try:
             for ev in rispondi(d.domanda, conversazione):
                 if ev.get("tipo") == "fine":
-                    # I consumi erano gia' calcolati per mostrarli nella UI, e
-                    # venivano buttati. Qui restano, e alimentano i tetti.
                     archivio.registra_consumo(
                         utente.id, ev.get("tokenIn", 0), ev.get("tokenOut", 0),
                         float(ev.get("costo", 0)))
@@ -245,10 +263,24 @@ def chat(d: Domanda, utente: Utente = Depends(utente_corrente)):
                         registro.warning(
                             "citazioni non verificate conversazione=%s: %s",
                             conversazione, ", ".join(sospette))
-                yield f"data: {json.dumps(ev, ensure_ascii=False, default=str)}\n\n"
+                coda.put(ev)
         except Exception as e:
-            errore = {"tipo": "errore", "messaggio": f"{type(e).__name__}: {e}"}
-            yield f"data: {json.dumps(errore, ensure_ascii=False)}\n\n"
+            coda.put({"tipo": "errore", "messaggio": f"{type(e).__name__}: {e}"})
+        finally:
+            coda.put(FINE)
+
+    threading.Thread(target=consulta, daemon=True).start()
+
+    def eventi():
+        while True:
+            try:
+                ev = coda.get(timeout=BATTITO)
+            except queue.Empty:
+                yield ": attesa\n\n"
+                continue
+            if ev is FINE:
+                return
+            yield f"data: {json.dumps(ev, ensure_ascii=False, default=str)}\n\n"
 
     return StreamingResponse(
         eventi(),

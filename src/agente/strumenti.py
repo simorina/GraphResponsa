@@ -86,6 +86,21 @@ def _lucene(query):
     return fuori.strip() or '""'
 
 
+def _prefissi_titolo(testo):
+    """La ricerca nei titoli per inizio di parola.
+
+    L'indice dei titoli non riduce le parole alla radice: "trust" non trovava
+    "Adesione alla Convenzione sulla Legge applicabile ai Trusts", cioe' la
+    Convenzione dell'Aja, e un elenco "completo" delle norme sul trust la
+    perdeva. Ogni parola di almeno quattro lettere diventa un prefisso.
+    """
+    parole = _lucene(testo).split()
+    return " ".join(p + "*" if len(p) >= 4 and p.isalnum() else p for p in parole) or '""'
+
+
+assert _prefissi_titolo("trust fiduciari (a)") == "trust* fiduciari* \\(a\\)"
+
+
 def _firma(testo):
     """Impronta del testo, per riconoscere i passi identici.
 
@@ -495,7 +510,48 @@ def _novelle(righe):
             # davanti. Se il testo nuovo arriva insieme, non c'e' piu' un passo
             # da ricordarsi di fare.
             r["citatoDaAttiSuccessivi"] = [
-                {**n, "testo": _taglia(n["testo"], 900)} for n in novelle]
+                {**n, "testo": _taglia(_senza_firma(n["testo"]), 900)} for n in novelle]
+    return righe
+
+
+# L'ultimo comma di un atto porta la formula di chiusura e le firme: "Dato
+# dalla Nostra Residenza, addi' ... I CAPITANI REGGENTI ... IL SEGRETARIO DI
+# STATO ...". Dentro il testo di una novella sono duecento caratteri che il
+# modello rilegge a ogni giro senza che dicano nulla.
+RE_FIRMA_ATTO = re.compile(r"\s*Dat[oa] dalla Nostra Residenza\b.*$", re.S)
+
+
+def _senza_firma(testo):
+    return RE_FIRMA_ATTO.sub("", testo or "")
+
+
+def _compatta(righe):
+    """I risultati di cerca_testo senza il peso che non informa.
+
+    Misurato su una ricerca da otto risultati: 15.133 caratteri, di cui solo
+    5.082 di testo normativo. Il resto erano campi vuoti, URL completi (al
+    sito basta sapere che il documento c'e') e `attoNovellatoDa` ripetuto
+    identico per ogni comma dello stesso atto. Tutto questo si rispedisce al
+    modello a ogni giro successivo della consultazione.
+
+    Sulle ripetizioni di `attoNovellatoDa` restano `norma` e
+    `toccaQuestoArticolo`, che cambia da articolo ad articolo: titolo, anno e
+    articoli toccati stanno sul primo risultato di quell'atto.
+    """
+    visti = {}
+    for r in righe:
+        for k in [k for k, v in r.items() if v is None or v == [] or (k == "troncato" and v is False)]:
+            del r[k]
+        if r.get("urlDocumento"):
+            r["urlDocumento"] = True
+        novellanti = r.get("attoNovellatoDa")
+        if novellanti:
+            if r.get("normaId") in visti:
+                r["attoNovellatoDa"] = [
+                    {"norma": n.get("norma"), "toccaQuestoArticolo": n.get("toccaQuestoArticolo"),
+                     "comeNelRisultato": visti[r["normaId"]]} for n in novellanti]
+            else:
+                visti[r.get("normaId")] = r.get("rango")
     return righe
 
 
@@ -858,15 +914,22 @@ def cerca_testo(query: str, limite: int = 8, dal_anno: int | None = None,
     if not righe:
         return {"risultati": [], "quanti": 0, "ricerca": modo,
                 "nota": "Nessun comma trovato. Prova sinonimi o termini piu' generali."}
-    return {"risultati": righe, "quanti": len(righe), "ricerca": modo}
+    return {"risultati": _compatta(righe), "quanti": len(righe), "ricerca": modo}
 
 
 @tool
-def leggi_articolo(norma_id: str, numero: str) -> dict:
-    """Restituisce il testo integrale di un articolo, comma per comma, senza troncamenti.
+def leggi_articolo(norma_id: str, numero: str, comma: str | None = None,
+                   da_carattere: int = 0) -> dict:
+    """Restituisce il testo di un articolo, comma per comma.
 
     Da usare quando cerca_testo ha individuato un articolo rilevante e serve il
     testo completo per rispondere con precisione.
+
+    Quasi sempre il testo arriva intero. Gli articoli lunghissimi (allegati,
+    tabelle, profili di ruolo) arrivano a porzioni: allora la risposta porta
+    `parziale: true`, i commi tagliati hanno `troncato: true` e `continua` (il
+    carattere da cui riprendere), quelli non mostrati `omesso: true`. Per il
+    seguito richiama lo strumento con `comma` e `da_carattere`.
 
     Porta gli stessi marchi di vigenza di cerca_testo, e vanno letti prima di
     citare: `abrogata` (l'atto e' caduto per intero: non e' piu' vigente, e
@@ -881,6 +944,8 @@ def leggi_articolo(norma_id: str, numero: str) -> dict:
     Args:
         norma_id: id della norma, es. "L-87-2026"
         numero: numero dell'articolo, es. "7" oppure "12 bis"
+        comma: opzionale, legge solo quel comma (es. "3", "1.cap2", "all2")
+        da_carattere: con `comma`, il carattere da cui riprendere la lettura
     """
     righe = grafo().query("""
         MATCH (n:Norma {id: $norma_id})-[:HA_ARTICOLO]->(a:Articolo)
@@ -925,6 +990,11 @@ def leggi_articolo(norma_id: str, numero: str) -> dict:
     riga = dict(righe[0])
     riga["testo"] = " ".join(c.get("testo") or "" for c in riga.get("commi") or [])
     riga["normaId"] = riga.get("normaId")
+    righe[0] = dict(righe[0])
+    porzione = _porziona(righe[0].get("commi") or [], comma, da_carattere)
+    if "errore" in porzione:
+        return porzione
+    righe[0].update(porzione)
     _novelle([riga])
     _bersagli_abrogati([riga])
     _testo_aggiornato_in([riga])
@@ -956,6 +1026,64 @@ def leggi_articolo(norma_id: str, numero: str) -> dict:
                 {**x, "testo": _taglia(x.get("testo"), 1200)} for x in piu]
 
     return righe[0]
+
+
+# Quanto testo restituisce una lettura. L'art. 8 del DD-19-2019 (bilanci degli
+# operatori economici) ha un comma di 1.018.781 caratteri, con l'allegato
+# tecnico stampato in coda, e leggi_articolo lo restituiva intero: circa
+# 300.000 token, oltre quanto il modello puo' ricevere, e la consultazione
+# falliva. Al 17/09 143 articoli superavano i 50.000 caratteri (allegati,
+# tabelle, profili di ruolo). Il resto si legge a porzioni.
+LETTURA_COMMA = 10000
+LETTURA_ARTICOLO = 40000
+ANTEPRIMA_OMESSO = 200
+
+
+def _porziona(commi, comma=None, da_carattere=0):
+    """I commi entro i limiti di lettura, con le indicazioni per il seguito."""
+    if comma is not None:
+        scelti = [c for c in commi if str(c.get("numero")) == str(comma)]
+        if not scelti:
+            return {"errore": f"Il comma {comma} non esiste in questo articolo.",
+                    "commiDisponibili": [c.get("numero") for c in commi]}
+        c = scelti[0]
+        testo = c.get("testo") or ""
+        inizio = max(0, int(da_carattere or 0))
+        pezzo = {**c, "testo": testo[inizio:inizio + LETTURA_COMMA],
+                 "daCarattere": inizio, "lunghezza": len(testo)}
+        if inizio + LETTURA_COMMA < len(testo):
+            pezzo.update(troncato=True, continua=inizio + LETTURA_COMMA)
+        return {"commi": [pezzo], **({"parziale": True} if pezzo.get("troncato") or inizio else {})}
+
+    fuori, usati, parziale = [], 0, False
+    for c in commi:
+        testo = c.get("testo") or ""
+        spazio = min(LETTURA_COMMA, LETTURA_ARTICOLO - usati)
+        if spazio <= 0:
+            fuori.append({**c, "testo": testo[:ANTEPRIMA_OMESSO], "omesso": True,
+                          "lunghezza": len(testo)})
+            parziale = True
+        elif len(testo) > spazio:
+            fuori.append({**c, "testo": testo[:spazio], "troncato": True,
+                          "lunghezza": len(testo), "continua": spazio})
+            usati += spazio
+            parziale = True
+        else:
+            fuori.append(c)
+            usati += len(testo)
+    if not parziale:
+        return {"commi": fuori}
+    return {"commi": fuori, "parziale": True,
+            "comeContinuare": "leggi_articolo(norma_id, numero, comma=<numero del comma>, "
+                              "da_carattere=<continua>) per il seguito di un comma tagliato "
+                              "o per un comma omesso (da_carattere=0)"}
+
+
+assert _porziona([{"numero": "1", "testo": "abc"}]) == {"commi": [{"numero": "1", "testo": "abc"}]}
+assert _porziona([{"numero": "1", "testo": "x" * 25000}])["commi"][0]["continua"] == LETTURA_COMMA
+assert _porziona([{"numero": str(i), "testo": "x" * 9000} for i in range(6)])["commi"][-1]["omesso"]
+assert _porziona([{"numero": "1", "testo": "x" * 25000}], "1", 20000)["commi"][0]["testo"] == "x" * 5000
+assert "errore" in _porziona([{"numero": "1", "testo": "x"}], "2")
 
 
 def url_documento(norma_id: str, articolo: str | None = None) -> str | None:
@@ -1069,7 +1197,7 @@ def trova_norma(numero: int | None = None, anno: int | None = None,
                    articoli,
                    node.abrogata AS abrogata, node.abrogataDa AS abrogataDa
             ORDER BY score DESC LIMIT $limite
-        """, {"testo": _lucene(testo), "limite": min(max(1, int(limite)), 50)})
+        """, {"testo": _prefissi_titolo(testo), "limite": min(max(1, int(limite)), 50)})
     else:
         return {"errore": "Serve almeno 'numero' oppure 'testo'."}
 
@@ -1098,6 +1226,14 @@ def trova_norma(numero: int | None = None, anno: int | None = None,
         return {"risultati": [], "nota":
                 "Nessun titolo corrisponde a queste parole. L'indice cerca nel "
                 "titolo, non nel testo: per il merito usa cerca_testo()."}
+    # Due URL completi per atto, fino a cinquanta atti: al modello non servono,
+    # al sito basta sapere che il documento c'e'.
+    for r in righe:
+        r.pop("urlScheda", None)
+        for k in [k for k, v in r.items() if v is None]:
+            del r[k]
+        if r.get("urlDocumento"):
+            r["urlDocumento"] = True
     return {"risultati": righe}
 
 

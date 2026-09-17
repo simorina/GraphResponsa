@@ -42,7 +42,7 @@ flowchart TB
     end
 
     subgraph Agent["3. AI Reasoning Layer (Anthropic Claude)"]
-        AgentEngine <-->|Prompt di Sistema + Firme Tool| Claude["Claude 4.5 Haiku (claude-haiku-4-5)"]
+        AgentEngine <-->|Prompt di Sistema + Firme Tool| Claude["Claude Sonnet 5 (claude-sonnet-5)"]
         AgentEngine -->|Esecuzione Dispatcher| ToolBridge["Python Tool Bridge (strumenti.py)"]
     end
 
@@ -67,7 +67,7 @@ flowchart TB
 | **Interfaccia Web** | **React 19 + Vite + Tailwind v4** | UI in stile ChatGPT / Claude con accordion per il ragionamento, chip delle fonti e visualizzatore di norme. |
 | **Server Web** | **FastAPI + Uvicorn** | Canale SSE: la UI mostra in diretta quali strumenti vengono invocati. La **risposta** invece non e' incrementale, arriva in un unico evento a fine ciclo (vedi §2.1). |
 | **Orchestrazione Agente** | **LangChain 1.x (`create_agent`)** | Ciclo ReAct, max 8 giri di strumenti. In locale la memoria e' `InMemorySaver`; in produzione il checkpointer DynamoDB, che rende i container senza stato. |
-| **Modello di Ragionamento (LLM)** | **Anthropic `claude-haiku-4-5`** | Bassa latenza, alta fedeltà alle istruzioni del prompt e costo contenuto ($1 / $5 MTok). |
+| **Modello di Ragionamento (LLM)** | **Anthropic `claude-sonnet-5`** | Dal 17/09 al posto di `claude-haiku-4-5`, che non seguiva in modo affidabile le regole su rinvii, vigenza e completezza ($2 / $10 MTok contro $1 / $5). Sovrascrivibile con `MODELLO`. |
 | **Knowledge Graph** | **Neo4j Aura** | Grafo nativo con indici full-text Lucene e vincoli di unicità idempotenti. |
 | **Modello di Embedding** | **Voyage AI (`voyage-4`)** | 1024 dimensioni. Trasforma testo in numeri: e' cio' che permette di trovare una norma con parole diverse dalle sue. Vedi §6. |
 | **Memoria delle Conversazioni** | **DynamoDB** (`langgraph-checkpoint-dynamodb`) | I checkpoint NON stanno su Aura: `03_load.py --reset` cancellerebbe le chat di tutti a ogni ricarico del grafo. |
@@ -83,7 +83,7 @@ sequenceDiagram
     participant UI as React Frontend
     participant Server as FastAPI Server
     participant Agent as Agente (agente.py)
-    participant Claude as Claude Haiku 4.5
+    participant Claude as Claude Sonnet 5
     participant Tools as Strumenti (strumenti.py)
     participant DB as Neo4j Aura & Voyage AI
 
@@ -333,28 +333,45 @@ cerca_testo("matrimonio e famiglia", dal_anno=2010)   anni: 2013 2014 2015
 
 ## 5. Presidi Anti-Allucinazione e Benchmark
 
-Il prompt di sistema (`ISTRUZIONI` in `agente.py`) enuncia cinque regole
-dichiarate non negoziabili:
+Il prompt di sistema (`ISTRUZIONI` in `agente.py`) e' diviso in sei parti,
+ciascuna una lista di regole:
 
-1. **Cerca prima di rispondere qualsiasi cosa.** Nessuna richiesta di
-   chiarimenti senza aver invocato almeno uno strumento — nemmeno quando la
-   domanda e' davvero ambigua.
-2. **Ancoraggio obbligatorio:** ogni affermazione vincolata a norma, articolo e
-   comma.
-3. **Dichiarazione di mancanza:** se la materia non e' disciplinata a San
-   Marino, l'agente lo dichiara, senza colmare il vuoto con il diritto italiano
-   o di altri ordinamenti.
-4. **Distinzione delle norme stub:** dichiara apertamente se una norma citata
-   non ha il testo caricato (`testoDisponibile: false`).
-5. **Principio di vigenza:** su materie ancora attuali verifica le novelle
-   successive ed espone in primo piano la disciplina vigente — con l'eccezione
-   dei fatti storici e degli atti gia' esauriti, dove la verifica costa giri e
-   non aggiunge nulla.
+1. **Prima cerca, poi rispondi.** Nessuna richiesta di chiarimenti senza aver
+   cercato; riformulare prima di arrendersi; dire quando l'archivio non ha la
+   materia, senza colmare il vuoto con il diritto italiano; distinguere le
+   norme solo citate (`testoDisponibile: false`) e le procedure, che in
+   archivio non ci sono.
+2. **Citazioni.** Ogni affermazione con la citazione in prosa e il marcatore
+   `{{cita:normaId:articolo:comma}}` del passo da cui viene il dato; ogni atto
+   nominato aperto e marcato; le parti numerate (`1.cap2`, `1.p3`, `all4`,
+   `1.rip2`, `all-3`) citate per quello che sono.
+3. **Vigenza.** Cosa dice ciascun marchio degli strumenti (`abrogata`,
+   `passoAbrogato`, `citatoDaAttiSuccessivi`, `attoNovellatoDa`,
+   `testoCoordinatoAl`, `testoAggiornatoIn`, `versionePiuRecente`) e cosa
+   farne; "vigente" solo con una prova letta.
+4. **Leggere bene.** Seguire i rinvii, leggere le definizioni della legge
+   madre, non dare nomi che il testo non usa, elenchi "completi" solo dopo una
+   ricerca sistematica.
+5. **Il diritto sammarinese.** Le parole del codice (prigionia, misfatto,
+   delitto), le pene in gradi tradotte con l'art. 81, gli elenchi con i numeri
+   della legge.
+6. **La risposta.** Italiano, il fatto prima della norma, l'incertezza
+   dichiarata; in coda un controllo prima di inviare.
 
-A queste si aggiunge una sezione sul **grado di incertezza**: una risposta
-raggiunta dopo molti tentativi, o che risponde solo di sbieco, va presentata
-come tale. Una risposta incerta esposta con la sicurezza di una certa e' un
-danno, perche' chi legge non ha modo di accorgersene.
+**La riscrittura del 17/09.** Il prompt era arrivato a 21.837 caratteri (7.380
+token): ogni correzione aveva aggiunto un paragrafo col racconto del caso che
+l'aveva causata, e le regole importanti si diluivano. Riscritto a 10.457
+caratteri (3.673 token) tenendo le regole e togliendo i racconti, che restano
+nei commenti del codice e in questo documento. Con gli schemi degli strumenti
+il prefisso di ogni chiamata passa da 11.339 a 7.632 token.
+
+Confronto a parita' di modello (Haiku 4.5) su sei casi - omicidio, edilizia
+sovvenzionata con il seguito sui giovani, ricorso e elenco sul trust, legge
+abrogata, ferie - piu' due ripetizioni dei tre piu' deboli: nessuna regressione
+che non compaia anche col prompt vecchio (lo stesso caso, ripetuto, cambia
+risposta con entrambi), costo della chat sull'edilizia sceso di circa un
+quarto. Due regole restano deboli con Haiku con entrambi i prompt: l'elenco
+presentato come "completo" e la durata dei gradi citata all'art. 81.
 
 ### 5.1 Benchmark su 100 domande
 
