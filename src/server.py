@@ -15,14 +15,18 @@ degrada a vuoto e il server continua a funzionare da solo.
 import json
 import logging
 import mimetypes
+import queue
 import sys
+import threading
 import urllib.error
 import urllib.request
+import zipfile
+from io import BytesIO
 from pathlib import Path
 
 import uvicorn
 from fastapi import Depends, FastAPI, HTTPException
-from fastapi.responses import FileResponse, StreamingResponse
+from fastapi.responses import FileResponse, Response, StreamingResponse
 from pydantic import BaseModel, Field
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -39,6 +43,10 @@ WEB = ROOT / "web"
 FRONTEND_DIST = ROOT / "frontend" / "dist"
 
 registro = logging.getLogger("graphresponsa")
+
+# Secondi di silenzio dopo cui /chat manda un commento SSE: CloudFront chiude
+# le connessioni mute dopo 120.
+BATTITO = 15
 
 app = FastAPI(title="graphResponsa")
 
@@ -121,8 +129,17 @@ def stato():
 
 # ------------------------------------------------------------------ documenti
 
+@app.get("/documenti/{norma_id}/{articolo}")
+def documento_articolo(norma_id: str, articolo: str):
+    """Il PDF dove si legge l'articolo. L'articolo sta nel percorso e non in
+    `?articolo=`: la cache di CloudFront su /documenti/* ignora i parametri, e
+    ogni articolo del Codice Penale avrebbe ricevuto per un giorno la legge di
+    emanazione, messa in cache per l'atto."""
+    return documento(norma_id, articolo)
+
+
 @app.get("/documenti/{norma_id}")
-def documento(norma_id: str):
+def documento(norma_id: str, articolo: str | None = None):
     """
     Proxy verso il PDF originale della norma sul portale del Consiglio Grande
     e Generale, senza autenticazione: sono atti pubblici, e a differenza di
@@ -132,7 +149,7 @@ def documento(norma_id: str):
     la scarica invece di mostrarla. Qui si rilegge il file e lo si re-inoltra
     con `inline`, cosi' si apre nel visualizzatore PDF del browser.
     """
-    url = url_documento(norma_id)
+    url = url_documento(norma_id, articolo)
     if not url:
         raise HTTPException(status_code=404,
                             detail="Documento non disponibile per questa norma.")
@@ -157,6 +174,28 @@ def documento(norma_id: str):
                   "application/zip": ".zip", "application/x-zip-compressed": ".zip"}
     estensione = ESTENSIONI.get(tipo) or mimetypes.guess_extension(tipo) or ".pdf"
     disposizione = "inline" if tipo == "application/pdf" else "attachment"
+
+    # Il testo coordinato di un articolo arriva impacchettato: il Codice
+    # Penale e l'Edilizia sono ZIP con due PDF, "SENZA NOTE" e quello completo.
+    # Le pagine degli articoli (17_documenti_coordinati.py) sono contate sul
+    # completo, che e' il piu' grande: si estrae quello e si apre nel
+    # visualizzatore, dove #page=N funziona. Un ZIP di norma resta un download.
+    if articolo and estensione == ".zip":
+        with risposta:
+            dati = risposta.read()
+        try:
+            archivio_zip = zipfile.ZipFile(BytesIO(dati))
+            pdf = max((i for i in archivio_zip.infolist() if i.filename.lower().endswith(".pdf")),
+                      key=lambda i: i.file_size, default=None)
+        except zipfile.BadZipFile:
+            pdf = None
+        if pdf is not None:
+            return Response(
+                archivio_zip.read(pdf), media_type="application/pdf",
+                headers={"Content-Disposition": f'inline; filename="{norma_id}.pdf"',
+                         "Cache-Control": "public, max-age=86400"})
+        return Response(dati, media_type=tipo, headers={
+            "Content-Disposition": f'attachment; filename="{norma_id}{estensione}"'})
 
     def a_pezzi():
         # Non l'intero file in memoria: un allegato puo' pesare diversi MB, e
@@ -194,12 +233,24 @@ def chat(d: Domanda, utente: Utente = Depends(utente_corrente)):
 
     archivio.annota_conversazione(utente.id, conversazione, d.domanda)
 
-    def eventi():
+    # La consultazione gira in un thread e gli eventi passano da una coda.
+    #
+    # La risposta arriva intera alla fine, e mentre il modello la scrive dal
+    # server non esce nulla: CloudFront chiude una connessione muta dopo 120
+    # secondi, e con Sonnet una risposta lunga ne chiede piu' di uno. Ogni
+    # BATTITO secondi di silenzio parte un commento SSE (": attesa"), che il
+    # sito ignora e che tiene viva la connessione.
+    #
+    # Il thread registra i consumi da se': se chi chiede chiude la pagina a
+    # meta', la consultazione arriva in fondo comunque, e la spesa - che prima
+    # andava persa insieme al generatore - finisce nei tetti.
+    coda: queue.Queue = queue.Queue()
+    FINE = object()
+
+    def consulta():
         try:
             for ev in rispondi(d.domanda, conversazione):
                 if ev.get("tipo") == "fine":
-                    # I consumi erano gia' calcolati per mostrarli nella UI, e
-                    # venivano buttati. Qui restano, e alimentano i tetti.
                     archivio.registra_consumo(
                         utente.id, ev.get("tokenIn", 0), ev.get("tokenOut", 0),
                         float(ev.get("costo", 0)))
@@ -212,10 +263,24 @@ def chat(d: Domanda, utente: Utente = Depends(utente_corrente)):
                         registro.warning(
                             "citazioni non verificate conversazione=%s: %s",
                             conversazione, ", ".join(sospette))
-                yield f"data: {json.dumps(ev, ensure_ascii=False, default=str)}\n\n"
+                coda.put(ev)
         except Exception as e:
-            errore = {"tipo": "errore", "messaggio": f"{type(e).__name__}: {e}"}
-            yield f"data: {json.dumps(errore, ensure_ascii=False)}\n\n"
+            coda.put({"tipo": "errore", "messaggio": f"{type(e).__name__}: {e}"})
+        finally:
+            coda.put(FINE)
+
+    threading.Thread(target=consulta, daemon=True).start()
+
+    def eventi():
+        while True:
+            try:
+                ev = coda.get(timeout=BATTITO)
+            except queue.Empty:
+                yield ": attesa\n\n"
+                continue
+            if ev is FINE:
+                return
+            yield f"data: {json.dumps(ev, ensure_ascii=False, default=str)}\n\n"
 
     return StreamingResponse(
         eventi(),
@@ -268,7 +333,7 @@ def conversazione(conversazione: str, utente: Utente = Depends(utente_corrente))
     if not archivio.appartiene(utente.id, conversazione):
         raise HTTPException(status_code=403, detail="Conversazione non tua.")
 
-    from agente.agente import _ancora_gli_atti, _fonti_da, agente
+    from agente.agente import _fonti_da, agente, rifinisci
     stato = agente().get_state({"configurable": {"thread_id": conversazione}})
     messaggi = []
     # Le fonti si ricostruiscono dai ToolMessage del checkpoint, esattamente
@@ -277,6 +342,9 @@ def conversazione(conversazione: str, utente: Utente = Depends(utente_corrente))
     # le citazioni sparivano dalla risposta, che restava giusta ma non piu'
     # verificabile. Il testo non basta: la citazione e' testo PIU' fonte.
     fonti, viste = [], set()
+    # Le fonti dei turni gia' passati: una risposta di seguito le cita senza
+    # rileggerle, come dal vivo (rifinisci).
+    precedenti = []
     for m in (stato.values or {}).get("messages", []):
         tipo = getattr(m, "type", "")
         if tipo == "tool":
@@ -305,8 +373,9 @@ def conversazione(conversazione: str, utente: Utente = Depends(utente_corrente))
             # Lo stesso ancoraggio del percorso dal vivo: il checkpoint
             # conserva il testo grezzo del modello, non quello gia' ancorato.
             messaggi.append({"role": ruolo,
-                             "content": _ancora_gli_atti(contenuto, fonti),
+                             "content": rifinisci(contenuto, fonti, viste, precedenti),
                              "fonti": fonti})
+            precedenti = precedenti + [f for f in fonti if f not in precedenti]
             fonti, viste = [], set()
         else:
             messaggi.append({"role": ruolo, "content": contenuto})

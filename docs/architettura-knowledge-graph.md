@@ -3,11 +3,12 @@
 Grafo Neo4j della normativa della Repubblica di San Marino, costruito per essere
 interrogato da un agente in modalità Graph RAG.
 
-**Stato aggiornato:** **254.510 nodi**, **321.005 relazioni**, **11.053 norme con testo
-integrale** su 11.136 scaricabili dal portale, distribuite su 16 tipologie di atto:
-leggi, decreti in tutte le loro forme, regolamenti, notifiche, ordinanze, statuti,
-errata corrige e verbali. Tutti i 171.417 commi hanno un embedding, e 424 norme,
-186 articoli e 68 commi portano una marcatura di abrogazione.
+**Stato aggiornato (17/09/2026):** **267.903 nodi**, **339.606 relazioni**, **11.054
+norme con testo integrale** su 11.136 scaricabili dal portale, distribuite su 16
+tipologie di atto: leggi, decreti in tutte le loro forme, regolamenti, notifiche,
+ordinanze, statuti, errata corrige e verbali. Tutti i 164.669 commi e i 17.766
+frammenti dei commi lunghissimi hanno un embedding; 476 norme (38 decadute), 240
+articoli e 68 commi portano una marcatura di abrogazione.
 
 ---
 
@@ -63,6 +64,8 @@ erDiagram
         string testo "Testo integrale atomico"
         floatArray embedding "Vettore Voyage-4 1024d"
         boolean numerazioneAnomala "Flag duplicati ufficiali"
+        string parte "capoverso, punto, allegato: non un comma proprio"
+        string numeroOriginale "Il numero che la parte aveva nel testo"
         boolean commaImplicito "Flag comma non numerato"
         boolean abrogato "Soppresso dentro un atto vivo"
         stringArray abrogatoDa "Gli atti che l'hanno soppresso"
@@ -90,23 +93,26 @@ Nel nostro Knowledge Graph, le rubriche svolgono due funzioni cruciali:
 
 | Entità / Label | Quantità | Ruolo nel Modello |
 |---|---|---|
-| **`:Comma`** | **`171.417`** | Unità atomica di testo, ricerca semantica e retrieval |
-| **`:Articolo`** | **`70.919`** | Articoli con rubriche, capi e collocazione tematica |
-| **`:Norma`** | **`12.173`** | Tutti gli atti normativi censiti: |
-| ↳ *con testo integrale (`caricata: true`)* | *`11.053`* | *Su 11.136 scaricabili dal portale, 16 tipologie* |
-| ↳ *stub citati (`caricata: false`)* | *`1.120`* | *Atti richiamati nei testi per tracciare i rinvii* |
-| **TOTALE NODI** | **`254.510`** | |
+| **`:Comma`** | **`164.669`** | Unità atomica di testo, ricerca semantica e retrieval |
+| **`:Articolo`** | **`74.120`** | Articoli con rubriche, capi e collocazione tematica |
+| **`:Norma`** | **`11.347`** | Tutti gli atti normativi censiti: |
+| ↳ *con testo integrale (`caricata: true`)* | *`11.054`* | *Su 11.136 scaricabili dal portale, 16 tipologie* |
+| ↳ *stub citati (`caricata: false`)* | *`293`* | *Atti richiamati nei testi per tracciare i rinvii* |
+| **`:Frammento`** | **`17.766`** | Pezzi dei commi oltre 6.000 caratteri, con vettore proprio (vedi 4.6) |
+| **`:StatoVigenza`** | **`1`** | Stato del calcolo delle abrogazioni |
+| **TOTALE NODI** | **`267.903`** | |
 
 ### Relazioni (Archi)
 
 | Relazione | Quantità | Direzione | Significato |
 |---|---|---|---|
-| **`HA_COMMA`** | **`171.417`** | `Articolo ➔ Comma` | Contenimento strutturale |
-| **`HA_ARTICOLO`** | **`70.919`** | `Norma ➔ Articolo` | Contenimento strutturale |
-| **`CITA`** | **`56.515`** | `(Comma/Norma) ➔ Norma` | Rinvio normativo formale |
-| **`CITA_ARTICOLO`** | **`21.632`** | `Comma ➔ Articolo` | Rinvio puntuale ad articolo specifico risolto |
-| **`ABROGA`** | **`522`** | `Norma ➔ Norma` | Abrogazione di un atto per intero, riconosciuta senza ambiguità |
-| **TOTALE ARCHI** | **`321.005`** | | |
+| **`HA_COMMA`** | **`164.669`** | `Articolo ➔ Comma` | Contenimento strutturale |
+| **`HA_ARTICOLO`** | **`74.120`** | `Norma ➔ Articolo` | Contenimento strutturale |
+| **`CITA`** | **`58.574`** | `(Comma/Norma) ➔ Norma` | Rinvio normativo formale |
+| **`CITA_ARTICOLO`** | **`23.935`** | `Comma ➔ Articolo` | Rinvio puntuale ad articolo specifico risolto |
+| **`ABROGA`** | **`542`** | `Norma ➔ Norma` | Abrogazione di un atto per intero, riconosciuta senza ambiguità |
+| **`HA_FRAMMENTO`** | **`17.766`** | `Comma ➔ Frammento` | Il comma lunghissimo e i suoi pezzi |
+| **TOTALE ARCHI** | **`339.606`** | | |
 
 `CITA_ARTICOLO` era fermo a 16.763 finche' `RE_BERSAGLIO`, nel parser,
 pretendeva che il numero d'articolo fosse **adiacente** al nome dell'atto. Nel
@@ -123,10 +129,90 @@ Il guadagno vale per i caricamenti futuri; sul grafo esistente lo applica
 parser** invece di ricopiarle — se divergessero, il grafo smetterebbe di
 corrispondere a cio' che un caricamento pulito produrrebbe.
 
+**Il primo del mese.** «Legge 1° marzo 2010 n.42»: col giorno scritto da
+ordinale `RE_CITAZIONE` non riconosceva la data, e la citazione andava persa
+per intero. Erano 144 archi `CITA` e 60 `CITA_ARTICOLO`, e l'atto più colpito
+era proprio la legge sul trust: la L. 123/2019, che fa dell'«Autorità
+Giudiziaria» la Corte per il Trust, non risultava modificare l'art. 1 della
+L. 42/2010, e il DD 50/2010 non risultava citarla affatto. Il parser ora
+accetta `°`/`º`; `09_riallinea_citazioni.py` rilegge i testi che contengono
+l'ordinale e aggiunge gli archi che mancano, senza toccare gli esistenti (i
+quattro nodi in più sono stub citati).
+
+**Le altre forme di citazione (17/09).** Il parser perdeva anche:
+
+- la virgola dopo l'anno ("27 febbraio 1947, n. 2", 1.444 citazioni);
+- le abbreviazioni ("D.D. n.128/2013", 572);
+- il plurale ("Leggi 28 giugno 1974 n. 46", 221);
+- "del" davanti alla data (118);
+- "Decreto Consigliare".
+
+Di "Decreto – Legge" col trattino leggeva solo "Legge n. X": 1.858 archi
+puntavano alla legge con quel numero. L'intestazione in apertura del
+preambolo ("REPUBBLICA DI SAN MARINO DECRETO 20 settembre 2004 n. 119")
+diventava la citazione di un atto inesistente quando il tipo scritto non era
+quello dell'archivio: 716 archi. `09_riallinea_citazioni.py` rilegge tutti i
+testi con `estrai_citazioni()`: +4.461 `CITA`, +1.655 `CITA_ARTICOLO`, e gli
+archi sbagliati sono stati tolti.
+
+**Il tipo sbagliato nella citazione.** Il testo chiama un atto con un tipo,
+l'archivio lo cataloga con un altro: "Decreto Reggenziale 1° settembre 2003
+n.113" è in archivio come D-113-2003. L'id costruito dal tipo scritto non
+esisteva, e 769 citazioni finivano su atti fantasma con la stessa data di un
+atto caricato. `comune.risolutore_per_data` le porta sull'atto giusto quando la
+citazione ha una data e un solo atto caricato con quel numero e anno ha
+quella data. Tipi diversi possono avere lo stesso numero nello stesso anno
+(DD-12-2017 e R-12-2017): senza data non si decide.
+
+Un atto che nomina se stesso con un altro tipo ("Decreto Delegato 26
+febbraio 2021 n.33" dentro il DC-33-2021) si ritroverebbe, risolto, come
+citazione di se stesso: quelle si scartano. Lo usano 03, 09 e 15.
+`20_pulizia_grafo.py` l'ha applicato al grafo esistente
+(l'arco spostato ricorda l'id di prima in `risoltoDa`) e ha tolto 333 atti
+fantasma rimasti isolati.
+
+**Titoli e date del portale.**
+
+- 269 titoli erano letti con la codifica sbagliata ("NÂ° 27"):
+  `comune.ripara_mojibake` li ripara coppia per coppia.
+- 23 date erano segnaposto ("1200-01-01", tolte) o avevano l'anno troncato
+  ("0006-01-11", completata con l'anno dell'atto), con `comune.data_pulita`.
+
+03 applica entrambe al caricamento; `20_pulizia_grafo.py` le ha applicate al
+grafo.
+
+**Intestazioni che il parser non vedeva, e testo che perdeva.** Due difetti del
+parser, trovati confrontando il testo del grafo con quello dei PDF (101 atti
+sospetti):
+
+- **Intestazioni con la rubrica sulla stessa riga.** `RE_ARTICOLO` voleva la
+  riga col solo numero. "Art. 1 (Prima seduta della legislatura)", "Art.1 -
+  Quorum...", "- Art. 3 -" finivano nel testo: la L-21-1981 (53 articoli) era
+  un articolo unico. `RE_ARTICOLO_ESTESO` le riconosce, ma solo se il numero
+  continua la sequenza, perché una riga che comincia con "Art. 3 Legge..."
+  può essere il seguito di una frase. Una serie fitta di intestazioni che poi
+  ricomincia da 1 è un indice e resta testo, anche quando il testo usa
+  intestazioni semplici ("Art. 1"): la prima versione guardava solo quelle
+  estese, e l'indice della L-2-2015 era diventato 46 articoli vuoti. Le voci
+  coi puntini e il numero di pagina sono indice comunque; "(1)" è il rimando a
+  una nota, non una rubrica.
+- **Testo scartato dopo un TITOLO o un CAPO.** Il parser chiudeva l'articolo
+  corrente, e se l'intestazione successiva non veniva riconosciuta tutto il
+  testo fino a lì andava perso: lo Statuto allegato al D-100-1995 (30.000
+  caratteri) non era nel grafo. Ora il testo oltre i 200 caratteri si
+  attacca all'articolo precedente.
+
+Riletto tutto l'archivio, cambiano 201 atti e rientrano 2,18 milioni di
+caratteri (più altri 86.000 dopo la correzione sugli indici). Nessuna parola del grafo va persa: le intestazioni riconosciute e
+gli indici passano in rubriche e preambolo. `15_ricostruisci_articoli.py
+--atti` ne ha ricaricati 169; 4 hanno testo coordinato e restano com'erano.
+Le L-200-2011, L-106-1993 e L-100-1982 (bilanci) e i decreti del 1995 con lo
+statuto allegato sono i guadagni maggiori.
+
 I `:Comma` erano 180.932 fino alla riparazione del parser: i **316 in più** sono
 il testo che si perdeva su 312 articoli, dove il buffer della rubrica non si
 chiudeva su `)` seguito da punteggiatura. Il conteggio dei nodi per etichetta
-somma a 266.683 e non a 254.510 perché ogni `:Norma` ne porta due — quella
+somma a 279.186 e non a 267.903 perché quasi ogni `:Norma` ne porta due — quella
 generica e quella del tipo (`:Legge`, `:DecretoDelegato`, e così via).
 
 **I nodi `:Allegato` non ci sono più.** Erano 519 su 27 norme e portavano solo
@@ -236,8 +322,9 @@ Rispetto al Codice Penale la lettura del PDF ha quattro regole in più:
   - un **Titolo abrogato per intero** (`TITOLO II [ABROGATO]`) non riporta i
     suoi articoli: si ritrovano nel grafo da `Articolo.titolo`, e la fonte si
     cerca nella nota col nome del Titolo, non col numero dell'articolo;
-  - i **rinvii fra note** (*«vedere nota n. 4»*) si risolvono per atto e
-    articolo, perché il numero indicato può essere sbagliato: qui era la 5.
+  - i **rinvii fra note** (*«vedere nota n. 4»*) si risolvono prima sulla nota
+    indicata, se nomina lo stesso atto per lo stesso articolo, poi per atto e
+    articolo, perché il numero può essere sbagliato: qui era la 5.
 
 Sui commi riscritti le citazioni ricavate dal testo vecchio si staccano e si
 ricalcolano sul nuovo; gli archi che portano un'`origine` restano.
@@ -245,6 +332,277 @@ ricalcolano sul nuovo; gli archi che portano un'`origine` restano.
 Dei 65 atti linkati dalla raccolta, 63 avevano già il testo nel grafo. La
 `L-85/1981` è entrata dopo (sezione seguente); la `L-17/1917` resta fuori: è
 una scansione senza testo, e senza OCR non si legge.
+
+### La raccolta sul Lavoro, ferma al 2018
+
+La seconda raccolta è quella **sul Lavoro** (`data/coordinati/lavoro.pdf`, 302
+pagine, **aggiornata al 24 dicembre 2018**): 26 atti coordinati nel corpo, dalla
+`L-7/1961` alla `L-173/2018`, e sotto *«ALTRE NORME IN MATERIA DI LAVORO»*
+estratti di altri cinque. Dei **144 atti linkati**, 142 avevano già il testo nel
+grafo. La `L-41/1972` c'era ma era rifiutata da `03` ed è entrata con `13`
+(sezione seguente). La Legge Ipotecaria del 16 marzo 1854 è una scansione,
+come la `L-17/1917`.
+
+Cosa ha cambiato: **207 articoli e 564 commi** riscritti, **90 archi di
+novella**, e **43 articoli abrogati** su sette atti, 41 dei quali col proprio
+atto abrogante. Ci sono anche otto articoli che il grafo non aveva:
+- `L-137/2003`: artt. 5-bis, 6-bis, 6-ter e 6-quater;
+- `DD-14/2018`: art. 15-bis;
+- `DL-156/2011`: art. 8-bis;
+- `DL-148/2015`: art. 6-bis;
+- `L-115/2017`: art. 25-bis.
+
+L'art. 25-bis del `DL-156/2011` risultava nuovo per numero, ma il suo id
+esisteva già e la scrittura lo ha aggiornato senza crearne un secondo.
+
+**Il testo e' vecchio di otto anni, e lo si dice.** Nessuno di quegli articoli
+aveva gia' un testo coordinato: nel grafo c'era quello promulgato, piu' vecchio
+ancora, quindi la riscrittura resta un passo avanti. Ma un testo del 2018
+presentato come vigente sarebbe una risposta sbagliata detta con sicurezza:
+`leggi_articolo` restituisce ora `testoCoordinatoAl`, e il prompt chiede
+all'agente di aprire gli atti posteriori a quella data quando l'articolo ne
+porta, e di dichiarare la data quando non ne trova.
+
+Il PDF ha rotto sette regole scritte per l'Edilizia:
+
+  - **le note sono a 10pt**, non a 9: la soglia fissa le leggeva come testo.
+    Ora è mezzo punto sotto il corpo più frequente del documento, misurato
+    senza i numeri di nota (il numero della nota 95 è a 12pt);
+  - intestazioni **senza trattino** (*«DECRETO LEGGE 5 ottobre 2011 n.156»*) o
+    **col punto finale**, e articoli come `Art. 8/bis` e `Articolo Unico`
+    (numerato `Unico`, come nel resto del grafo): senza, due atti finivano
+    dentro quello che li precede;
+  - un **Allegato** in maiuscolo o centrato chiude l'articolo. L'organico
+    dell'Ufficio del Lavoro in coda alla `L-131/2005` sono undici pagine di
+    *«POSTI N. 1»* che finivano nell'art. 24;
+  - un articolo **`[ABROGATO]` finisce lì**. Dopo l'art. 5 della `L-71/2014` la
+    nota col testo originario prosegue per due pagine al corpo del testo;
+  - un **Titolo in mezzo a un elenco** (*«articoli 8, 9, 10, 11 del Titolo
+    III, 26 e 27»*) lo spezzava, e gli artt. 26 e 27 della `L-7/1961` restavano
+    senza fonte. Stessa sorte per la nota *«Articoli abrogati dalla Legge…»*,
+    che non ha l'intestazione *«Modifiche legislative»*;
+  - **Decreto-Legge e Decreto Delegato sono affini**: la numerazione dei decreti
+    è unica, e il portale registra da `DD-118-2014` una ratifica che la
+    raccolta chiama Decreto-Legge;
+  - un atto si **rinumera** solo se il coordinato ne riporta tutti gli
+    articoli. La `L-7/1961` non riporta il Titolo I abrogato, e gli artt. 6-60
+    rinumerati da 1 avrebbero preso l'ordine degli artt. 1-5.
+
+Anche un estratto **nel corpo** (due articoli dei quindici del `DD-14/2018`)
+non autorizza più a riscrivere l'atto intero: serve che il coordinato copra
+almeno il 90% degli articoli del grafo. Dopo le modifiche la raccolta
+sull'Edilizia produce lo stesso esito di prima. Nel suo dump cambiano solo due
+tabelle di Allegati, che erano già rimaste fuori dal grafo.
+
+Resta non risolta una nota che chiama *«Legge»* il `DL-156/2011`.
+
+### L'articolo inserito e l'articolo che lo inserisce
+
+Alla domanda *«per i giovani come funziona»* l'agente ha risposto dall'art.
+3-bis della `L-44/2015`, e alla successiva *«la L-64/2025 non dice niente?»* ha
+dovuto ricostruire a mano che l'art. 5 della `L-64/2025` è lo stesso testo
+(coincidono al 97,9%: cambia solo *«è aggiunto il seguente articolo 3-bis»*).
+Prima aveva cercato un art. 3-bis dentro la L-64. Ogni *«L. 64/2025»* della
+risposta, poi, era seguito da *«[art. 1]»*.
+
+Quell'etichetta non l'aveva scritta il modello. `_ancora_gli_atti` rende
+cliccabile ogni atto nominato in prosa, e sceglie come bersaglio la fonte
+dell'atto intero. Se non ce n'era una ripiegava sulla prima fonte di
+quell'atto:
+- con `struttura_norma` era l'art. 1, da cui *«[art. 1]»*;
+- con `leggi_articolo` era il comma 1 dell'articolo letto, da cui *«[3-bis.1]»*
+  anche per requisiti del comma 18.
+
+Ora `rispondi()` aggiunge una fonte d'atto intero per ogni atto consultato, e
+l'atto nominato si etichetta *«[atto]»*.
+
+La nota del coordinato dice *«Testo originario (Legge n.64/2025)»* senza
+l'articolo, e `12` agganciava le novelle solo con l'articolo. Ora lo cerca
+nell'atto d'origine: rubrica e primo comma devono nominare l'articolo inserito,
+la legge che lo riceve e il verbo dell'inserimento, e il candidato dev'essere
+uno solo. Sulle due raccolte il caso è unico: le altre 100 note senza articolo
+nominano l'atto stesso.
+
+Lato agente:
+- sull'articolo inserito, l'arco fa comparire la L-64/2025 in
+  `citatoDaAttiSuccessivi`;
+- sull'articolo che lo inserisce, `testoAggiornatoIn` indica dove sta oggi il
+  testo;
+- il prompt vieta di usare l'art. 1 come marcatore di un'intera legge.
+
+I commi dell'art. 5 numerati `1`, `1`, `2`… (la frase introduttiva, poi il
+comma 1 del 3-bis citato) erano uno dei 4.188 articoli con numeri di comma
+ripetuti: se ne occupa la sezione seguente.
+
+### Commi, capoversi, punti, allegati: la numerazione dentro l'articolo
+
+Un articolo su diciassette aveva due commi con lo stesso numero. Il numero
+doppio era il sintomo di cinque difetti diversi, misurati sul grafo prima di
+toccarlo. `src/commi.py` li corregge dopo la lettura del parser:
+
+| Difetto | Nel grafo, dopo | Cosa diventa |
+|---|---|---|
+| Rubrica senza parentesi né punto (*«Denuncia»*, *«Entrata in vigore»*) letta come comma implicito `1`, seguito dal vero comma 1 | 1.252 rubriche recuperate | torna `Articolo.rubrica`, il comma si cancella |
+| Numero di pagina o frammento numerico rimasto solo su una riga | 712 commi tolti | si cancella |
+| Testo citato da una novella (*«è così sostituito: “1. … 2. …”»*), i cui commi ripartono da 1 | 7.194 capoversi | **capoversi** del comma che li introduce: `1.cap2` |
+| Elenco numerato dentro un comma (*«in modo da essere: 1. … 2. …»*) | 1.496 punti | **punti**: `1.p2` |
+| Allegato stampato dopo la formula di promulgazione, con la sua numerazione (quasi sempre il trattato ratificato) | 14.497 parti, in 380 articoli | **parti d'allegato**: `all3` |
+
+Gli articoli con commi a numero doppio sono passati da **4.188 a zero**, gli
+articoli con rubrica da 33.534 a 35.271. I numeri della tabella sono quelli del
+primo giro; il secondo e il terzo hanno aggiunto capoversi, punti e allegati, e
+il conto finale è 7.597 capoversi, 1.758 punti, 14.888 parti d'allegato e
+1.858 ripetizioni.
+
+Quando nessuna forma si riconosce - il refuso della legge stessa, sette commi
+e poi di nuovo un comma 1 - il secondo diventa `1.rip2` (`parte:
+ripetizione`): non si inventa un numero che il testo non ha, ma il comma ha un
+nome suo.
+
+Le forme nuove portano `Comma.parte` (`capoverso`, `punto`, `allegato`, `ripetizione`) e
+`Comma.numeroOriginale`, il numero che avevano nel testo. Il testo non cambia:
+cambiano numero e id.
+
+**Come si riconosce il testo citato.** Il blocco comincia dopo un comma che
+annuncia la novella (*«così sostituito»*, *«come segue»*, *«è aggiunto il
+seguente»*) e lascia aperte le virgolette. Finisce sul comma che le richiude
+tutte: le virgolette si contano lungo i commi, così *«…”; “Art. 54»* non
+interrompe il blocco. Il blocco comincia anche quando l'annuncio è finito nella
+rubrica e il primo comma apre direttamente le virgolette (*«“Art. 120 bis
+(Norme di coordinamento)»*). Senza virgolette di chiusura vale la numerazione:
+il blocco è la sequenza 1, 2, 3… che segue, ma solo se arriva in fondo
+all'articolo o se subito dopo riprendono i commi veri. In ogni caso la
+numerazione del blocco deve ripartire: un numero doppio è meglio di un comma
+vero scambiato per testo citato. Un elenco segue un comma chiuso dai due punti,
+parte da 1 e va di uno in uno.
+
+**Frammenti di tabella.** *«sanzione da L.10»* / *«00 0 a L.50»*: l'estrazione
+ha spezzato un importo, e la riga *«00 0»* è diventata un comma `0`, che
+nessuna legge numera. Il frammento torna in coda al comma da cui viene. È
+l'unico caso in cui il testo di un comma cambia, e il suo vettore e le sue
+citazioni si ricalcolano.
+
+La funzione è **idempotente**: riapplicata a commi già riordinati riparte dai
+numeri del testo (`numeroOriginale`), e le regole aggiunte in un secondo
+momento si sono applicate così, sopra la prima migrazione.
+
+**Perché i capoversi.** È la forma con cui il diritto cita il testo inserito da
+una novella: *art. 5, comma 1, capoverso 2*. Tenerli come nodi separati
+conserva la ricerca precisa, e il numero univoco ha un effetto oltre
+l'etichetta: `08` segna un comma abrogato cercandone il numero, e *«il comma 2
+dell'art. 5 è abrogato»* poteva colpire il comma 2 dell'articolo citato.
+
+**Testo perso.** Nove articoli di tre atti (otto del `D-122/1985` e del
+`D-123/1982`, uno di un'errata corrige) venivano dalla struttura dedotta del
+parser, che dava lo stesso id a commi diversi: il caricamento li aveva fusi, e
+il testo di 70 commi era sparito dal grafo. Sono stati ricostruiti dal JSON.
+
+`02_parse.py` applica il riordino ai caricamenti nuovi. `src/14_rinumera_commi.py`
+l'ha applicato al grafo partendo da `data/parsed`, con alcune regole:
+- nel grafo i nodi restano quelli: si rinominano, e vettori, citazioni e
+  marcature restano con loro;
+- tocca un articolo solo se nel grafo ha ancora gli stessi commi del JSON;
+- lascia fuori i testi coordinati, la cui numerazione viene dal coordinato;
+- prima di scrivere salva un backup: nodi cancellati con vettori e archi,
+  rinomine, rubriche e JSON originali.
+
+Rilanciato su dieci atti, il parser produce gli stessi id della migrazione.
+
+I refusi, le novelle senza virgolette riconoscibili e i trattati senza formula
+sono stati coperti in un secondo e un terzo giro: altre virgolette (`―` `‖`
+dei PDF mal codificati, `''`), elenchi aperti da una voce o seguiti dal numero
+di pagina, *«Allegato …»* in coda al comma o *«Article 1»* inglese come inizio
+dell'allegato, e infine `.ripN`.
+
+### Articoli fusi: due articoli, un nodo
+
+Il numero doppio c'era anche un livello sopra, e faceva più danni. **Nel
+JSON di 381 atti caricati due articoli avevano lo stesso id**, e 03 fa MERGE
+sull'id: finivano nello stesso nodo, con la rubrica e il testo del secondo
+sopra quelli del primo e i commi dei due mescolati. Dove anche gli id dei commi
+coincidevano, il testo del primo era perso. `src/articoli.py` lo corregge dopo
+la lettura del parser:
+
+  - **allegato dopo la firma** con numerazione propria (il regolamento della
+    `L-84/1981`, i trattati dopo il decreto di ratifica): gli articoli dopo la
+    formula prendono il prefisso `all-`, oppure `all2-`, `all3-` quando gli
+    allegati che ripartono sono più d'uno, come nelle reiterazioni che tengono
+    più decreti nello stesso PDF. È l'idea di `13_atto_composto.py`, senza il
+    nome della sezione;
+  - **intestazione incollata in coda a un comma** (*«Comma soppresso. Art.
+    2-bis (Procedura attivazione posti)»*, e poi 1, 2, 3): diventa un articolo.
+    Serve che stia dopo la fine di una frase, abbia la rubrica fra parentesi,
+    sia fuori da una citazione e che il comma dopo riparta da 1: *«…all'art.
+    12»* in coda a una frase è un rinvio;
+  - **refuso**, due *«Art. 9»*: il secondo è `9-rip2`.
+
+Il numero del testo resta in `Articolo.numeroOriginale`, e 03 conta le
+ripetizioni su quello: un atto rifiutato per numerazione patologica resta
+rifiutato anche se i prefissi lo rendono univoco.
+
+`src/15_ricostruisci_articoli.py` ha ricaricato questi atti **dal PDF**, con il
+parser attuale, e non dal JSON: 137 di quei JSON venivano da versioni
+precedenti del parser, che li leggevano peggio. Il `D-11-2000`, per esempio,
+aveva come art. 1 una riga della tabella di sanzioni. Per ogni atto 15:
+- cancella articoli e commi, lasciando il nodo della norma e le citazioni del
+  preambolo;
+- li ricrea con le query di 03;
+- rimette i vettori dove il testo è identico;
+- ricalcola le citazioni e ricollega gli archi di novella dei testi coordinati;
+- riscrive il JSON.
+
+Restano fuori sei atti con testo coordinato e i dieci Statuti antichi: la
+regola è saltare ogni atto che la lettura nuova impoverisce oltre il 10%. Il
+backup tiene gli articoli di prima con tutti gli archi, e il vettore dei soli
+commi il cui testo non torna.
+
+**Gli Statuti erano caricati due volte.** Non vengono dal parser, e dieci di
+loro portano ogni rubrica due volte, con due forme di id (`S-1-1600_artI` e
+`S-1-1600_I`) e lo stesso numero di commi. Da qui il testo *«dimezzato»* della
+lettura nuova, che era il testo giusto. Le due copie non sono identiche: una
+estrazione salta righe. Sul PDF, con le coppie di parole consecutive, la copia
+`_art` ne ritrova il 98-100% e l'altra il 97-98%. `src/16_statuti_doppi.py`
+toglie la seconda: 383 articoli e 7.882 commi, nessuno con archi.
+
+**L'articolo d'allegato ha il suo titolo.** Il parser gli dava il contesto
+dell'ultimo Titolo della legge, e l'art. 1 del regolamento della `L-84/1981`
+risultava *«Titolo II»*. Leggendo quegli articoli l'agente ha contato *«undici
+allegati»* dove c'era un regolamento di undici articoli. Ora `Articolo.titolo`
+è *«Allegato»*, oppure *«Allegato 2»* quando gli allegati sono più d'uno.
+
+**Le citazioni sanno dell'allegato.** *«Il comma 3 dell'articolo 58
+dell'Allegato A alla Legge n.188/2011 è abrogato»* va all'articolo `all-58`,
+non all'art. 58 della legge. Finché i due articoli erano fusi il comma si
+trovava per caso, e separandoli tre marcature d'abrogazione erano rimaste senza
+bersaglio. `RE_BERSAGLIO` accetta ora *«dell'Allegato A»* fra l'articolo e
+l'atto, e il numero diventa `all-N`: nel parser, in `09` e in `08`. Vale per
+gli atti con un solo allegato numerato; con più allegati il bersaglio resta
+scartato.
+
+### Il PDF di un articolo coordinato
+
+Il riferimento a un articolo apriva il PDF della norma. Per il Codice Penale il
+documento della `L-17-1974` è la legge di emanazione: due pagine e un rimando
+agli allegati. I 480 articoli del Codice nel grafo vengono invece dal testo
+coordinato, che sul portale è un altro documento. Chi cliccava sull'art. 150
+non lo trovava.
+
+`src/17_documenti_coordinati.py` legge i testi coordinati elencati in
+`data/coordinati/documenti.json`. Per ogni articolo trova la pagina dove
+comincia (l'intestazione in grassetto al corpo del testo, sotto l'ultima
+intestazione d'atto) e scrive sull'articolo `urlDocumento` e
+`paginaDocumento`: 480 articoli del Codice (478 con la pagina), 94
+dell'Edilizia (93) e 207 del Lavoro (tutti).
+
+La catena fino al browser:
+- gli strumenti restituiscono l'URL dell'articolo quando c'è, e la pagina;
+- il server lo usa in `/documenti/{norma}?articolo=N`;
+- il sito apre il PDF a `#page=N`.
+
+Il Codice e l'Edilizia il portale li serve come ZIP con due PDF, *«SENZA NOTE»*
+e completo. Per un articolo il server estrae il più grande, su cui sono contate
+le pagine, e lo apre nel visualizzatore. Lo ZIP di una norma resta un
+download. `17` va rieseguito dopo `10` e `12`.
 
 ### Un atto con più numerazioni: la legge di registro
 
@@ -271,6 +629,18 @@ L'art. 7 non manca per errore: il PDF passa dall'art. 6 all'art. 8.
 `data/parsed/L-85-1981.json` è ora prodotto da `13` (lo dice `fonteParsing`):
 rilanciare `02_parse.py` in forzatura su quella norma la riporterebbe allo stato
 rifiutato, e andrebbe rieseguito `13`.
+
+La stessa strada ha preso la **`L-41/1972`**, legge organica per i dipendenti
+dello Stato e **citata da 160 commi**: artt. 1-108, poi gli Allegati B
+(fascicolo personale), C (concorsi), E (orario di servizio) e H (diritti
+sindacali), ciascuno da "Art. 1" (`allB-1`, `allH-9`). Restano fuori l'Allegato
+A, che il PDF stesso dichiara *«non inserito»*, e l'F, tabella a colonne. Due
+dettagli:
+- una seconda formula di promulgazione chiude l'Allegato H, e `13` taglia ogni
+  sezione su di essa;
+- `Art. 94 (*)` non era un'intestazione per il parser, e l'art. 94 spariva
+  nel 93. L'asterisco rimanda a un'errata sul secondo comma, stampata dopo le
+  firme, che non è integrata nel testo.
 
 ### Lo stesso atto sotto due schede
 
@@ -475,7 +845,8 @@ flowchart TD
 
     subgraph P["2. Parsing Strutturale Deterministico"]
         C --> E["02_parse.py (PyMuPDF / regex)"]
-        E --> F["data/parsed/&lt;id&gt;.json"]
+        E --> E2["commi.py: rubriche, capoversi, punti, allegati"]
+        E2 --> F["data/parsed/&lt;id&gt;.json"]
         F --> G["Articoli, Commi, Rubriche, Citazioni puntuali"]
     end
 
@@ -619,6 +990,70 @@ caricamento: è idempotente e calcola solo i commi che non ce l'hanno.
 
 ---
 
+### 4.6 I commi lunghissimi e i loro frammenti
+
+**Un vettore solo non basta per un allegato.** Il comma mediano è di 297
+caratteri, ma 887 superano i 6.000 e alcuni contengono un allegato intero: i
+profili di ruolo del DD 165/2014 (338.513 caratteri), lo schema XBRL dei
+bilanci nel DD 19/2019 (1.018.781), le tabelle delle leggi di bilancio.
+Misurato il 17/09:
+
+- `voyage-4` legge al massimo 32.000 token e la libreria taglia in silenzio.
+  43 commi li superano, e 2,3 milioni di token non erano rappresentati. Il
+  vettore dell'art. 8 del DD 19/2019 ha somiglianza 0,975 con quello dei suoi
+  primi 100.000 caratteri;
+- anche sotto il limite, il vettore di un testo così lungo è una media, e
+  l'indice full-text penalizza la lunghezza. "OPSPAMMI", che compare nei
+  profili di ruolo del DD 165/2014, non trovava quel decreto.
+
+`19_frammenti.py` spezza ogni comma oltre 6.000 caratteri in frammenti di al
+più 1.700 caratteri (fino a 2.000 con la coda), tagliati a fine frase o a fine
+riga, con 200 caratteri di sovrapposizione: **16.707 frammenti** per 887 commi,
+circa 8,6 M token.
+
+```
+(:Comma)-[:HA_FRAMMENTO]->(:Frammento {id, ordine, da, a, testo, improntaComma, embedding})
+```
+
+- `id` è l'id del comma seguito da `#fN`.
+- `da` e `a` sono posizioni nel testo del comma, le stesse che usa
+  `leggi_articolo(comma=..., da_carattere=...)`.
+- `testo` è il passo puro. Il vettore invece si calcola sul passo preceduto da
+  titolo della norma, articolo e rubrica: una riga di tabella da sola non dice
+  di che cosa parla.
+- `improntaComma` è l'impronta del testo del comma. Se il comma cambia, lo
+  script rifà i frammenti; se il comma sparisce o si accorcia, li toglie. Va
+  rieseguito dopo 07 e dopo ogni script che tocca i commi.
+
+`cerca_testo` interroga i frammenti accanto ai commi, nei due rami. Le due
+liste si uniscono **per punteggio** e non a ranghi reciproci: la lista dei
+frammenti ha sempre un primo classificato, e fonderla alla pari avrebbe messo
+un pezzo di tabella in cima a ogni ricerca. Di ogni comma resta una voce sola;
+se è stato trovato per un suo passo, la voce mostra quel passo e porta
+`daCarattere` e `lunghezzaComma`, e con `altriPassi` fino a tre altri punti
+dello stesso comma che corrispondono alla domanda. 07_embeddings.py avvisa
+quando ci sono commi oltre i 90.000 caratteri.
+
+**Quanto funziona.** 60 frammenti a caso, ciascuno con una domanda in
+linguaggio naturale scritta da un modello a partire dal passo, e una di otto
+parole prese dal passo:
+
+| | Senza frammenti | Con frammenti |
+|---|---|---|
+| Domanda naturale: il passo giusto fra i primi 8 | 10/60 | 46/60, 53/60 contando `altriPassi` |
+| Domanda naturale: il comma giusto fra i primi 8 | 23/60 | 55/60 |
+| Parole chiave: il passo giusto fra i primi 8 | 7/60 | 31/60, 38/60 contando `altriPassi` |
+
+Le domande mancate riguardano soprattutto convenzioni scritte in inglese, che
+l'indice full-text analizza come italiano, e intestazioni di tabella fatte di
+parole presenti ovunque ("Totale", "Variazioni").
+
+**Quanto pesano.** Circa 137 MB di vettori e 26 MB di testo: un decimo dei
+vettori dei commi. Le interrogazioni di una ricerca girano in parallelo, e una
+ricerca richiede 353 ms mediani, contro i 776 di prima dei frammenti.
+
+---
+
 ## 5. Indici e Vincoli di Integrità
 
 ```cypher
@@ -626,6 +1061,7 @@ caricamento: è idempotente e calcola solo i commi che non ce l'hanno.
 CREATE CONSTRAINT norma_id    FOR (n:Norma)    REQUIRE n.id IS UNIQUE;
 CREATE CONSTRAINT articolo_id FOR (a:Articolo) REQUIRE a.id IS UNIQUE;
 CREATE CONSTRAINT comma_id    FOR (c:Comma)    REQUIRE c.id IS UNIQUE;
+CREATE CONSTRAINT frammento_id FOR (f:Frammento) REQUIRE f.id IS UNIQUE;
 
 -- Indici Full-Text per ricerca lessicale italiana
 CREATE FULLTEXT INDEX testo_normativo FOR (n:Comma|Articolo) ON EACH [n.testo, n.rubrica]
@@ -636,16 +1072,19 @@ CREATE FULLTEXT INDEX titoli_norme FOR (n:Norma) ON EACH [n.titolo];
 -- rubriche degli articoli. Sono due perche' rispondono a domande diverse -
 -- vedi 5.1 - e la ricerca li interroga entrambi con UN SOLO embedding della
 -- domanda, per non pagare Voyage due volte.
-VECTOR INDEX commi_vettoriale    FOR (c:Comma)    ON c.embedding
-VECTOR INDEX rubriche_vettoriale FOR (a:Articolo) ON a.embedding
+VECTOR INDEX commi_vettoriale     FOR (c:Comma)     ON c.embedding
+VECTOR INDEX rubriche_vettoriale  FOR (a:Articolo)  ON a.embedding
+VECTOR INDEX frammenti_vettoriale FOR (f:Frammento) ON f.embedding   -- vedi 4.6
+CREATE FULLTEXT INDEX testo_frammenti FOR (f:Frammento) ON EACH [f.testo]
+  OPTIONS {indexConfig: {`fulltext.analyzer`: 'italian'}};
 -- configurazione effettiva in esercizio:
 --   vector.dimensions           1024
 --   vector.similarity_function  COSINE
 --   vector.hnsw.m               16
 --   vector.hnsw.ef_construction 100
---   vector.quantization.type    SCALAR   comprime i vettori in memoria: ricerca
---                                        piu' leggera, perdita di precisione
---                                        trascurabile su 181.000 commi
+--   vector.quantization.type    BINARY sui commi, SCALAR su rubriche e
+--                               frammenti: comprime i vettori in memoria,
+--                               ricerca piu' leggera
 ```
 
 ### 5.1 I tre indici non coprono le stesse cose
@@ -699,7 +1138,7 @@ l'indice l'aveva classificato per primo. Corretto con `OPTIONAL MATCH` e
 ## 6. Riconciliazione delle Anomalie Giuridiche Reali
 
 1. **Gestione Duplicate/Novelle (`numerazioneAnomala`):**
-   * Alcune leggi storiche contengono commi con lo stesso numero o derivanti da novelle legislative (es. due commi 2 in un articolo). Il loader non sovrascrive né perde testo: aggiunge un suffisso deterministico (`/c-2`, `/c-2-2`) e applica il flag `numerazioneAnomala = true`.
+   * Il testo citato dalle novelle, gli elenchi numerati e gli allegati dopo la firma non sono più commi con numeri ripetuti: diventano capoversi (`1.cap2`), punti (`1.p2`) e parti d'allegato (`all3`), vedi *«Commi, capoversi, punti, allegati»*. Quando due commi hanno davvero lo stesso numero (es. due commi 2 nella legge stessa) il testo non si perde: l'id prende un suffisso deterministico (`/c-2`, `/c-2-2`) e il comma il flag `numerazioneAnomala = true`.
 2. **Commi Impliciti (`commaImplicito`):**
    * Per le leggi storiche antecedenti al 2000 prive di commi numerati, il testo dell'articolo viene conservato in un comma implicito marcato con `commaImplicito = true`.
 3. **Gestione Multi-Label Idempotente:**

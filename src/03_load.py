@@ -25,7 +25,8 @@ if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(line_buffering=True)
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from comune import LABELS, PREFISSI, norma_id, norma_label  # noqa: E402
+from comune import (LABELS, PREFISSI, data_pulita, norma_id, norma_label,  # noqa: E402
+                    ripara_mojibake, risolutore_per_data)
 
 ROOT = Path(__file__).resolve().parent.parent
 PARSED = ROOT / "data" / "parsed"
@@ -66,6 +67,7 @@ UNWIND $articoli AS a
 MATCH (n:Norma {id: $normaId})
 MERGE (art:Articolo {id: a.id})
 SET art.numero = a.numero, art.rubrica = a.rubrica, art.ordine = a.ordine,
+    art.numeroOriginale = a.numeroOriginale,
     art.testo = a.testo,
     art.titolo = a.titolo, art.titoloRubrica = a.titoloRubrica,
     art.capo = a.capo, art.capoRubrica = a.capoRubrica
@@ -75,7 +77,8 @@ UNWIND a.commi AS c
 MERGE (cm:Comma {id: c.id})
 SET cm.numero = c.numero, cm.testo = c.testo, cm.ordine = c.ordine,
     cm.numerazioneAnomala = c.numerazioneAnomala,
-    cm.commaImplicito = c.commaImplicito
+    cm.commaImplicito = c.commaImplicito,
+    cm.parte = c.parte, cm.numeroOriginale = c.numeroOriginale
 MERGE (art)-[:HA_COMMA]->(cm)
 """
 
@@ -164,7 +167,9 @@ def motivo_scarto(dati):
     # veri, quindi il recupero automatico sbaglierebbe piu' di quanto ripari.
     # Meglio dichiararlo e lasciarlo a un riconoscitore che sappia leggere gli
     # allegati.
-    numeri = [str(a.get("numero")) for a in dati.get("articoli") or []]
+    # Sul numero del testo, non su quello reso univoco da articoli.py: i
+    # prefissi d'allegato non devono far passare un atto patologico.
+    numeri = [str(a.get("numeroOriginale") or a.get("numero")) for a in dati.get("articoli") or []]
     if numeri:
         piu_ripetuto = max(numeri.count(n) for n in set(numeri))
         if piu_ripetuto > MAX_RIPETIZIONI_NUMERO:
@@ -202,12 +207,16 @@ def prepara(dati):
         # i numeri ripetuti (novelle e refusi della legge).
         commi = [{"id": c["id"], "numero": c["numero"], "testo": c["testo"],
                   "ordine": i, "numerazioneAnomala": c.get("numerazioneAnomala", False),
-                  "commaImplicito": c.get("commaImplicito", False)}
+                  "commaImplicito": c.get("commaImplicito", False),
+                  "parte": c.get("parte"), "numeroOriginale": c.get("numeroOriginale")}
                  for i, c in enumerate(a.get("commi") or [])]
         ctx = contesto.get(a.get("partizioneId")) or {
             "titolo": None, "titoloRubrica": None, "capo": None, "capoRubrica": None}
+        if a.get("allegato"):
+            ctx = {"titolo": a["allegato"], "titoloRubrica": None, "capo": None, "capoRubrica": None}
         articoli.append({
             "id": a["id"], "numero": a["numero"], "rubrica": a.get("rubrica"),
+            "numeroOriginale": a.get("numeroOriginale"),
             "ordine": a.get("ordine", 0), **ctx,
             "testo": " ".join(c["testo"] for c in a.get("commi") or []),
             "commi": commi,
@@ -342,6 +351,10 @@ def main(reset=False):
                         ["id", "tipo", "numero", "anno", "data", "titolo",
                          "dataPubblicazione", "dataEntrataVigore",
                          "urlScheda", "urlDocumento", "preambolo"]}
+        # Le schede del portale portano titoli letti con la codifica sbagliata
+        # ("NÂ° 27") e date segnaposto ("1200-01-01"): vedi comune.py.
+        norma_params["titolo"] = ripara_mojibake(norma_params["titolo"])
+        norma_params["data"] = data_pulita(norma_params["data"], norma_params["anno"])
 
         run_con_retry(driver, db, q_norma_specifica, norma_params)
         if articoli:
@@ -356,6 +369,19 @@ def main(reset=False):
             print(f"  {nid}: {motivo}")
         if len(scartati) > 10:
             print(f"  ... e altri {len(scartati) - 10}")
+
+    # Il tipo scritto nella citazione non e' sempre quello dell'archivio: con la
+    # data si ritrova l'atto giusto (comune.risolutore_per_data).
+    with driver.session(database=db) as s:
+        risolvi = risolutore_per_data(
+            (r["id"], r["data"]) for r in s.run(
+                "MATCH (n:Norma) WHERE n.caricata RETURN n.id AS id, toString(n.data) AS data"))
+    for c in tutte_citazioni + tutte_preambolo:
+        c["targetId"] = risolvi(c["targetId"], c["testo"])
+    # Un atto che nomina se stesso con un altro tipo ("Decreto Delegato ... n.33"
+    # dentro il DC-33-2021) si ritrova, risolto, come citazione di se stesso.
+    tutte_citazioni = [c for c in tutte_citazioni if c["targetId"] != c["commaId"].split("/")[0]]
+    tutte_preambolo = [c for c in tutte_preambolo if c["targetId"] != c["normaId"]]
 
     print(f"\nCaricamento citazioni ({len(tutte_citazioni)} totali)...")
     for chunk in chunk_list(tutte_citazioni, 500):

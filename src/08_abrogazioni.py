@@ -151,7 +151,7 @@ _MESI_RE = ("gennaio|febbraio|marzo|aprile|maggio|giugno|luglio|agosto"
             "|settembre|ottobre|novembre|dicembre")
 RIF = (r"(?:n\.?\s*(\d+)\s*/\s*(\d{4})"
        r"|(\d{4})\s*,?\s*n\.?\s*(\d+)"
-       r"|n\.?\s*(\d+)\s+del\s+\d{1,2}\s+(?:" + _MESI_RE + r")\s+(\d{4}))")
+       r"|n\.?\s*(\d+)\s+del\s+\d{1,2}\s*[°º]?\s+(?:" + _MESI_RE + r")\s+(\d{4}))")
 
 
 def estremi(gruppi):
@@ -291,6 +291,20 @@ NUMERO = re.compile(r"\b(\d+(?:\s*(?:bis|ter|quater))?)\b", re.I)
 SOTTO_ARTICOLO = re.compile(r"(comm[ai]|letter[ae]|punt[oi]|capovers|numer[oi]|"
                             r"period[oi]|tabell|allegat|parte)", re.I)
 SOTTO_COMMA = re.compile(r"(letter[ae]|punt[oi]|capovers|period[oi])", re.I)
+# "l'articolo 58 dell'Allegato A alla Legge n.188/2011": non un livello sotto
+# l'articolo ma un altro articolo, quello dell'allegato, che articoli.py
+# numera "all-58".
+IN_ALLEGATO = re.compile(r"\bdell'\s*allegat", re.I)
+
+
+def _nell_allegato(tratto):
+    """Se il tratto nomina l'allegato e nient'altro sotto l'articolo."""
+    return bool(IN_ALLEGATO.search(tratto)) and all(
+        s.lower().startswith("allegat") for s in SOTTO_ARTICOLO.findall(tratto))
+
+
+def _con_allegato(numero, tratto):
+    return f"all-{numero}" if IN_ALLEGATO.search(tratto) else numero
 # "abrogato E SOSTITUITO dal seguente" non abroga: l'articolo resta, riscritto.
 # Marcarlo morto nasconderebbe la disciplina vigente invece di rivelarla.
 SOSTITUZIONE = re.compile(r"abrogat\w*\s+e\s+sostituit", re.I)
@@ -319,16 +333,17 @@ def articoli_abrogati(testo):
         return {}
     fuori = {}
     for m in ARTICOLO.finditer(testo):
-        if SOTTO_ARTICOLO.search(m.group(0)) or SPEZZA.search(m.group(0)):
+        if SPEZZA.search(m.group(0)) or (SOTTO_ARTICOLO.search(m.group(0))
+                                         and not _nell_allegato(m.group(0))):
             continue
-        fuori.setdefault(m.group(1).strip(".,"), set()).update(
+        fuori.setdefault(_con_allegato(m.group(1).strip(".,"), m.group(0)), set()).update(
             atti_con_tipo(m.group(0)))
     for m in ARTICOLO_AVANTI.finditer(testo):
         # qui il verbo precede: il tratto da controllare e' quello DOPO il
         # numero, dove si annidano "dell'Allegato A" e ", comma 2,".
-        if SOTTO_ARTICOLO.search(m.group(2)):
+        if SOTTO_ARTICOLO.search(m.group(2)) and not _nell_allegato(m.group(2)):
             continue
-        fuori.setdefault(m.group(1).strip(".,"), set()).update(
+        fuori.setdefault(_con_allegato(m.group(1).strip(".,"), m.group(2)), set()).update(
             atti_con_tipo(m.group(2)))
     # gli ELENCHI: la lista dei numeri sta fra "articoli" e "del/della", dove
     # date e importi non entrano, e l'atto sta nel tratto che segue.
@@ -367,7 +382,7 @@ def commi_abrogati(testo):
         for m in espressione.finditer(testo):
             if SOTTO_COMMA.search(m.group(0)) or SPEZZA.search(m.group(0)):
                 continue
-            articolo = m.group(ga).strip(".,")
+            articolo = _con_allegato(m.group(ga).strip(".,"), m.group(gatto))
             atti = atti_con_tipo(m.group(gatto))
             for n in NUMERO.finditer(m.group(gc)):
                 if (n.group(1), articolo, atti) not in fuori:
@@ -489,7 +504,7 @@ def data_discorde(testo, numero, anno, data_nodo):
         nodo = datetime.date.fromisoformat(str(data_nodo)[:10])
     except ValueError:
         return False
-    riferimento = (r"(\d{1,2})\s+(" + "|".join(MESI) + r")\s+(\d{4})\s*,?\s*n\.?\s*"
+    riferimento = (r"(\d{1,2})\s*[°º]?\s+(" + "|".join(MESI) + r")\s+(\d{4})\s*,?\s*n\.?\s*"
                    + str(numero) + r"\b")
     for m in re.finditer(riferimento, testo, re.I):
         if int(m.group(3)) != anno:
@@ -507,6 +522,7 @@ assert not data_discorde("Sono abrogati: - la Legge 29 settembre 2014 n. 147;", 
 assert not data_discorde("È abrogato il Decreto Delegato 7 gennaio 2019 n.1.", 1, 2019, "2019-01-07")
 assert not data_discorde("È abrogato il Decreto Delegato n.1/2019.", 1, 2019, "2019-01-07")
 assert not data_discorde("È abrogato il Regolamento 22 agosto 2025 n.15.", 15, 2025, None)
+assert data_discorde("È abrogata la Legge 1° marzo 2010 n.42.", 42, 2010, "2010-06-01")
 
 
 def decorrenza_non_maturata(testo, oggi=None):
@@ -800,13 +816,18 @@ PROVE_ARTICOLO = [
     # La direzione opposta, che prima non veniva letta affatto.
     ("È abrogato l'articolo 1-bis del Decreto Delegato 18 luglio 2025 n.97.", 1),
     ("È abrogato l'articolo 8 della Legge 24 novembre 1887.", 1),
-    # ...ma l'articolo di un ALLEGATO non e' un articolo dell'atto.
-    ("È abrogato l'articolo 27 dell'Allegato A alla Legge n.188/2011.", 0),
+    # L'articolo di un ALLEGATO non e' un articolo dell'atto: e' "all-27", che
+    # articoli.py separa dall'art. 27 della legge. Prima si scartava, perche' i
+    # due stavano nello stesso nodo.
+    ("È abrogato l'articolo 27 dell'Allegato A alla Legge n.188/2011.", 1),
+    ("È abrogato l'articolo 27, lettera b), dell'Allegato A alla Legge n.188/2011.", 0),
     ("È abrogato l'articolo 5, comma 2, della Legge n.188/2011.", 0),
 ]
 PROVE_COMMA = [
     ("E' abrogato l'articolo 5, comma 14 del Decreto-Legge n. 68/2020.", [("14", "5")]),
     ("Il comma 3 dell'articolo 3 della Legge n.92/2008 è abrogato.", [("3", "3")]),
+    ("Il comma 3 dell'articolo 58 dell'Allegato A alla Legge n.188/2011 è abrogato.",
+     [("3", "all-58")]),
     ("I commi 1 e 2 dell'articolo 86 della Legge n.140/2017 sono abrogati.",
      [("1", "86"), ("2", "86")]),
     ("La lettera d), comma 1, dell'articolo 3 del DD n.101/2019 è abrogata.", []),
@@ -1096,15 +1117,27 @@ def main():
     # "ABROGATO - Decreto Delegato..." e' la marcatura redazionale dell'archivio
     # di Stato. STARTS WITH e non CONTAINS: "referendum abrogativo" ricorre in
     # una quarantina di titoli e non significa che l'atto sia caduto.
-    dal_titolo = {r["id"] for r in g.query("""
-        MATCH (n:Norma) WHERE toUpper(n.titolo) STARTS WITH 'ABROGAT'
-        RETURN n.id AS id
-    """)}
+    #
+    # Lo stesso archivio premette "DECADUTO - " ai decreti che hanno perso
+    # efficacia: 38 atti, fino al 17/09 dati per vivi perche' qui
+    # si cercava solo "ABROGAT". Anche loro sono caduti per intero; `decaduto`
+    # dice come, e il titolo lo porta scritto. "ABGROGATO" e' un refuso del
+    # portale (DD-37-2019).
+    dal_titolo, decaduti = set(), set()
+    for r in g.query("""
+        MATCH (n:Norma)
+        WHERE toUpper(n.titolo) STARTS WITH 'ABROGAT' OR toUpper(n.titolo) STARTS WITH 'ABGROGAT'
+           OR toUpper(n.titolo) STARTS WITH 'DECADUT'
+        RETURN n.id AS id, toUpper(n.titolo) STARTS WITH 'DECADUT' AS decaduto
+    """):
+        dal_titolo.add(r["id"])
+        if r["decaduto"]:
+            decaduti.add(r["id"])
     tutte = dai_commi | dal_titolo
 
     print(f"\n  coppie fonte->bersaglio: {len(unici)}")
     print(f"  abrogate secondo i commi:  {len(dai_commi):>4}")
-    print(f"  abrogate secondo il titolo:{len(dal_titolo):>4}")
+    print(f"  abrogate secondo il titolo:{len(dal_titolo):>4}  (di cui decadute {len(decaduti)})")
     print(f"  in comune:                 {len(dai_commi & dal_titolo):>4}")
     print(f"  ABROGATE IN TUTTO:         {len(tutte):>4}")
 
@@ -1158,10 +1191,14 @@ def main():
     # l'arco costerebbe un MATCH in piu' su ogni ricerca. Si ricalcolano da capo
     # a ogni esecuzione, cosi' lo script resta idempotente.
     g.query("""MATCH (n:Norma) WHERE n.abrogata IS NOT NULL OR n.abrogataDa IS NOT NULL
-               REMOVE n.abrogata, n.abrogataDa""")
+                                  OR n.decaduto IS NOT NULL
+               REMOVE n.abrogata, n.abrogataDa, n.decaduto""")
     g.query("""
         UNWIND $ids AS id MATCH (n:Norma {id: id}) SET n.abrogata = true
     """, {"ids": sorted(tutte)})
+    g.query("""
+        UNWIND $ids AS id MATCH (n:Norma {id: id}) SET n.decaduto = true
+    """, {"ids": sorted(decaduti)})
     g.query("""
         MATCH (f:Norma)-[:ABROGA]->(b:Norma)
         WITH b, collect(DISTINCT f.id) AS fonti

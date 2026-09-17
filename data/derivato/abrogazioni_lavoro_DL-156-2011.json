@@ -1,0 +1,52 @@
+{
+ "norma": "DL-156-2011",
+ "fonte": "testo coordinato del Consiglio Grande e Generale (lavoro.pdf)",
+ "aggiornatoAl": "24 dicembre 2018",
+ "articoli": [
+  {
+   "articolo": "4",
+   "fonti": [
+    "L-115-2017"
+   ],
+   "articoloId": "DL-156-2011/art-4"
+  },
+  {
+   "articolo": "10",
+   "fonti": [
+    "L-71-2014"
+   ],
+   "articoloId": "DL-156-2011/art-10"
+  },
+  {
+   "articolo": "11",
+   "fonti": [
+    "L-71-2014"
+   ],
+   "articoloId": "DL-156-2011/art-11"
+  },
+  {
+   "articolo": "12",
+   "fonti": [
+    "L-71-2014"
+   ],
+   "articoloId": "DL-156-2011/art-12"
+  },
+  {
+   "articolo": "17",
+   "fonti": [
+    "DD-118-2014"
+   ],
+   "articoloId": "DL-156-2011/art-17"
+  },
+  {
+   "articolo": "20",
+   "fonti": [],
+   "articoloId": "DL-156-2011/art-20"
+  },
+  {
+   "articolo": "25",
+   "fonti": [],
+   "articoloId": "DL-156-2011/art-25"
+  }
+ ]
+}

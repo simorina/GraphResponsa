@@ -8,6 +8,21 @@ interface SourceDrawerProps {
 }
 
 /** Pannello laterale: il comma resta accanto alla risposta, non la copre. */
+
+/**
+ * Il PDF dove la fonte si legge davvero. Con l'articolo il server sceglie il
+ * documento dell'articolo - per il Codice Penale il testo coordinato, non la
+ * legge di emanazione - e con la pagina il visualizzatore si apre li'.
+ */
+function urlDocumento(source: Fonte): string {
+  const articolo = String(source.articolo ?? '-');
+  // L'articolo nel percorso, non in ?articolo=: la cache di CloudFront su
+  // /documenti/* ignora i parametri e confonderebbe l'articolo con l'atto.
+  const percorso = articolo && articolo !== '-' ? `/${encodeURIComponent(articolo)}` : '';
+  const pagina = source.pagina ? `#page=${source.pagina}` : '';
+  return `/documenti/${encodeURIComponent(source.norma)}${percorso}${pagina}`;
+}
+
 export const SourceDrawer: React.FC<SourceDrawerProps> = ({ source, onClose }) => {
   useEffect(() => {
     if (!source) return;
@@ -123,7 +138,7 @@ export const SourceDrawer: React.FC<SourceDrawerProps> = ({ source, onClose }) =
         <div className="shrink-0 border-t border-line px-6 py-3">
           {source.haDocumento && (
             <button
-              onClick={() => window.open(`/documenti/${encodeURIComponent(source.norma)}`, '_blank', 'noopener,noreferrer')}
+              onClick={() => window.open(urlDocumento(source), '_blank', 'noopener,noreferrer')}
               className="mb-2 flex items-center gap-1.5 rounded-lg border border-line px-2.5 py-1.5 text-[12px] font-medium text-ink-2 transition-colors duration-200 hover:border-dorato-2 hover:bg-alloro-3/40"
             >
               <FileText className="h-3.5 w-3.5" strokeWidth={1.5} />

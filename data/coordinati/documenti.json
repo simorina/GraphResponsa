@@ -1,0 +1,21 @@
+{
+  "codice-penale": {
+    "pdf": "codice-penale.pdf",
+    "documento": "17088264",
+    "aggiornatoAl": "27 febbraio 2026",
+    "norma": "L-17-1974",
+    "titolo": "Testo coordinato Nuovo Codice Penale (aggiornato al 27 febbraio 2026)"
+  },
+  "edilizia-sovvenzionata": {
+    "pdf": "edilizia-sovvenzionata.pdf",
+    "documento": "17101401",
+    "aggiornatoAl": "30 marzo 2026",
+    "titolo": "Testo coordinato in materia di edilizia sovvenzionata (aggiornato al 30 marzo 2026)"
+  },
+  "lavoro": {
+    "pdf": "lavoro.pdf",
+    "documento": "17102853",
+    "aggiornatoAl": "24 dicembre 2018",
+    "titolo": "Raccolta Coordinata delle norme in materia di lavoro (aggiornato al 24 dicembre 2018)"
+  }
+}

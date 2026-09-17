@@ -92,7 +92,7 @@ python -m venv .venv
 Chat web in cui fare domande in italiano sulla normativa.
 
 **Stack:** `create_agent` di LangChain 1.x (in LangGraph 1.0 `create_react_agent` di
-`langgraph.prebuilt` e' deprecato in suo favore), modello `claude-haiku-4-5` via
+`langgraph.prebuilt` e' deprecato in suo favore), modello `claude-sonnet-5` via
 `langchain-anthropic`, connessione al grafo via `Neo4jGraph` di `langchain-neo4j`,
 memoria conversazionale con checkpointer LangGraph.
 

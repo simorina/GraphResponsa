@@ -234,3 +234,146 @@ def norma_label(tipo):
         pulito = re.sub(r"[^a-zA-Z0-9]", "", (tipo or "").title())
         lbl = pulito if pulito else None
     return lbl
+
+
+# ------------------------------------------------------------ tipo sbagliato
+
+MESI_CITATI = ["gennaio", "febbraio", "marzo", "aprile", "maggio", "giugno", "luglio",
+               "agosto", "settembre", "ottobre", "novembre", "dicembre"]
+RE_DATA_CITATA = re.compile(
+    r"(\d{1,2})\s*[°º]?\s+(" + "|".join(MESI_CITATI) + r")\s+(\d{4})", re.I)
+
+
+def data_citata(testo):
+    """La data scritta in una citazione ("Decreto 1° luglio 2004 n.94"), o None."""
+    m = RE_DATA_CITATA.search(testo or "")
+    if not m:
+        return None
+    try:
+        import datetime
+        return datetime.date(int(m.group(3)), MESI_CITATI.index(m.group(2).lower()) + 1,
+                             int(m.group(1))).isoformat()
+    except ValueError:
+        return None
+
+
+def risolutore_per_data(atti):
+    """Una funzione (id citato, testo della citazione) -> id da collegare.
+
+    Il testo chiama un atto con un tipo, l'archivio lo cataloga con un altro:
+    "Decreto Reggenziale 1° settembre 2003 n.113" e' in archivio come D-113-2003,
+    "Decreto 1° luglio 2004 n.94" come DR-94-2004. L'id costruito dal tipo
+    scritto non esiste, e la citazione finiva su un atto fantasma che l'agente
+    non poteva aprire: 794 citazioni il 17/09, con la stessa data dell'atto
+    caricato.
+
+    Si reindirizza solo se l'id citato non e' in archivio, la citazione porta
+    una data, e fra gli atti caricati con lo stesso numero e anno UNO SOLO ha
+    quella data. Tipi diversi possono avere lo stesso numero nello stesso anno
+    (DD-12-2017 e R-12-2017): la data e' cio' che li distingue, e senza data
+    non si decide.
+
+    `atti` e' un iterabile di (id, data ISO) degli atti con testo.
+    """
+    presenti, per_estremi = set(), {}
+    for id_atto, data in atti:
+        presenti.add(id_atto)
+        m = re.match(r"^[A-Z]+-(\d+)-(\d{4})$", id_atto or "")
+        if m and data:
+            per_estremi.setdefault(m.groups(), []).append((id_atto, str(data)[:10]))
+
+    def risolvi(id_citato, testo):
+        if id_citato in presenti:
+            return id_citato
+        m = re.match(r"^[A-Z]+-(\d+)-(\d{4})$", id_citato or "")
+        data = data_citata(testo)
+        if not m or not data:
+            return id_citato
+        uguali = [i for i, d in per_estremi.get(m.groups(), []) if d == data]
+        return uguali[0] if len(uguali) == 1 else id_citato
+
+    return risolvi
+
+
+_r = risolutore_per_data([("D-113-2003", "2003-09-01"), ("DD-12-2017", "2017-01-18"),
+                          ("R-12-2017", "2017-10-11"), ("L-5-2020", "2020-01-10")])
+assert _r("DR-113-2003", "Decreto Reggenziale 1° settembre 2003 n.113") == "D-113-2003"
+assert _r("DR-113-2003", "Decreto Reggenziale n.113/2003") == "DR-113-2003"           # senza data
+assert _r("L-12-2017", "Legge 11 ottobre 2017 n.12") == "R-12-2017"
+assert _r("L-12-2017", "Legge 3 marzo 2017 n.12") == "L-12-2017"                      # nessuna data uguale
+assert _r("L-5-2020", "Legge 2 febbraio 2020 n.5") == "L-5-2020"                      # presente: non si tocca
+del _r
+
+
+# ------------------------------------------------------------ caratteri corrotti
+
+_MOJIBAKE = re.compile(r"[ÂÃ][\u0080-\u00bf\u0152\u0153\u0160\u0161\u0178\u017d\u017e\u0192"
+                       r"\u02c6\u02dc\u2013\u2014\u2018\u2019\u201a\u201c\u201d\u201e\u2020"
+                       r"\u2021\u2022\u2026\u2030\u2039\u203a\u20ac\u2122]")
+
+
+def ripara_mojibake(testo):
+    """Il testo UTF-8 letto come Windows-1252 e riscritto: "NÂ° 27" -> "N° 27".
+
+    Si ripara coppia per coppia, non la stringa intera: un titolo puo' avere
+    lettere accentate giuste accanto a quelle corrotte, e decodificarlo tutto
+    insieme fallirebbe. Una coppia che non torna UTF-8 valido resta com'e'.
+    """
+    if not testo or ("Â" not in testo and "Ã" not in testo):
+        return testo
+
+    def una(m):
+        try:
+            return m.group(0).encode("cp1252").decode("utf-8")
+        except (UnicodeEncodeError, UnicodeDecodeError):
+            try:
+                return m.group(0).encode("latin-1").decode("utf-8")
+            except (UnicodeEncodeError, UnicodeDecodeError):
+                return m.group(0)
+
+    riparato = _MOJIBAKE.sub(una, testo)
+    # "Ã " e' una "à" il cui secondo byte (lo spazio non separabile) e'
+    # diventato uno spazio qualunque: lo spazio va assorbito. "Â" isolata
+    # davanti a uno spazio e' il resto di uno spazio non separabile.
+    riparato = re.sub(r"Ã\s", "à", riparato)
+    return re.sub(r"Â(?=\s)", "", riparato)
+
+
+assert ripara_mojibake("MODIFICHE ALLA LEGGE 20 FEBBRAIO 1991 NÂ° 27") == "MODIFICHE ALLA LEGGE 20 FEBBRAIO 1991 N° 27"
+assert ripara_mojibake("attivitÃ  e perchÃ© cosÃ¬") == "attività e perché così"
+assert ripara_mojibake("città già giusta") == "città già giusta"
+assert ripara_mojibake("la liberta\u0300 Ã\u00a0 garantita") == "la liberta\u0300 à garantita"
+
+
+def data_pulita(data, anno):
+    """La data di un atto, senza i segnaposto del portale.
+
+    31 schede avevano date impossibili: "1200-01-01" dove la data non era nota,
+    "0006-01-11" per l'11 gennaio 2006. La prima non dice nulla e si toglie; la
+    seconda ha l'anno troncato, e l'anno dell'atto lo completa. Le date
+    anteriori al 1500 non sono di questo archivio (il documento piu' antico e'
+    del 1599).
+    """
+    if not data:
+        return None
+    s = str(data)[:10]
+    try:
+        anno_data = int(s[:4])
+    except ValueError:
+        return None
+    if anno_data >= 1500:
+        return s
+    try:
+        anno = int(anno)
+    except (TypeError, ValueError):
+        return None
+    if 1 <= anno_data <= 99 and anno % 100 == anno_data:
+        return f"{anno:04d}{s[4:]}"
+    return None
+
+
+assert data_pulita("1200-01-01", 1949) is None
+assert data_pulita("0006-01-11", 2006) == "2006-01-11"
+assert data_pulita("1599-06-27", 1599) == "1599-06-27"
+assert data_pulita("2015-01-28", 2014) == "2015-01-28"
+assert data_pulita(None, 2000) is None

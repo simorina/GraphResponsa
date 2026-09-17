@@ -25,9 +25,15 @@ estratto le alterna riga per riga ("1 Vendite, cessioni, Al n.1 - Le impo-").
 Nell'indice diventerebbe testo senza senso ma cercabile, e il grafo non tiene
 testo che produce citazioni plausibili e false.
 
+Lo stesso vale per la Legge 22 dicembre 1972 n.41, la legge organica per i
+dipendenti dello Stato: artt. 1-108 e, dietro, gli Allegati B, C, E e H con
+numerazione propria ("allB-1", ...). Gli Allegati A e F restano fuori: il primo
+il PDF non lo contiene, il secondo e' una tabella a colonne.
+
 Uso:
-    .venv/Scripts/python.exe src/13_atto_composto.py            # solo misura
-    .venv/Scripts/python.exe src/13_atto_composto.py --scrivi   # JSON e grafo
+    .venv/Scripts/python.exe src/13_atto_composto.py                      # solo misura
+    .venv/Scripts/python.exe src/13_atto_composto.py --scrivi             # JSON e grafo
+    .venv/Scripts/python.exe src/13_atto_composto.py L-41-1972 --scrivi   # un atto solo
 
 E' idempotente: il JSON si rigenera dal PDF e il caricamento usa MERGE.
 """
@@ -76,6 +82,30 @@ ATTI = {
              "rubrica": "Regolamento per l'applicazione della legge sulle imposte di registro"},
         ],
     },
+    # La legge organica per i dipendenti dello Stato: artt. 1-108, poi sei
+    # Allegati, quattro dei quali ricominciano da "Art. 1". Citata dalla
+    # raccolta coordinata sul Lavoro.
+    "L-41-1972": {
+        "fine_legge": re.compile(r"^\s*Data(ta)? dalla Nostra Residenza", re.I),
+        "sezioni": [
+            {"apertura": re.compile(r'^\s*ALLEGATO\s+"A"\s*$', re.I), "prefisso": None,
+             "motivo": "sei avvertenze e le tavole dei concorsi, che il PDF stesso non riporta "
+                       "(\"Testo da pag. 107 a pag. 147 B.U. 1972 n 6 non inserito\")"},
+            {"apertura": re.compile(r"^\s*ALLEGATO\s+B\s*-", re.I), "prefisso": "allB",
+             "tipo": "Allegato", "numero": "B",
+             "rubrica": "Norme per la tenuta del fascicolo personale dei dipendenti"},
+            {"apertura": re.compile(r"^\s*ALLEGATO\s+C\s*-", re.I), "prefisso": "allC",
+             "tipo": "Allegato", "numero": "C", "rubrica": "Norme che regolano i concorsi"},
+            {"apertura": re.compile(r"^\s*ALLEGATO\s+E\s*-", re.I), "prefisso": "allE",
+             "tipo": "Allegato", "numero": "E",
+             "rubrica": "Calendario degli uffici ed orario di servizio"},
+            {"apertura": re.compile(r'^\s*ALLEGATO\s+"F"\s*$', re.I), "prefisso": None,
+             "motivo": "tabella fuori organico a colonne: qualifiche e importi alternati riga per riga"},
+            {"apertura": re.compile(r"^\s*ALLEGATO\s+H\s*-", re.I), "prefisso": "allH",
+             "tipo": "Allegato", "numero": "H",
+             "rubrica": "Regolamento per la disciplina dei diritti sindacali sanciti dalla legge organica"},
+        ],
+    },
 }
 
 
@@ -92,6 +122,10 @@ def dividi(righe, conf):
     pezzi = []
     for n, (s, i) in enumerate(zip(conf["sezioni"], inizi)):
         stop = inizi[n + 1] if n + 1 < len(inizi) else len(righe)
+        # L'ultima sezione della L-41/1972 chiude con una seconda formula di
+        # promulgazione e le firme: senza il taglio finivano nell'art. 9
+        # dell'Allegato H.
+        stop = next((k for k in range(i + 1, stop) if conf["fine_legge"].match(righe[k])), stop)
         # La prima riga e' l'intestazione (a volte su due righe): il parser
         # la tratterebbe da preambolo, e va bene cosi'.
         pezzi.append((s, righe[i:stop]))
@@ -99,6 +133,7 @@ def dividi(righe, conf):
 
 
 RE_SOLO_ANNO = re.compile(r"^\s*\d{4}\.?\s*$")
+RE_ART_RICHIAMO = re.compile(r"^(\s*Art\.?\s*\d+)\s*\(\*\)\s*$")
 
 
 def riattacca_anni(righe):
@@ -131,11 +166,14 @@ def qualifica(articoli, norma, sezione, partizione_id):
     """Numeri e id resi univoci dentro l'atto: "reg-1", ".../art-reg-1/c-1"."""
     for a in articoli:
         numero = f"{sezione['prefisso']}-{a['numero']}"
+        vecchio = a["id"]
         a["numero"] = numero
         a["id"] = f"{norma}/art-{numero}"
         a["partizioneId"] = partizione_id
-        for k, c in enumerate(a["commi"], 1):
-            c["id"] = f"{a['id']}/c-{k}"
+        # Il suffisso del comma resta quello del parser (commi.ristruttura):
+        # cambia solo l'articolo, cosi' capoversi e punti tengono il loro nome.
+        for c in a["commi"]:
+            c["id"] = a["id"] + c["id"][len(vecchio):]
         # Le citazioni portano l'id del comma: si ricalcolano sugli id nuovi
         # con la stessa funzione del parser.
         a["citazioni"] = []
@@ -151,7 +189,10 @@ def ricostruisci(norma, conf):
     vecchio = json.loads((PARSED / f"{norma}.json").read_text(encoding="utf-8"))
     meta = {k: v for k, v in vecchio.items()
             if k not in ("preambolo", "citazioniPreambolo", "partizioni", "articoli")}
-    righe = riattacca_anni(parser.righe_pdf(RAW / norma / "testo.pdf"))
+    # "Art. 94 (*)": col richiamo il parser non riconosce l'intestazione, e
+    # l'art. 94 della L-41/1972 spariva dentro il 93.
+    righe = [RE_ART_RICHIAMO.sub(r"\1", r)
+             for r in riattacca_anni(parser.righe_pdf(RAW / norma / "testo.pdf"))]
     legge, pezzi = dividi(righe, conf)
 
     dati = leggi_con(legge, norma, meta)
@@ -212,7 +253,10 @@ def carica_norma(dati):
 
 def main():
     scrivi = "--scrivi" in sys.argv
+    scelte = [a for a in sys.argv[1:] if not a.startswith("--")]
     for norma, conf in ATTI.items():
+        if scelte and norma not in scelte:
+            continue
         dati, vecchio = ricostruisci(norma, conf)
         print(f"\n  {norma} - {dati.get('titolo')}")
         print(f"    prima: {len(vecchio['articoli'])} articoli, rifiutata da 03: "
@@ -228,8 +272,11 @@ def main():
         for e in dati["sezioniEscluse"]:
             print(f"    esclusa: {e['sezione']} ({e['righe']} righe) - {e['motivo']}")
         print(f"    03 la rifiuterebbe ancora: {carica.motivo_scarto(dati) or 'no'}")
-        ultimo = next(a for a in dati["articoli"] if a["numero"] == "76")
-        print(f"    art. 76 ora: {' | '.join(c['testo'][:160] for c in ultimo['commi'])}")
+        # La coda di ogni sezione e' dove finiscono firme e tabelle della
+        # sezione dopo: e' la prima cosa da guardare.
+        for sezione, arts in per_sezione.items():
+            coda = arts[-1]["commi"][-1]["testo"] if arts[-1]["commi"] else ""
+            print(f"    fine {sezione} (art. {arts[-1]['numero']}): ...{coda[-160:]}")
 
         if not scrivi:
             continue

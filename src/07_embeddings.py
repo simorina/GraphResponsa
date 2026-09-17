@@ -91,6 +91,16 @@ def main():
     auth = (utente, password)
     prima = conta(uri, auth, db)
     print(f"Commi nel grafo: {prima['totali']}, gia' con embedding: {prima['con_embedding']}")
+
+    # voyage-4 legge al massimo 32.000 token, e la libreria taglia in silenzio
+    # il resto (truncation=True): il vettore di un comma cosi' lungo
+    # rappresenta solo l'inizio. Si dice quanti sono, e chi li copre.
+    # 90.000 caratteri: il testo piu' denso misurato fa 3,03 caratteri a token.
+    with GraphDatabase.driver(uri, auth=auth) as d, d.session(database=db) as s:
+        lunghi = s.run("MATCH (c:Comma) WHERE size(c.testo) > 90000 RETURN count(c) AS n").single()["n"]
+    if lunghi:
+        print(f"Attenzione: {lunghi} commi superano i 90.000 caratteri e il loro vettore "
+              f"ne rappresenta solo l'inizio. Dopo questo script esegui 19_frammenti.py.")
     if prima["con_embedding"] >= prima["totali"]:
         print("Tutti i commi hanno gia' un embedding. Niente da fare.")
         return
