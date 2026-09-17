@@ -302,6 +302,66 @@ for _riga, _atteso in _PROVE_RUBRICA_PRESUNTA:
     assert _puo_essere_rubrica(_riga) == _atteso, f"rubrica presunta: {_riga!r}"
 
 
+# --- Due atti nello stesso PDF ---
+#
+# Il PDF del portale a volte contiene due atti di seguito: una Legge e il suo
+# Regolamento, una Tariffa, una Parte seconda. Il secondo rinumera gli
+# articoli da 1, e senza riconoscerlo i suoi articoli prendono gli id del
+# primo: a valle sopravvive un solo testo per id (misurato: 131 documenti e
+# 459 articoli, fra cui i 22 della Legge in L-0-1910, cancellati dai 22 del
+# Regolamento). L'id_norma resta uno solo - le citazioni in entrata puntano
+# li' - ma gli articoli del secondo atto prendono un segmento proprio:
+# "L-0-1910/reg/art-1".
+RE_MARCATORE_ATTO = re.compile(
+    r"^\s*(?:[\dIVXLC]+\s*[.)]{1,2}\s*)?"
+    r"(regolamento|statuto|tariffa|tariffe|allegato|tabella|convenzione"
+    r"|parte\s+[IVXLC\d]+"
+    r"|disposizion[ei]\s+transitori[ae])"
+    r"\s*[.:]?\s*$", re.I)
+FINESTRA_MARCATORE = 6   # righe non vuote da guardare sopra l'intestazione
+
+
+def _marcatore_atto(righe, i, finestra=FINESTRA_MARCATORE):
+    """Sopra la riga i comincia un altro atto? Restituisce il segmento di id."""
+    viste, j = 0, i - 1
+    while j >= 0 and viste < finestra:
+        s = righe[j].strip()
+        if s:
+            viste += 1
+            m = RE_MARCATORE_ATTO.match(s)
+            if m:
+                testo = m.group(1).lower()
+                if testo.startswith("regolament"):
+                    return "reg"
+                return re.sub(r"[^a-z0-9]+", "-", testo).strip("-")
+        j -= 1
+    return None
+
+
+_PROVE_MARCATORE = [
+    ("L-0-1910: il Regolamento dopo l'ultimo articolo della Legge",
+     ["servizio nella misura del 4 per cento sullo stipendio percepito.", "",
+      "REGOLAMENTO", "Istruzione obbligatoria.", "Art. 1."], 4, "reg"),
+    ("L-111-1918: il regolamento numerato come voce di un elenco",
+     ["- Questa legge entrera' in vigore il 1 Agosto 1918.", "2.) Regolamento.",
+      "Parte I", "Art. 1."], 3, "parte-i"),
+    ("L-32-1987: seconda parte dello stesso atto",
+     ["del mezzo.", "Parte 2", "MISSIONI E TRASFERTE", "Art. 1"], 3, "parte-2"),
+    # "CAPO III" e' una partizione dell'atto, non un atto nuovo: in L-59-2016 e
+    # DD-192-2020 l'indice iniziale avrebbe spinto gli articoli veri in una
+    # parte, lasciando l'id canonico alle voci dell'indice. Resta alla rete di
+    # sicurezza (id reso univoco).
+    ("R-0-1883: un capitolo che rinumera non e' un secondo atto",
+     ["avvenuti.", "Cap. III.", "Del cantoniere come appaltatore.", "Art. 1."], 3, None),
+    ("testo normativo qualunque: nessun marcatore",
+     ["- La presente legge entra in vigore subito.", "Art. 1."], 1, None),
+    ("la parola dentro una frase non e' un'intestazione",
+     ["Il regolamento e' approvato con decreto delegato.", "Art. 1."], 1, None),
+]
+for _nome, _righe_test, _i, _atteso in _PROVE_MARCATORE:
+    assert _marcatore_atto(_righe_test, _i) == _atteso, f"marcatore atto ({_nome})"
+
+
 def righe_pdf(path):
     doc = fitz.open(path)
     righe = []
@@ -381,8 +441,18 @@ def struttura_dedotta(id_norma, righe):
         }
 
     def nuovo_comma(art, numero, testo):
+        # Nei regolamenti tecnici la stessa coppia "1.1" ricorre in sezioni
+        # diverse (D-122-1985: 66 commi con lo stesso id). Un id ripetuto, a
+        # valle, e' un testo che ne cancella un altro: si rende unico qui,
+        # come fa chiudi_comma() per il parsing normale.
+        base = f"{art['id']}/c-{numero}"
+        esistenti = {c["id"] for c in art["commi"]}
+        cid, n = base, 1
+        while cid in esistenti:
+            n += 1
+            cid = f"{base}-{n}"
         return {
-            "id": f"{art['id']}/c-{numero}",
+            "id": cid,
             "numero": str(numero),
             "testo": testo,
             "numerazioneAnomala": False,
@@ -456,12 +526,17 @@ def estrai_citazioni(testo, id_norma_corrente):
     return citazioni
 
 
-def parse(id_norma, meta):
-    righe = righe_pdf(RAW / id_norma / "testo.pdf")
+def parse(id_norma, meta, righe=None):
+    # righe: per le prove all'import, che non hanno un PDF da leggere.
+    if righe is None:
+        righe = righe_pdf(RAW / id_norma / "testo.pdf")
 
     partizioni = []       # albero: Titoli con figli Capi
     articoli = []
     ids_usati = set()
+    ids_articoli = set()
+    parti_usate = set()
+    parte_corrente = None    # None = atto principale del documento
 
     titolo_corrente = None
     capo_corrente = None
@@ -525,6 +600,42 @@ def parse(id_norma, meta):
                 })
         comma_corrente = None
         buffer = []
+
+    def id_articolo(numero, i):
+        """
+        Id univoco dell'articolo, e riconoscimento del secondo atto.
+
+        Se l'id e' gia' stato usato e sopra l'intestazione c'e' quella di un
+        altro atto (RE_MARCATORE_ATTO), da qui in avanti gli articoli vanno
+        in una parte con un segmento di id proprio. Senza marcatore l'id
+        viene comunque reso unico: un id ripetuto, a valle, e' un testo che
+        ne cancella un altro.
+        """
+        nonlocal parte_corrente
+        slug = numero.replace(" ", "-")
+
+        def costruisci():
+            base = f"{id_norma}/{parte_corrente}" if parte_corrente else id_norma
+            return f"{base}/art-{slug}"
+
+        candidato = costruisci()
+        if candidato in ids_articoli:
+            marcatore = _marcatore_atto(righe, i)
+            if marcatore:
+                parte, n = marcatore, 1
+                while parte in parti_usate:
+                    n += 1
+                    parte = f"{marcatore}-{n}"
+                parti_usate.add(parte)
+                parte_corrente = parte
+                candidato = costruisci()
+        reso_univoco = candidato in ids_articoli
+        base, n = candidato, 1
+        while candidato in ids_articoli:
+            n += 1
+            candidato = f"{base}-{n}"
+        ids_articoli.add(candidato)
+        return candidato, reso_univoco
 
     def id_partizione(tipo, numero):
         """Il percorso rende l'id unico: i Capi si rinumerano dentro ogni Titolo."""
@@ -600,14 +711,21 @@ def parse(id_norma, meta):
             iniziato = True
             numero = m_art.group(1) + (f" {m_art.group(2).lower()}" if m_art.group(2) else "")
             genitore = capo_corrente or titolo_corrente
+            aid, reso_univoco = id_articolo(numero, i)
             articolo_corrente = {
-                "id": f"{id_norma}/art-{numero.replace(' ', '-')}",
+                "id": aid,
                 "numero": numero,
+                "parte": parte_corrente,
                 "rubrica": None,
                 "partizioneId": genitore["id"] if genitore else None,
                 "ordine": len(articoli),
                 "commi": [],
             }
+            if reso_univoco:
+                # nessun marcatore ha spiegato la collisione: l'id e' stato
+                # comunque reso unico, cosi' il testo non sparisce. main() lo
+                # dichiara a fine parsing.
+                articolo_corrente["idResoUnivoco"] = True
             articoli.append(articolo_corrente)
             attesa_rubrica = True
             rubrica_buffer = []
@@ -722,6 +840,53 @@ def parse(id_norma, meta):
     }
 
 
+_PROVE_STRUTTURA_DEDOTTA = [
+    # numerazione decimale che ricomincia in una sezione successiva
+    ("1.1 Le presenti norme si applicano agli edifici civili.",
+     "1.2 Sono esclusi gli edifici industriali.",
+     "2.1 Le autorimesse rispettano le distanze.",
+     "1.1 Le presenti norme riguardano gli impianti a gas."),
+]
+for _righe_test in _PROVE_STRUTTURA_DEDOTTA:
+    _d = parse("T-2-2000", {}, righe=list(_righe_test))
+    _id_commi = [c["id"] for a in _d["articoli"] for c in a["commi"]]
+    assert len(set(_id_commi)) == len(_id_commi), f"id di comma ripetuti: {_id_commi}"
+    _testi = " ".join(c["testo"] for a in _d["articoli"] for c in a["commi"])
+    for _r in _righe_test:
+        assert _r.split(" ", 1)[1] in _testi, f"testo perso: {_r!r}"
+
+
+_PROVE_DUE_ATTI = [
+    ("due atti nello stesso PDF: il secondo rinumera da 1",
+     ["Art. 1", "1.", "Prima norma della legge.", "Art. 2", "1.",
+      "Seconda norma della legge.", "", "REGOLAMENTO", "",
+      "Art. 1", "1.", "Prima norma del regolamento."],
+     ["T-1-2000/art-1", "T-1-2000/art-2", "T-1-2000/reg/art-1"],
+     [None, None, "reg"]),
+    ("numerazione continua: niente parti, id invariati",
+     ["Art. 1", "1.", "Prima norma.", "Art. 2", "1.", "Seconda norma.",
+      "Art. 3", "1.", "Terza norma."],
+     ["T-1-2000/art-1", "T-1-2000/art-2", "T-1-2000/art-3"],
+     [None, None, None]),
+    ("riparte da 1 senza marcatore: solo la rete di sicurezza",
+     ["Art. 1", "1.", "Prima norma.", "Art. 1", "1.", "Prima norma di un altro atto."],
+     ["T-1-2000/art-1", "T-1-2000/art-1-2"],
+     [None, None]),
+]
+for _nome, _righe_test, _attesi, _parti in _PROVE_DUE_ATTI:
+    _d = parse("T-1-2000", {}, righe=_righe_test)
+    _ids = [a["id"] for a in _d["articoli"]]
+    assert _ids == _attesi, f"due atti ({_nome}): {_ids}"
+    assert [a["parte"] for a in _d["articoli"]] == _parti, f"parte ({_nome})"
+    _id_commi = [c["id"] for a in _d["articoli"] for c in a["commi"]]
+    assert len(set(_id_commi)) == len(_id_commi), f"id di comma ripetuti ({_nome})"
+    # nessun testo perso: ogni riga di contenuto finisce in un comma
+    _testi = " ".join(c["testo"] for a in _d["articoli"] for c in a["commi"])
+    for _r in _righe_test:
+        if _r.endswith(".") and " " in _r:      # riga di testo, non un numero di comma
+            assert _r in _testi, f"testo perso ({_nome}): {_r!r}"
+
+
 if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(line_buffering=True)
 
@@ -763,6 +928,12 @@ def main(force=False):
             n_capi = sum(len(t.get("figli", [])) for t in dati["partizioni"])
             n_commi = sum(len(a["commi"]) for a in dati["articoli"])
             n_cit = sum(len(a["citazioni"]) for a in dati["articoli"])
+
+            univoci = [a["id"] for a in dati["articoli"] if a.get("idResoUnivoco")]
+            if univoci:
+                print(f"  {cartella.name}: {len(univoci)} id di articolo gia' usati, "
+                      f"resi univoci senza riconoscere un secondo atto: "
+                      f"{', '.join(univoci[:5])}")
 
             if idx % 50 == 0 or idx == len(da_parsare):
                 print(f"  [{idx}/{len(da_parsare)}] {cartella.name}: {len(dati['articoli'])} art, {n_commi} commi, {n_cit} cit")
