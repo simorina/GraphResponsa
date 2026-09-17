@@ -18,6 +18,7 @@ import hashlib
 import logging
 import os
 import re
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -70,6 +71,21 @@ def grafo() -> Neo4jGraph:
 # oltre i 20.000 al 17/09): megabyte trasferiti a ogni ricerca per mostrarne
 # duemila.
 LETTI = MAX_TESTO + 1
+
+
+# Le interrogazioni di una ricerca sono indipendenti, e in fila costavano la
+# loro somma: 776 ms mediani, misurati il 17/09, di cui 221 per il ramo
+# lessicale che aspettava il semantico. Due gruppi di thread, non uno: in
+# _RAMI gira il ramo lessicale, che a sua volta lancia le sue interrogazioni
+# in _QUERY e le aspetta. Con un gruppo solo, piu' ricerche contemporanee
+# potrebbero occupare tutti i posti con rami in attesa di interrogazioni che
+# non trovano piu' un posto dove girare. Le interrogazioni in _QUERY non ne
+# lanciano altre.
+_RAMI = ThreadPoolExecutor(max_workers=8, thread_name_prefix="ramo")
+_QUERY = ThreadPoolExecutor(max_workers=24, thread_name_prefix="query")
+
+# Quanti altri punti dello stesso comma segnalare, oltre a quello mostrato.
+ALTRI_PASSI = 3
 
 
 def _taglia(testo, limite=MAX_TESTO):
@@ -204,7 +220,7 @@ def ricerca_vettoriale():
 def _full_text(query, limite, dal_anno=None, al_anno=None, prefissi=None,
                escludi_abrogati=False):
     """Ricerca lessicale: la riserva quando il vettoriale non e' disponibile."""
-    righe = grafo().query("""
+    commi = _QUERY.submit(grafo().query, """
         CALL db.index.fulltext.queryNodes('testo_normativo', $query)
         YIELD node, score
         // Anche qui l'articolo agganciato per la rubrica va tenuto, non scartato.
@@ -241,7 +257,8 @@ def _full_text(query, limite, dal_anno=None, al_anno=None, prefissi=None,
           "escludi_abrogati": bool(escludi_abrogati), "letti": LETTI})
     filtri = {"dal_anno": dal_anno, "al_anno": al_anno, "prefissi": prefissi,
               "escludi_abrogati": bool(escludi_abrogati)}
-    righe = _intreccia(righe, _frammenti(query, limite * 3, True, **filtri))
+    frammenti = _QUERY.submit(_frammenti, query, limite * 3, True, **filtri)
+    righe = _intreccia(commi.result(), frammenti.result())
 
     # Stessa potatura dei doppioni del ramo ibrido: due rami, una semantica.
     tenute, viste = [], {}
@@ -426,12 +443,31 @@ def _intreccia(commi, frammenti):
         if gia is None:
             per_comma[chiave] = r
             tenute.append(r)
-        elif r.get("daCarattere") is not None and gia.get("daCarattere") is None:
-            gia.update(testo=r["testo"], daCarattere=r["daCarattere"],
-                       lunghezzaComma=r.get("lunghezzaComma"))
+        elif r.get("daCarattere") is not None:
+            if gia.get("daCarattere") is None:
+                gia.update(testo=r["testo"], daCarattere=r["daCarattere"],
+                           lunghezzaComma=r.get("lunghezzaComma"))
+            else:
+                _aggiungi_passi(gia, [r["daCarattere"]])
     for r in tenute:
         r.pop("punteggio", None)
     return tenute
+
+
+def _aggiungi_passi(riga, posizioni):
+    """Annota altri punti dello stesso comma che corrispondono alla ricerca.
+
+    Nei testi ripetitivi - lo schema XBRL dei bilanci, gli elenchi di
+    prestazioni sanitarie - il passo migliore per punteggio non e' sempre
+    quello che risponde: misurato su 60 domande, 9 volte il comma era giusto e
+    il passo mostrato un altro. Con le posizioni degli altri, l'agente li apre
+    con leggi_articolo(da_carattere=...) invece di scorrere il comma.
+    """
+    altri = riga.setdefault("altriPassi", [])
+    for d in posizioni:
+        if d is not None and d != riga.get("daCarattere") and d not in altri \
+                and len(altri) < ALTRI_PASSI:
+            altri.append(d)
 
 
 def _frammenti(query_o_vettore, k, lessicale, **filtri):
@@ -480,19 +516,22 @@ def _semantico(query, limite, dal_anno=None, al_anno=None, prefissi=None,
     k = limite * AMPIEZZA_FILTRATA if filtrato else limite
     filtri = {"dal_anno": dal_anno, "al_anno": al_anno, "prefissi": prefissi,
               "escludi_abrogati": bool(escludi_abrogati)}
+    futuri = [_QUERY.submit(grafo().query, risalita, {
+                  "indice": indice, "k": k, "vettore": vettore, "letti": LETTI, **filtri})
+              for indice, risalita in ((INDICE_VETTORIALE, RISALITA_COMMI),
+                                       (INDICE_RUBRICHE, RISALITA_RUBRICHE))]
+    frammenti = _QUERY.submit(_frammenti, vettore, k, False, **filtri)
     liste = []
-    for indice, risalita in ((INDICE_VETTORIALE, RISALITA_COMMI),
-                             (INDICE_RUBRICHE, RISALITA_RUBRICHE)):
+    for futuro in futuri:
         try:
-            liste.append(grafo().query(risalita, {
-                "indice": indice, "k": k, "vettore": vettore, "letti": LETTI, **filtri}))
+            liste.append(futuro.result())
         except Exception:
             # L'indice delle rubriche puo' non esserci ancora: si prosegue con
             # quello dei commi invece di far fallire tutta la ricerca.
             continue
     if not liste:
         return None
-    liste[0] = _intreccia(liste[0], _frammenti(vettore, k, False, **filtri))
+    liste[0] = _intreccia(liste[0], frammenti.result())
     # I commi pesano piu' delle rubriche: una rubrica dice di cosa tratta
     # l'articolo, un comma contiene la disposizione. Ma una rubrica centrata
     # vale piu' di un comma alla lontana, quindi non si azzera.
@@ -852,13 +891,18 @@ def _fondi(liste, limite, taglia=True):
             punti[impronta] = punti.get(impronta, 0.0) + peso / (K_RRF + rango)
             if impronta not in primo:
                 primo[impronta] = dict(r)
+                if r.get("altriPassi"):
+                    primo[impronta]["altriPassi"] = list(r["altriPassi"])
             else:
                 gia = primo[impronta]
                 if r.get("daCarattere") is not None and gia.get("daCarattere") is None:
                     # Lo stesso comma trovato intero da un ramo e per un suo
                     # passo dall'altro: si mostra il passo.
                     gia.update(testo=r["testo"], daCarattere=r["daCarattere"],
-                               lunghezzaComma=r.get("lunghezzaComma"))
+                               lunghezzaComma=r.get("lunghezzaComma"),
+                               altriPassi=list(r.get("altriPassi") or []))
+                elif r.get("daCarattere") is not None:
+                    _aggiungi_passi(gia, [r["daCarattere"]] + (r.get("altriPassi") or []))
                 # Stesso testo sotto un altro atto: si annota dove ricorre,
                 # invece di spendere un posto utile per ripeterlo.
                 altro = r.get("normaId")
@@ -927,7 +971,8 @@ def cerca_testo(query: str, limite: int = 8, dal_anno: int | None = None,
     (`lunghezzaComma` caratteri: un allegato, una tabella): e' il punto che
     corrisponde alla ricerca. Si cita con il numero del comma; per leggerlo nel
     suo contesto chiama leggi_articolo(norma_id, numero, comma=...,
-    da_carattere=...).
+    da_carattere=...). `altriPassi` elenca altri punti dello stesso comma che
+    corrispondono alla ricerca: se il passo mostrato non risponde, aprili.
 
     Ogni risultato porta due date, che non vanno confuse: `inVigoreDal` e' la
     data in cui l'atto ha cominciato ad applicarsi, `dataAtto` quella in cui e'
@@ -999,8 +1044,9 @@ def cerca_testo(query: str, limite: int = 8, dal_anno: int | None = None,
         return {"errore": errore}
     filtri = {"dal_anno": dal_anno, "al_anno": al_anno, "prefissi": prefissi,
               "escludi_abrogati": escludi_abrogati}
-    lessicali = _full_text(query, limite * AMPIEZZA, **filtri)
+    ramo_lessicale = _RAMI.submit(_full_text, query, limite * AMPIEZZA, **filtri)
     semantici = _semantico(query, limite * AMPIEZZA, **filtri)
+    lessicali = ramo_lessicale.result()
     if semantici is None:
         righe = lessicali[:limite]
         modo = "solo lessicale (semantica non disponibile)"
@@ -1020,7 +1066,12 @@ def cerca_testo(query: str, limite: int = 8, dal_anno: int | None = None,
             righe = _fondi([(semantici, PESO_SEMANTICO), (lessicali, PESO_LESSICALE)], limite)
             modo = "ibrida"
     if righe:
-        righe = _piu_recenti(_atti_novellati(_bersagli_abrogati(_testo_aggiornato_in(_novelle(righe)))))
+        # Leggono atto e articolo e scrivono ciascuno un campo suo: possono
+        # girare insieme. _piu_recenti confronta le righe gia' in mano, dopo.
+        for futuro in [_QUERY.submit(f, righe) for f in
+                       (_novelle, _testo_aggiornato_in, _bersagli_abrogati, _atti_novellati)]:
+            futuro.result()
+        righe = _piu_recenti(righe)
 
     if not righe:
         return {"risultati": [], "quanti": 0, "ricerca": modo,

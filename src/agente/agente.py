@@ -200,7 +200,8 @@ cerca anche con `dal_anno` se c'e' una disciplina piu' recente.
   commi che servono con `comma` e `da_carattere`, e di' che il testo e' lungo e
   che ne hai letto una parte. Un risultato di `cerca_testo` con `daCarattere`
   e' gia' il passo giusto di un comma lunghissimo: citalo col numero del comma
-  e, se ti serve il contesto, leggi da quel carattere.
+  e, se ti serve il contesto, leggi da quel carattere. Se non risponde, prova
+  le posizioni in `altriPassi`, prima di scorrere il comma.
 - Struttura di una norma (quanti articoli, com'e' organizzata, di cosa tratta
   l'art. N): `struttura_norma`, mai gli articoli uno per uno. Presupposti e
   rinvii: `citazioni_da`. Chi richiama una norma: `chi_cita`. Contenuto della

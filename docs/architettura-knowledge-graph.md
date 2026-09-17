@@ -956,8 +956,27 @@ liste si uniscono **per punteggio** e non a ranghi reciproci: la lista dei
 frammenti ha sempre un primo classificato, e fonderla alla pari avrebbe messo
 un pezzo di tabella in cima a ogni ricerca. Di ogni comma resta una voce sola;
 se è stato trovato per un suo passo, la voce mostra quel passo e porta
-`daCarattere` e `lunghezzaComma`. 07_embeddings.py avvisa quando ci sono commi
-oltre i 90.000 caratteri.
+`daCarattere` e `lunghezzaComma`, e con `altriPassi` fino a tre altri punti
+dello stesso comma che corrispondono alla domanda. 07_embeddings.py avvisa
+quando ci sono commi oltre i 90.000 caratteri.
+
+**Quanto funziona.** 60 frammenti a caso, ciascuno con una domanda in
+linguaggio naturale scritta da un modello a partire dal passo, e una di otto
+parole prese dal passo:
+
+| | Senza frammenti | Con frammenti |
+|---|---|---|
+| Domanda naturale: il passo giusto fra i primi 8 | 10/60 | 46/60, 53/60 contando `altriPassi` |
+| Domanda naturale: il comma giusto fra i primi 8 | 23/60 | 55/60 |
+| Parole chiave: il passo giusto fra i primi 8 | 7/60 | 31/60, 38/60 contando `altriPassi` |
+
+Le domande mancate riguardano soprattutto convenzioni scritte in inglese, che
+l'indice full-text analizza come italiano, e intestazioni di tabella fatte di
+parole presenti ovunque ("Totale", "Variazioni").
+
+**Quanto pesano.** Circa 137 MB di vettori e 26 MB di testo: un decimo dei
+vettori dei commi. Le interrogazioni di una ricerca girano in parallelo, e una
+ricerca richiede 353 ms mediani, contro i 776 di prima dei frammenti.
 
 ---
 
