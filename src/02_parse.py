@@ -96,9 +96,15 @@ RE_CITAZIONE = re.compile(
     # L'ordine conta: le alternative vanno dalla piu' specifica alla piu'
     # generica. Con "Legge" davanti, "Decreto Legge n.89/2014" veniva letto
     # come "Legge n.89/2014" e la norma finiva sotto l'id sbagliato.
+    #
+    # Statuto, Notifica, Ordinanza, Verbale ed Errata Corrige mancavano
+    # dall'alternanza pur essendo tipi che comune.PREFISSI sa gia' tradurre in
+    # un id: 338 documenti citavano un atto di questi tipi senza che il rinvio
+    # venisse riconosciuto (389 occorrenze stimate).
     r"(?P<tipo>Legge\s+Costituzionale|Legge\s+Qualificata"
     r"|Decreto\s+Delegato|Decreto\s+Legge|Decreto\s+Reggenziale"
-    r"|Decreto\s+Consiliare|Decreto|Regolamento|Legge)"
+    r"|Decreto\s+Consiliare|Decreto|Regolamento|Legge"
+    r"|Errata\s+Corrige|Notifica|Ordinanza|Verbale|Statuto)"
     r"\s*"
     r"(?:(?P<giorno>\d{1,2})\s+(?P<mese>gennaio|febbraio|marzo|aprile|maggio|giugno"
     r"|luglio|agosto|settembre|ottobre|novembre|dicembre)\s+(?P<anno_data>\d{4})\s*)?"
@@ -106,6 +112,31 @@ RE_CITAZIONE = re.compile(
     r"(?:\s*/\s*(?P<anno_slash>\d{4}))?",
     re.I,
 )
+
+# Un tipo in piu' nell'alternanza sposta l'id di destinazione della citazione:
+# le prove girano all'import come quelle di RE_BERSAGLIO.
+_PROVE_CITAZIONE = [
+    ("ai sensi dello Statuto n.12/1600", ("Statuto", 12, 1600)),
+    ("vista la Notifica n.4/2019", ("Notifica", 4, 2019)),
+    ("richiamata l'Ordinanza n.7/2020", ("Ordinanza", 7, 2020)),
+    ("visto il Verbale n.3/2018", ("Verbale", 3, 2018)),
+    ("come da Errata Corrige n.9/2015", ("Errata Corrige", 9, 2015)),
+    ("la Legge 29 luglio 2014 n.125", ("Legge", 125, 2014)),
+    ("il Decreto Delegato n.62/2008", ("Decreto Delegato", 62, 2008)),
+    # non sono citazioni normative: manca il numero d'atto
+    ("lo statuto della societa' per azioni X", None),
+    ("lo statuto della societa' X n.5 del registro", None),
+    ("il verbale della seduta del Consiglio", None),
+]
+for _testo, _atteso in _PROVE_CITAZIONE:
+    _m = RE_CITAZIONE.search(_testo)
+    _ris = None
+    if _m:
+        _anno = _m.group("anno_slash") or _m.group("anno_data")
+        _ris = (re.sub(r"\s+", " ", _m.group("tipo")).strip().title(),
+                int(_m.group("numero")), int(_anno) if _anno else None)
+    assert _ris == _atteso, f"RE_CITAZIONE: {_testo!r} -> {_ris!r}"
+
 
 # "articolo 10 della Legge ..." -> il bersaglio della citazione precede la norma.
 #
@@ -362,6 +393,123 @@ for _nome, _righe_test, _i, _atteso in _PROVE_MARCATORE:
     assert _marcatore_atto(_righe_test, _i) == _atteso, f"marcatore atto ({_nome})"
 
 
+# --- Intestazione minuscola: testo andato a capo, non un articolo ---
+#
+# "... di cui al successivo / articolo 20." finisce su due righe, e la seconda
+# ha la forma di un'intestazione. Le intestazioni vere iniziano con la
+# maiuscola: misurate 114 righe minuscole in 75 documenti, ognuna un articolo
+# inventato che spezza in due il comma in corso (DD-12-2017 ne ha 27).
+def intestazione_articolo(riga):
+    """RE_ARTICOLO, ma solo se la riga comincia con la maiuscola."""
+    if not riga or riga[0].islower():
+        return None
+    return RE_ARTICOLO.match(riga)
+
+
+_PROVE_INTESTAZIONE = [
+    ("Art. 20", "20"),
+    ("ART. 5", "5"),
+    ("Articolo 12", "12"),
+    ("articolo 20.", None),
+    ("art. 166", None),
+    ("art.9.", None),
+]
+for _riga, _atteso in _PROVE_INTESTAZIONE:
+    _m = intestazione_articolo(_riga)
+    assert (_m.group(1) if _m else None) == _atteso, f"intestazione minuscola: {_riga!r}"
+
+
+# --- Convenzione estera dentro il dispositivo ---
+#
+# Stessa famiglia del taglio alla promulgazione: un atto di ratifica riporta
+# per intero il testo di una convenzione, che ha una numerazione propria e
+# riparte da "Art. 1". Senza fermarsi, quegli articoli diventano articoli del
+# decreto sammarinese. Misurato: 6 documenti (X-3-1942, D-9-1972, D-28-1924,
+# DC-16-1918, DR-12-1922, DC-21-1914), 66 intestazioni, 61 gia' diventate
+# articoli propri. Nei decreti di ratifica recenti la convenzione sta dopo la
+# formula di promulgazione, ed e' gia' esclusa da _cerca_promulgazione().
+RE_ART_PERMISSIVA_CONV = re.compile(r"^Art(?:icolo)?\.?\s*(\d+)", re.I)
+RE_RATIFICA = re.compile(r"ratific|piena\s+ed?\s+intera\s+esecuzione|recepit", re.I)
+RE_TRATTATO = re.compile(r"\b(?:Convenzione|Trattato|Accordo|Protocollo|"
+                         r"Parti\s+contraenti|Stati\s+membri)\b")
+MIN_ART_CONVENZIONE = 5
+
+
+def inizio_convenzione(righe):
+    """
+    Indice della riga da cui comincia una convenzione riportata nel testo.
+
+    Tre condizioni insieme: almeno MIN_ART_CONVENZIONE righe "Art..." prima
+    della promulgazione, una numerazione che riparte da 1 dopo la prima
+    intestazione, e fra le due una frase di ratifica che nomina un trattato.
+    """
+    teste = []
+    for i, r in enumerate(righe):
+        s = r.strip()
+        if not s or s[0] != "A":
+            continue
+        if teste and _cerca_promulgazione(righe, i):
+            break
+        m = RE_ART_PERMISSIVA_CONV.match(s)
+        if m:
+            teste.append((i, int(m.group(1))))
+        elif RE_ARTICOLO.match(s):      # "Articolo Unico" del decreto di ratifica
+            teste.append((i, None))
+    if len(teste) < MIN_ART_CONVENZIONE:
+        return None
+    primo = teste[0][0]
+    ripartenze = [i for i, n in teste if n == 1 and (i > primo or teste[0][1] is None)]
+    if not ripartenze:
+        return None
+    fra = " ".join(r.strip() for r in righe[primo:ripartenze[0]])
+    if RE_RATIFICA.search(fra) and RE_TRATTATO.search(fra):
+        return ripartenze[0]
+    return None
+
+
+_PROVE_CONVENZIONE = [
+    ("atto di ratifica: la convenzione riparte da Art. 1",
+     ["Articolo Unico", "1.", "E' ratificata la Convenzione fra la Repubblica di San",
+      "Marino e il Regno d'Italia in materia postale.", "",
+      "Art. 1.", "- Le Parti contraenti si impegnano al servizio reciproco.",
+      "Art. 2.", "- Le spese sono ripartite in parti uguali.",
+      "Art. 3.", "- La convenzione ha durata decennale.",
+      "Art. 4.", "- Le controversie sono risolte in via diplomatica."], 5),
+    ("decreto normale: nessuna ratifica, nessun taglio",
+     ["Art. 1", "1.", "Il presente decreto disciplina l'accesso agli atti.",
+      "Art. 2", "1.", "Le domande si presentano all'ufficio competente.",
+      "Art. 3", "1.", "Il regolamento entra in vigore subito.",
+      "Art. 4", "1.", "Sono abrogate le disposizioni contrarie.",
+      "Art. 5", "1.", "Il presente decreto e' pubblicato."], None),
+]
+for _nome, _righe_test, _atteso in _PROVE_CONVENZIONE:
+    assert inizio_convenzione(_righe_test) == _atteso, f"inizio convenzione ({_nome})"
+
+
+# --- Errata Corrige: non ha articoli propri ---
+#
+# Un'errata corrige riporta la formulazione corretta di un articolo di un
+# ALTRO atto ("La formulazione corretta dell'articolo 6 ... e' la seguente:
+# Art. 6"). Quelle intestazioni diventavano articoli suoi: 31 documenti su
+# 193 ne producevano, tutti sbagliati. Senza intestazioni il testo passa da
+# struttura_dedotta() e resta interamente nel JSON, dichiarato come dedotto.
+def e_errata_corrige(id_norma, meta):
+    if PREFISSI.get(str((meta or {}).get("tipo") or "").strip().lower()) == "EC":
+        return True
+    return str(id_norma).startswith("EC-")
+
+
+_PROVE_ERRATA = [
+    ("EC-None-2019~17162000", {}, True),
+    ("EC-12-2020", {"tipo": "Errata Corrige"}, True),
+    ("L-87-2026", {"tipo": "Legge"}, False),
+    ("DD-45-2010", {"tipo": "Decreto Delegato"}, False),
+    ("L-1-2020", {"tipo": "errata corrige"}, True),
+]
+for _nid, _meta, _atteso in _PROVE_ERRATA:
+    assert e_errata_corrige(_nid, _meta) == _atteso, f"errata corrige: {_nid}"
+
+
 def righe_pdf(path):
     doc = fitz.open(path)
     righe = []
@@ -531,6 +679,11 @@ def parse(id_norma, meta, righe=None):
     if righe is None:
         righe = righe_pdf(RAW / id_norma / "testo.pdf")
 
+    # Un'errata corrige non ha articoli propri: le sue "Art. N" sono
+    # dell'atto corretto. Il testo passa da struttura_dedotta().
+    errata = e_errata_corrige(id_norma, meta)
+    taglio_convenzione = inizio_convenzione(righe)
+
     partizioni = []       # albero: Titoli con figli Capi
     articoli = []
     ids_usati = set()
@@ -549,6 +702,7 @@ def parse(id_norma, meta, righe=None):
     iniziato = False
     allegato_testo = None
     allegato_ha_struttura_propria = False
+    convenzione_testo = None
 
     def chiudi_comma():
         """
@@ -672,8 +826,15 @@ def parse(id_norma, meta, righe=None):
             allegato_ha_struttura_propria = _ha_struttura_propria(resto)
             break
 
+        # --- Convenzione riportata nel dispositivo ---
+        # Da qui in poi gli "Art. N" sono di un trattato, non del decreto.
+        if taglio_convenzione is not None and i >= taglio_convenzione:
+            chiudi_comma()
+            convenzione_testo = unisci(righe[i:])
+            break
+
         m_part = RE_PARTIZIONE.match(riga)
-        m_art = RE_ARTICOLO.match(riga)
+        m_art = None if errata else intestazione_articolo(riga)
 
         # --- Partizione: TITOLO / CAPO / SEZIONE ---
         if m_part:
@@ -836,6 +997,7 @@ def parse(id_norma, meta, righe=None):
         "partizioni": partizioni,
         "articoli": articoli,
         "allegatoPostPromulgazione": allegato_testo,
+        "convenzioneNelDispositivo": convenzione_testo,
         "allegatoHaStrutturaPropria": allegato_ha_struttura_propria,
     }
 
@@ -854,6 +1016,30 @@ for _righe_test in _PROVE_STRUTTURA_DEDOTTA:
     _testi = " ".join(c["testo"] for a in _d["articoli"] for c in a["commi"])
     for _r in _righe_test:
         assert _r.split(" ", 1)[1] in _testi, f"testo perso: {_r!r}"
+
+
+_PROVE_FIX_PARSE = [
+    ("errata corrige: nessun articolo proprio, testo conservato",
+     "EC-None-2019~17162000", {"tipo": "Errata Corrige"},
+     ["ERRATA CORRIGE",
+      "La formulazione corretta dell'articolo 6 della Legge n.145/2003 e' la seguente:",
+      "Art. 6", "1.", "Il Consiglio delibera a maggioranza assoluta."],
+     None, "Il Consiglio delibera a maggioranza assoluta."),
+    ("intestazione minuscola: resta testo del comma",
+     "T-3-2000", {"tipo": "Legge"},
+     ["Art. 1", "1.", "Le imposte sono riscosse nei modi previsti dal successivo",
+      "articolo 20.", "Art. 2", "1.", "Le spese sono a carico del richiedente."],
+     ["T-3-2000/art-1", "T-3-2000/art-2"], "articolo 20."),
+]
+for _nome, _nid, _meta, _righe_test, _ids_attesi, _atteso_testo in _PROVE_FIX_PARSE:
+    _d = parse(_nid, dict(_meta), righe=_righe_test)
+    if _ids_attesi is not None:
+        assert [a["id"] for a in _d["articoli"]] == _ids_attesi, \
+            f"{_nome}: {[a['id'] for a in _d['articoli']]}"
+    else:
+        assert all(a.get("strutturaDedotta") for a in _d["articoli"]), _nome
+    _testi = " ".join(c["testo"] for a in _d["articoli"] for c in a["commi"]) + " " + _d["preambolo"]
+    assert _atteso_testo in _testi, f"testo perso ({_nome}): {_atteso_testo!r}"
 
 
 _PROVE_DUE_ATTI = [
