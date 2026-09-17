@@ -10,6 +10,10 @@ langchain-neo4j
 langchain-anthropic
 langchain-voyageai
 neo4j
+# I contatori di consumo datano il giorno nel fuso di Roma, e python:3.12-slim
+# non porta con se' il database dei fusi: senza questo, zoneinfo non trova
+# "Europe/Rome" e il servizio non parte affatto.
+tzdata
 python-dotenv
 fastapi
 uvicorn[standard]

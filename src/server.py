@@ -220,7 +220,7 @@ def chat(d: Domanda, utente: Utente = Depends(utente_corrente)):
 
     # I tetti si verificano PRIMA di chiamare Anthropic: dopo sarebbe inutile,
     # i soldi sono gia' spesi.
-    rifiuto = archivio.verifica_limiti(utente.id)
+    rifiuto = archivio.verifica_limiti(utente.id, utente.fasce)
     if rifiuto:
         raise HTTPException(status_code=429, detail=rifiuto)
 
@@ -317,7 +317,7 @@ def riscontro(r: Riscontro, utente: Utente = Depends(utente_corrente)):
 def conversazioni(utente: Utente = Depends(utente_corrente)):
     return {
         "conversazioni": archivio.elenca_conversazioni(utente.id),
-        "consumi": archivio.consumi_correnti(utente.id),
+        "consumi": archivio.consumi_correnti(utente.id, utente.fasce),
         "utente": {"nome": utente.nome, "email": utente.email},
     }
 

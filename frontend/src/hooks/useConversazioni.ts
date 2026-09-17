@@ -14,6 +14,11 @@ export interface Consumi {
   limiteGiorno: number;
   costoMese: number;
   limiteMese: number;
+  /** Istanti assoluti in cui i due contatori ripartono (mezzanotte di Roma,
+   *  primo del mese). Sono istanti e non durate perche' la pagina resta
+   *  aperta per ore: il conto alla rovescia lo rifa' il browser. */
+  azzeraGiorno: string;
+  azzeraMese: string;
 }
 
 export interface Profilo {

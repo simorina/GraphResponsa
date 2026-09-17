@@ -54,6 +54,21 @@ Parameters:
     Default: '20'
     Description: Tetto di spesa in dollari per utente al mese, verso Anthropic e Voyage
 
+  LimitiFascia:
+    Type: String
+    Default: 'prova:10:2,base:50:5,pro:100:25'
+    Description: >-
+      I tetti per fascia, nella forma gruppo:consultazioni-al-giorno:dollari-al-mese.
+      Il gruppo e' un gruppo del pool Cognito. Chi non ne ha ricade su
+      LimiteRichiesteGiorno e LimiteCostoMese.
+
+  FusoOrario:
+    Type: String
+    Default: 'Europe/Rome'
+    Description: >-
+      Il fuso in cui si data il giorno dei contatori. In UTC l'azzeramento
+      cadrebbe all'01:00 d'inverno e alle 02:00 d'estate.
+
   GiorniConservazioneChat:
     Type: Number
     Default: 90
@@ -406,6 +421,39 @@ Resources:
     Properties:
       Domain: !Sub '${NomeProgetto}-${AWS::AccountId}'
       UserPoolId: !Ref PoolUtenti
+
+  # Le fasce di consumo, come gruppi del pool.
+  #
+  # Il gruppo viaggia gia' dentro l'ID token come `cognito:groups`: il servizio
+  # lo legge da li' e non deve interrogare nessuna tabella a ogni domanda. I
+  # numeri non stanno qui ma nel parametro LimitiFascia, cosi' si ritoccano al
+  # rilascio senza rifare l'immagine.
+  #
+  # Chi non sta in nessun gruppo ricade sui limiti globali: aggiungere un
+  # utente non e' un passaggio obbligato per farlo funzionare.
+  FasciaProva:
+    Type: AWS::Cognito::UserPoolGroup
+    Properties:
+      GroupName: prova
+      Description: 10 consultazioni al giorno, 2 dollari al mese
+      UserPoolId: !Ref PoolUtenti
+      Precedence: 30
+
+  FasciaBase:
+    Type: AWS::Cognito::UserPoolGroup
+    Properties:
+      GroupName: base
+      Description: 50 consultazioni al giorno, 5 dollari al mese
+      UserPoolId: !Ref PoolUtenti
+      Precedence: 20
+
+  FasciaPro:
+    Type: AWS::Cognito::UserPoolGroup
+    Properties:
+      GroupName: pro
+      Description: 100 consultazioni al giorno, 25 dollari al mese
+      UserPoolId: !Ref PoolUtenti
+      Precedence: 10
 
   # =========================================================================
   # Segreti
@@ -814,6 +862,10 @@ Resources:
               Value: !Ref LimiteRichiesteGiorno
             - Name: LIMITE_COSTO_MESE
               Value: !Ref LimiteCostoMese
+            - Name: LIMITI_FASCIA
+              Value: !Ref LimitiFascia
+            - Name: FUSO_ORARIO
+              Value: !Ref FusoOrario
             - Name: COGNITO_POOL_ID
               Value: !Ref PoolUtenti
             - Name: COGNITO_CLIENT_ID

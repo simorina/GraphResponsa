@@ -3,6 +3,11 @@ langchain-neo4j
 langchain-anthropic
 langchain-voyageai
 neo4j
+certifi
+# Il database dei fusi orari, che i contatori di consumo usano per datare il
+# giorno a Roma. Windows non ne ha uno che zoneinfo sappia leggere, e
+# python:3.12-slim - l'immagine di produzione - nemmeno.
+tzdata
 python-dotenv
 fastapi
 uvicorn
