@@ -14,6 +14,7 @@ La docstring di ogni funzione diventa la descrizione che il modello legge per
 decidere se usarla: e' documentazione operativa, non commento.
 """
 
+import difflib
 import hashlib
 import logging
 import os
@@ -937,6 +938,49 @@ assert _accorpa({"normaId": "DD-81-2008", "anno": 2008},
                 {"normaId": "DD-67-2008", "anno": 2008})["normaId"] == "DD-81-2008"
 
 
+SOMIGLIANZA = 0.82
+RUBRICA_MINIMA = 12
+
+
+def _stessa_voce(a, b):
+    """Lo stesso passo in due edizioni diverse dello stesso atto.
+
+    Non basta l'impronta del testo: le annate delle violazioni amministrative
+    ripetono la stessa voce cambiando gli importi ("da L.40.000 a L.100.000",
+    poi "da € 20,00 a € 51,00"), quindi il testo non e' identico. Su dodici
+    domande da avvocato il 59% dei posti utili era occupato da quelle tabelle,
+    e la legge di merito finiva sesta.
+
+    Si accorpa solo con tre indizi insieme: stessa rubrica (lunga, perche'
+    "Definizioni" coincide per caso), stesso numero d'articolo e testo che si
+    somiglia oltre l'82%. Due leggi diverse con lo stesso art. 5 "Disposizioni
+    transitorie" restano due risultati, perche' il testo e' un altro.
+    """
+    if a.get("normaId") == b.get("normaId"):
+        return False
+    rubrica = " ".join((a.get("rubrica") or "").lower().split())
+    if len(rubrica) < RUBRICA_MINIMA or rubrica != " ".join((b.get("rubrica") or "").lower().split()):
+        return False
+    if str(a.get("articolo")) != str(b.get("articolo")):
+        return False
+    uno, due = (a.get("testo") or "")[:400], (b.get("testo") or "")[:400]
+    if not uno or not due:
+        return False
+    return difflib.SequenceMatcher(None, uno, due).quick_ratio() >= SOMIGLIANZA
+
+
+assert _stessa_voce({"normaId": "DD-149-2016", "rubrica": "Costituiscono violazioni amministrative, di competenza del Commissario della Legge",
+                     "articolo": "all-A", "testo": "[Codice Penale] art. 184, 2° comma sanzione da € 20,00 a € 51,00"},
+                    {"normaId": "D-157-1996", "rubrica": "Costituiscono violazioni amministrative, di competenza del Commissario della Legge",
+                     "articolo": "all-A", "testo": "[Codice Penale] art.184, 2° comma sanzione da L.40.000 a L.100.000"})
+assert not _stessa_voce({"normaId": "L-1-2000", "rubrica": "Disposizioni transitorie", "articolo": "5",
+                         "testo": "Le domande presentate prima dell'entrata in vigore restano disciplinate dalla legge anteriore."},
+                        {"normaId": "L-2-2010", "rubrica": "Disposizioni transitorie", "articolo": "5",
+                         "testo": "Il Congresso di Stato adotta i regolamenti attuativi entro sei mesi dalla pubblicazione."})
+assert not _stessa_voce({"normaId": "L-1-2000", "rubrica": "Sanzioni", "articolo": "5", "testo": "uguale"},
+                        {"normaId": "L-2-2010", "rubrica": "Sanzioni", "articolo": "5", "testo": "uguale"})
+
+
 def _fondi(liste, limite, taglia=True):
     """Unisce piu' liste ordinate col metodo dei ranghi reciproci.
 
@@ -971,10 +1015,21 @@ def _fondi(liste, limite, taglia=True):
                 elif r.get("daCarattere") is not None:
                     _aggiungi_passi(gia, [r["daCarattere"]] + (r.get("altriPassi") or []))
 
-    ordinate = sorted(punti, key=lambda f: punti[f], reverse=True)[:limite]
-    finali = []
-    for i, impronta in enumerate(ordinate, 1):
+    # Prima si accorpano le edizioni diverse dello stesso passo, poi si taglia:
+    # tagliare per primo lascerebbe i posti liberati alle stesse tabelle.
+    ordinate = sorted(punti, key=lambda f: punti[f], reverse=True)
+    scelti = []
+    for impronta in ordinate:
         r = primo[impronta]
+        gemello = next((k for k, x in enumerate(scelti) if _stessa_voce(x, r)), None)
+        if gemello is None:
+            if len(scelti) >= limite:
+                continue
+            scelti.append(r)
+        else:
+            scelti[gemello] = _accorpa(scelti[gemello], r)
+    finali = []
+    for i, r in enumerate(scelti, 1):
         r["rango"] = i
         if taglia:
             r["troncato"] = _troncato(r["testo"])

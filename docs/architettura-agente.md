@@ -296,6 +296,28 @@ nessuno l'ha dichiarato. Con quel criterio la voce sull'art. 184 usciva sotto
 una scheda del 1998 mai marcata, al posto del decreto del 2001 che la
 sostituisce.
 
+**Lo stesso passo in edizioni diverse.** L'impronta del testo non basta: le
+annate delle violazioni amministrative ripetono la stessa voce cambiando gli
+importi (*«da L.40.000 a L.100.000»*, poi *«da € 20,00 a € 51,00»*), e il
+testo non è più identico. `_stessa_voce()` le accorpa quando coincidono
+**rubrica** (lunga almeno 12 caratteri, perché *«Definizioni»* coincide per
+caso), **numero d'articolo** e **testo oltre l'82% di somiglianza**. Due leggi
+con lo stesso art. 5 *«Disposizioni transitorie»* restano due risultati, perché
+il testo è un altro.
+
+Misurato su dodici domande da avvocato (trust dopo la L.123/2019, oblazione,
+titoli abilitativi, antiriciclaggio, repertori notarili, canone di locazione):
+
+| | atto atteso nei primi 3 | fra i primi 8 | risultati abrogati |
+|---|---|---|---|
+| Prima | 8/12 | 11/12 | 49 |
+| Edizione più recente | 10/12 | 12/12 | 46 |
+| Con l'accorpamento | 10/12 | 12/12 | 43 |
+
+Nell'antiriciclaggio la L.92/2008 passa dal sesto al secondo posto, e il
+Codice Ambientale si unisce alla propria ratifica invece di occupare due
+posti.
+
 ### 4.4 Il punteggio non e' esposto, e non e' una svista
 
 Il retriever ibrido normalizza ciascun ramo sul proprio massimo prima di
