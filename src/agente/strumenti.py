@@ -266,8 +266,10 @@ def _full_text(query, limite, dal_anno=None, al_anno=None, prefissi=None,
         impronta = r.get("impronta") or _firma(r["testo"])
         if impronta in viste:
             gia = viste[impronta]
-            if r["normaId"] != gia["normaId"] and r["normaId"] not in gia.get("ancheIn", []):
-                gia.setdefault("ancheIn", []).append(r["normaId"])
+            scelto = _accorpa(gia, r)
+            if scelto is not gia:
+                tenute[next(i for i, x in enumerate(tenute) if x is gia)] = scelto
+                viste[impronta] = scelto
             continue
         viste[impronta] = r
         tenute.append(r)
@@ -874,6 +876,38 @@ def _piu_recenti(righe):
     return righe
 
 
+def _accorpa(gia, r):
+    """Fra due passi identici di atti diversi, quello da mostrare.
+
+    L'altro atto finisce in `ancheIn`. Si mostra l'atto non abrogato e, fra
+    pari, il piu' recente. Prima vinceva il primo trovato: le venticinque
+    annate delle violazioni amministrative ripetono le stesse voci, e alla
+    domanda sull'art. 184 del Codice Penale usciva il DD-209-2011, abrogato,
+    con il decreto successivo nascosto in `ancheIn`.
+    """
+    altro = r.get("normaId")
+    if not altro or altro == gia.get("normaId"):
+        return gia
+    if (not r.get("abrogata"), r.get("anno") or 0) > (not gia.get("abrogata"), gia.get("anno") or 0):
+        scelto = dict(r)
+        if r.get("altriPassi"):
+            scelto["altriPassi"] = list(r["altriPassi"])
+        scelto["ancheIn"] = [gia["normaId"]] + [x for x in gia.get("ancheIn", []) if x != altro]
+        return scelto
+    if altro not in gia.get("ancheIn", []):
+        gia.setdefault("ancheIn", []).append(altro)
+    return gia
+
+
+_vecchio = {"normaId": "DD-209-2011", "anno": 2011, "abrogata": True}
+_vivo = {"normaId": "DD-1-2018", "anno": 2018, "abrogata": None}
+assert _accorpa(_vecchio, _vivo)["normaId"] == "DD-1-2018"
+assert _accorpa(_vecchio, _vivo)["ancheIn"] == ["DD-209-2011"]
+assert _accorpa(dict(_vivo), {"normaId": "DD-5-2025", "anno": 2025, "abrogata": True})["ancheIn"] == ["DD-5-2025"]
+assert _accorpa({"normaId": "L-1-2000", "anno": 2000, "ancheIn": ["L-2-2010"]},
+                {"normaId": "L-2-2010", "anno": 2010})["ancheIn"] == ["L-1-2000"]
+
+
 def _fondi(liste, limite, taglia=True):
     """Unisce piu' liste ordinate col metodo dei ranghi reciproci.
 
@@ -893,6 +927,10 @@ def _fondi(liste, limite, taglia=True):
                 primo[impronta] = dict(r)
                 if r.get("altriPassi"):
                     primo[impronta]["altriPassi"] = list(r["altriPassi"])
+            elif r.get("normaId") != primo[impronta].get("normaId"):
+                # Stesso testo sotto un altro atto: si annota dove ricorre,
+                # invece di spendere un posto utile per ripeterlo.
+                primo[impronta] = _accorpa(primo[impronta], r)
             else:
                 gia = primo[impronta]
                 if r.get("daCarattere") is not None and gia.get("daCarattere") is None:
@@ -903,11 +941,6 @@ def _fondi(liste, limite, taglia=True):
                                altriPassi=list(r.get("altriPassi") or []))
                 elif r.get("daCarattere") is not None:
                     _aggiungi_passi(gia, [r["daCarattere"]] + (r.get("altriPassi") or []))
-                # Stesso testo sotto un altro atto: si annota dove ricorre,
-                # invece di spendere un posto utile per ripeterlo.
-                altro = r.get("normaId")
-                if altro and altro != gia["normaId"] and altro not in gia.get("ancheIn", []):
-                    gia.setdefault("ancheIn", []).append(altro)
 
     ordinate = sorted(punti, key=lambda f: punti[f], reverse=True)[:limite]
     finali = []

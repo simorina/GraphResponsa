@@ -28,6 +28,16 @@ segnali si sovrappongono per 88 norme. Il titolo dice CHE un
 atto e' caduto, i commi dicono DA CHI: si tengono entrambi, il flag `abrogata`
 dall'unione e l'attribuzione `abrogataDa` dai soli commi. In tutto 424 norme.
 
+## La ratifica e il decreto ratificato
+
+Un decreto e la sua ratifica ("Ratifica Decreto Delegato 29 dicembre 2016
+n.149") portano lo stesso testo, e l'atto che abroga la disciplina ne nomina di
+solito uno solo. Il 17/09 erano 30 coppie su 527 con una sola delle due
+abrogata, sempre la ratifica: DD-1-2018 abroga DD-12-2017, ratifica del
+DD-149-2016, e il DD-149-2016 risultava in vigore accanto al decreto che lo
+sostituisce. Ora chi abroga l'uno abroga anche l'altro: l'arco ABROGA verso il
+gemello porta `perRatifica`, l'atto da cui la marcatura e' passata (ratifiche).
+
 ## Il livello parziale: dentro atti che restano vivi
 
 Un articolo o un comma soppressi dentro una legge che per il resto vige sono il
@@ -951,6 +961,110 @@ def candidati(g):
     return trovati, scarti, in_attesa_di_maturare(righe)
 
 
+RATIFICA = re.compile(r"\bratifica\s+(?:del\s+|al\s+)?(decret.{0,160})", re.I)
+
+
+def ratifiche(g):
+    """Le coppie (ratifica, decreto ratificato) fra gli atti caricati.
+
+    Il decreto ratificato e' il primo atto nominato dopo "Ratifica",
+    nell'intestazione del preambolo o, se li' manca, nel titolo della scheda.
+    L'intestazione e' il testo ufficiale, il titolo una trascrizione del
+    portale: per DD-15-2008 il titolo dice "Decreto Delegato 28-12-2008
+    n.137", il preambolo "28 dicembre 2007 n.137". Il riferimento si risolve
+    con gli stessi controlli delle abrogazioni: il tipo dichiarato sceglie fra
+    gli omonimi, la data, se c'e', deve essere quella dell'atto, e la ratifica
+    non precede il decreto (col titolo sbagliato il DD-137-2008 sulla custodia
+    dei beni sarebbe caduto con le violazioni amministrative). Le errata
+    corrige nominano la ratifica nel titolo ma non lo sono.
+    """
+    righe = g.query("""
+        MATCH (r:Norma) WHERE r.caricata AND toLower(r.titolo) CONTAINS 'ratifica'
+          AND NOT r.id STARTS WITH 'EC-' AND NOT toLower(r.titolo) CONTAINS 'errata'
+        RETURN r.id AS id, r.titolo AS titolo, r.data AS data,
+               substring(coalesce(r.preambolo, ''), 0, 600) AS intestazione
+    """)
+    fuori = []
+    for r in righe:
+        m = (RATIFICA.search(r["intestazione"].translate(APOSTROFI))
+             or RATIFICA.search((r["titolo"] or "").translate(APOSTROFI)))
+        nominato = m and NOMINATO.search(m.group(1))
+        if not nominato:
+            continue
+        numero, anno = estremi(nominato.groups()[1:])
+        tipo = re.sub(r"\s*[-–]\s*", " ", " ".join(nominato.group(1).lower().split()))
+        norme = g.query("""
+            MATCH (n:Norma) WHERE n.numero = $numero AND n.anno = $anno AND n.caricata
+            RETURN n.id AS id, toString(n.data) AS data
+        """, {"numero": numero, "anno": anno})
+        motivo, scelto = atto_del_tipo([x["id"] for x in norme], tipo.replace("consigliare", "consiliare"))
+        if motivo or scelto == r["id"]:
+            continue
+        data = next(x["data"] for x in norme if x["id"] == scelto)
+        if data_discorde(nominato.group(0), numero, anno, data):
+            continue
+        if not data or not r["data"] or str(r["data"]) < data:
+            continue
+        fuori.append((r["id"], scelto))
+    return fuori
+
+
+def _anno(norma_id):
+    try:
+        return int(norma_id.split("~")[0].split("-")[2])
+    except (IndexError, ValueError):
+        return None
+
+
+def per_ratifica(coppie, unici, abrogate):
+    """Le abrogazioni che passano dal decreto alla sua ratifica e viceversa.
+
+    Restituisce (archi nuovi {(fonte, bersaglio): arco}, atti marcati in
+    piu'). Si ripete finche' qualcosa cambia; un atto non ne abroga mai uno
+    posteriore, e nessuno abroga se stesso.
+    """
+    archi, marcati = {}, set()
+    cambiato = True
+    while cambiato:
+        cambiato = False
+        fonti = {}
+        for t in list(unici.values()) + list(archi.values()):
+            fonti.setdefault(t["bersaglio"], []).append(t)
+        for ratifica, ratificato in coppie:
+            for caduto, gemello in ((ratifica, ratificato), (ratificato, ratifica)):
+                if caduto not in abrogate | marcati or gemello in abrogate | marcati:
+                    continue
+                nuovi = [t for t in fonti.get(caduto, [])
+                         if t["fonte"] != gemello
+                         and (_anno(gemello) or 0) <= (_anno(t["fonte"]) or 9999)]
+                if caduto in fonti and not nuovi:
+                    continue
+                marcati.add(gemello)
+                cambiato = True
+                for t in nuovi:
+                    archi.setdefault((t["fonte"], gemello), {**t, "bersaglio": gemello,
+                                                              "perRatifica": caduto})
+    return archi, marcati
+
+
+# DD-1-2018 abroga la ratifica DD-12-2017: cade anche il DD-149-2016. Il
+# decreto marcato solo dal titolo passa la marcatura senza arco.
+_archi, _marcati = per_ratifica(
+    [("DD-12-2017", "DD-149-2016"), ("DD-20-2013", "DD-158-2012"), ("D-7-2003", "D-114-2002")],
+    {("DD-1-2018", "DD-12-2017"): {"fonte": "DD-1-2018", "bersaglio": "DD-12-2017"},
+     ("DD-179-2013", "DD-158-2012"): {"fonte": "DD-179-2013", "bersaglio": "DD-158-2012"},
+     ("DD-149-2016", "DD-196-2015"): {"fonte": "DD-149-2016", "bersaglio": "DD-196-2015"}},
+    {"DD-12-2017", "DD-158-2012", "DD-196-2015", "D-7-2003"})
+assert set(_archi) == {("DD-1-2018", "DD-149-2016"), ("DD-179-2013", "DD-20-2013")}
+assert _archi[("DD-1-2018", "DD-149-2016")]["perRatifica"] == "DD-12-2017"
+assert _marcati == {"DD-149-2016", "DD-20-2013", "D-114-2002"}
+# Un atto non ne abroga uno posteriore: la ratifica del 2020 di un decreto
+# abrogato nel 2019 resta com'e'.
+assert per_ratifica([("DD-5-2020", "DD-90-2018")],
+                    {("DD-1-2019", "DD-90-2018"): {"fonte": "DD-1-2019", "bersaglio": "DD-90-2018"}},
+                    {"DD-90-2018"}) == ({}, set())
+
+
 def parziali(g):
     """Articoli e commi soppressi dentro atti che per il resto restano vivi.
 
@@ -1135,10 +1249,23 @@ def main():
             decaduti.add(r["id"])
     tutte = dai_commi | dal_titolo
 
+    # Decreto e ratifica portano lo stesso testo: chi abroga l'uno abroga
+    # l'altro.
+    coppie = ratifiche(g)
+    archi_ratifica, marcati_ratifica = per_ratifica(coppie, unici, tutte)
+    unici.update(archi_ratifica)
+    tutte |= marcati_ratifica
+    print(f"\n  coppie decreto-ratifica: {len(coppie)}; "
+          f"abrogate per ratifica: {len(marcati_ratifica)} ({len(archi_ratifica)} archi)")
+    for x in sorted(marcati_ratifica):
+        via = sorted({t["perRatifica"] for t in archi_ratifica.values() if t["bersaglio"] == x})
+        print(f"    {x:<14} per {', '.join(via) or '(abrogazione dal titolo)'}")
+
     print(f"\n  coppie fonte->bersaglio: {len(unici)}")
     print(f"  abrogate secondo i commi:  {len(dai_commi):>4}")
     print(f"  abrogate secondo il titolo:{len(dal_titolo):>4}  (di cui decadute {len(decaduti)})")
     print(f"  in comune:                 {len(dai_commi & dal_titolo):>4}")
+    print(f"  per ratifica:              {len(marcati_ratifica):>4}")
     print(f"  ABROGATE IN TUTTO:         {len(tutte):>4}")
 
     art, com = parziali(g)
@@ -1181,9 +1308,10 @@ def main():
         UNWIND $archi AS a
         MATCH (f:Norma {id: a.fonte}), (b:Norma {id: a.bersaglio})
         MERGE (f)-[r:ABROGA]->(b)
-        SET r.comma = a.comma, r.testo = a.testo
+        SET r.comma = a.comma, r.testo = a.testo, r.perRatifica = a.perRatifica
     """, {"archi": [{"fonte": t["fonte"], "bersaglio": t["bersaglio"],
-                     "comma": t["comma"], "testo": t["testo"][:400]}
+                     "comma": t["comma"], "testo": t["testo"][:400],
+                     "perRatifica": t.get("perRatifica")}
                     for t in unici.values()]})
 
     # Le proprieta' denormalizzate servono alla lettura: le query di risalita

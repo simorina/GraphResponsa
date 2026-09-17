@@ -178,6 +178,7 @@ def famiglie(g):
         WITH n, count(DISTINCT a) AS articoli, collect(c.testo) AS testi
         OPTIONAL MATCH (n)<-[cit:CITA]-()
         RETURN n.id AS id, coalesce(n.titolo, "") AS titolo,
+               coalesce(n.preambolo, "") AS preambolo,
                n.numero AS numero, n.anno AS anno,
                articoli, size(testi) AS commi, testi, count(cit) AS citata
     """, {"sep": SEPARATORE_COLLISIONE})
@@ -235,6 +236,11 @@ def testi_scambiati(g):
     appartenga al testo senza riaprire il portale - ma va detto, perche' e'
     peggio di un doppione: uno dei due atti nel grafo e' una risposta
     sbagliata che si presenta come giusta.
+
+    Il PDF scambiato ha anche lo stesso preambolo. Con preamboli diversi sono
+    due documenti che riportano lo stesso testo: il decreto di ratifica e
+    quello di esecuzione della convenzione col Belgio del 1903 pubblicano
+    entrambi i venti articoli, ognuno sotto il proprio titolo.
     """
     fuori = []
     for base, membri in famiglie(g).items():
@@ -247,6 +253,8 @@ def testi_scambiati(g):
             if len(v) < 2 or len({titolo_normale(x["titolo"]) for x in v}) == 1:
                 continue
             if any(nomina_altro_atto(x["titolo"], x["numero"], x["anno"]) for x in v):
+                continue
+            if len({" ".join(x["preambolo"].lower().split()) for x in v}) > 1:
                 continue
             if not specie_diversa(v) and not titoli_compatibili(v):
                 fuori.append(v)

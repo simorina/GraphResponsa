@@ -93,26 +93,26 @@ Nel nostro Knowledge Graph, le rubriche svolgono due funzioni cruciali:
 
 | Entità / Label | Quantità | Ruolo nel Modello |
 |---|---|---|
-| **`:Comma`** | **`164.669`** | Unità atomica di testo, ricerca semantica e retrieval |
-| **`:Articolo`** | **`74.120`** | Articoli con rubriche, capi e collocazione tematica |
-| **`:Norma`** | **`11.347`** | Tutti gli atti normativi censiti: |
-| ↳ *con testo integrale (`caricata: true`)* | *`11.054`* | *Su 11.136 scaricabili dal portale, 16 tipologie* |
-| ↳ *stub citati (`caricata: false`)* | *`293`* | *Atti richiamati nei testi per tracciare i rinvii* |
-| **`:Frammento`** | **`17.766`** | Pezzi dei commi oltre 6.000 caratteri, con vettore proprio (vedi 4.6) |
+| **`:Comma`** | **`177.369`** | Unità atomica di testo, ricerca semantica e retrieval |
+| **`:Articolo`** | **`77.387`** | Articoli con rubriche, capi e collocazione tematica |
+| **`:Norma`** | **`11.387`** | Tutti gli atti normativi censiti: |
+| ↳ *con testo integrale (`caricata: true`)* | *`11.110`* | *Su 11.136 scaricabili dal portale, 16 tipologie* |
+| ↳ *stub citati (`caricata: false`)* | *`277`* | *Atti richiamati nei testi per tracciare i rinvii* |
+| **`:Frammento`** | **`18.742`** | Pezzi dei commi oltre 6.000 caratteri, con vettore proprio (vedi 4.6) |
 | **`:StatoVigenza`** | **`1`** | Stato del calcolo delle abrogazioni |
-| **TOTALE NODI** | **`267.903`** | |
+| **TOTALE NODI** | **`284.886`** | |
 
 ### Relazioni (Archi)
 
 | Relazione | Quantità | Direzione | Significato |
 |---|---|---|---|
-| **`HA_COMMA`** | **`164.669`** | `Articolo ➔ Comma` | Contenimento strutturale |
-| **`HA_ARTICOLO`** | **`74.120`** | `Norma ➔ Articolo` | Contenimento strutturale |
-| **`CITA`** | **`58.574`** | `(Comma/Norma) ➔ Norma` | Rinvio normativo formale |
-| **`CITA_ARTICOLO`** | **`23.935`** | `Comma ➔ Articolo` | Rinvio puntuale ad articolo specifico risolto |
-| **`ABROGA`** | **`542`** | `Norma ➔ Norma` | Abrogazione di un atto per intero, riconosciuta senza ambiguità |
-| **`HA_FRAMMENTO`** | **`17.766`** | `Comma ➔ Frammento` | Il comma lunghissimo e i suoi pezzi |
-| **TOTALE ARCHI** | **`339.606`** | | |
+| **`HA_COMMA`** | **`177.369`** | `Articolo ➔ Comma` | Contenimento strutturale |
+| **`HA_ARTICOLO`** | **`77.387`** | `Norma ➔ Articolo` | Contenimento strutturale |
+| **`CITA`** | **`68.267`** | `(Comma/Norma) ➔ Norma` | Rinvio normativo formale |
+| **`CITA_ARTICOLO`** | **`26.356`** | `Comma ➔ Articolo` | Rinvio puntuale ad articolo specifico risolto |
+| **`ABROGA`** | **`615`** | `Norma ➔ Norma` | Abrogazione di un atto per intero, riconosciuta senza ambiguità |
+| **`HA_FRAMMENTO`** | **`18.742`** | `Comma ➔ Frammento` | Il comma lunghissimo e i suoi pezzi |
+| **TOTALE ARCHI** | **`368.736`** | | |
 
 `CITA_ARTICOLO` era fermo a 16.763 finche' `RE_BERSAGLIO`, nel parser,
 pretendeva che il numero d'articolo fosse **adiacente** al nome dell'atto. Nel
@@ -642,6 +642,105 @@ dettagli:
   nel 93. L'asterisco rimanda a un'errata sul secondo comma, stampata dopo le
   firme, che non è integrata nel testo.
 
+### Gli allegati che sono tabelle: le violazioni amministrative
+
+Fino al 17/09 **58 atti restavano fuori** dal grafo per *«numerazione
+patologica»*, cioè con un numero d'articolo ripetuto più di tre volte. Riletti
+col parser attuale, erano due famiglie:
+
+- **31 atti con allegati veri**, ciascuno numerato da 1: convenzioni, testi
+  unici, reiterazioni. `articoli.py` li rendeva già univoci con `allN-`, ma il
+  controllo conta le ripetizioni sul numero del testo. Fra questi:
+  - il Codice Ambientale (`DD-44-2012`), citato da 356 commi;
+  - il Testo unico urbanistico (`L-140-2017`), citato da 228;
+  - la disciplina del commercio (`L-130-2010`), citata da 190;
+  - il `DD-162-2021`, citato da 166;
+  - la convenzione del `DC-61-2024`, con 440 articoli.
+- **25 decreti annuali sulle violazioni amministrative** (1996-2016). Hanno sei
+  articoli e poi le tabelle delle infrazioni, che il riconoscitore leggeva come
+  articoli ("art. 166", "artt. 2, 3"). Il `DD-149-2016` risultava di 524
+  articoli.
+
+**Il controllo** sta ora in `src/allegati.py` (`numerazione_patologica`). Un
+atto oltre le tre ripetizioni passa solo a due condizioni:
+- il corpo resta entro le tre ripetizioni;
+- gli allegati sono in sequenza: ognuno parte da 1, ogni numero segue il
+  precedente, e i passi fuori sequenza non superano il 25%.
+
+Le convenzioni e i testi unici stanno sotto il 7%, le tabelle delle violazioni
+sopra il 60%. Il controllo si è solo allargato: un atto che prima passava passa
+ancora.
+
+**Le tabelle.** Il parser chiama `allegati_tabellari` dopo `articoli.py`.
+Si attiva quando gli allegati di un atto hanno la numerazione di una tabella di
+rimandi: almeno tre articoli d'allegato e più del 25% di passi fuori sequenza.
+Non conta quante volte un numero si ripete: otto decreti sulle violazioni del
+1991-2001 restavano sotto le tre ripetizioni ed erano già nel grafo, con
+articoli come `all1-3` e `all2-6`. Serve anche che almeno un allegato abbia
+l'intestazione riconosciuta; senza, la tabella era un falso positivo (la
+reiterazione `D-84-1990`, il protocollo `DC-207-2014`). Sull'intero archivio si
+attiva sui soli **33 decreti sulle violazioni**.
+
+`allegati_tabellari` rilegge le righe dopo la formula di promulgazione:
+
+- **Allegato.** "Allegato A" seguito da *«Costituiscono violazioni
+  amministrative, di competenza del …»* diventa l'articolo `all-A`:
+  - la rubrica è la frase intera, perché dice anche cosa non è di competenza
+    (*«…del Direttore del Dipartimento Prevenzione (…), salvo quelle attribuite
+    all'Ufficio Prevenzione e Ambiente…»*);
+  - `Articolo.titolo` è *«Allegato A»*.
+- **Voce.** "N)" o "N." in sequenza diventa il comma N; un numero fuori
+  sequenza resta testo.
+- **Atto di riferimento.** La voce che non nomina l'atto vale per l'ultimo
+  nominato, e il comma lo porta davanti fra quadre: *«[Legge 25 febbraio 1974,
+  n. 17 (Codice Penale)] art. 184, 2° comma sanzione da € 20,00 a €
+  51,00»*. È l'unica aggiunta al testo, e serve alla ricerca e alle citazioni:
+  nel solo `DD-149-2016` le voci citano gli atti 921 volte.
+- **Impaginazione.** Dal 2006 le pagine sono a colonne, e l'intestazione
+  dell'allegato esce dopo le prime voci ("1) 2) 3) Allegato C … 4)"):
+  - se dopo l'intestazione la numerazione continua, l'intestazione è
+    dell'allegato in corso;
+  - se riparte da 1, apre il successivo;
+  - quando due intestazioni reclamano le stesse voci, vince quella che continua
+    la numerazione.
+- **Allegato senza voci numerate.** L'Allegato I del `DD-149-2016` ha una voce
+  sola, senza numero: tiene il testo che segue l'intestazione, come comma
+  implicito. Se non c'è nemmeno quello, il comma è l'intestazione stessa.
+- **Elenchi interni.** "1) 2)" senza intestazione, con numeri già usati
+  dall'allegato, sono un elenco dentro la voce e restano nel suo testo.
+- **Testate.** L'intestazione di pagina (*«Allegati al Decreto Delegato …
+  n.149»*) e il numero di pagina accanto si tolgono.
+- **Firma.** Il comma con la formula finisce sui firmatari, invece di portarsi
+  dietro l'inizio della tabella.
+
+Il risultato sui 33 decreti:
+- 862 allegati e 5.692 voci;
+- il `DD-149-2016` ha 6 articoli e 42 allegati, dalla A alla Z18;
+- 62 voci oltre i 6.000 caratteri hanno i loro frammenti (4.6).
+
+**Cosa resta fuori o incompleto.**
+- Due atti hanno il corpo davvero confuso e restano rifiutati: `D-57-2000`,
+  con l'art. 4 sei volte, e `R-0-1883`.
+- Nella tabella "art. 184" segue il nome dell'atto invece di precederlo: le
+  citazioni arrivano all'atto, non all'articolo.
+
+`02_parse.py --atti <file>` rilegge solo gli atti della lista e
+`03_load.py --atti <file>` carica solo quelli. I 33 decreti sono stati poi
+ricaricati tutti con `15_ricostruisci_articoli.py --atti`, che conta come testo
+anche il titolo d'allegato: l'intestazione, che prima era nel testo di un
+comma, ora sta in titolo e rubrica.
+
+**Il decreto in vigore non ha le tabelle.** Dal 2017 il documento del portale è
+uno ZIP, con il decreto e ogni allegato in un PDF a parte, e `01` ne conserva
+uno solo:
+- il `DD-1-2018`, che abroga la ratifica del `DD-149-2016`, ha i suoi 6
+  articoli e nessuna tabella;
+- per il `DD-12-2017` è stato conservato il PDF dell'Allegato A invece del
+  decreto, e le sue voci sono caricate come 30 articoli (`art-166`,
+  `art-222`…).
+
+Gli ZIP con più PDF sono 25 in tutto l'archivio, quasi tutti leggi di bilancio.
+
 ### Lo stesso atto sotto due schede
 
 Il portale pubblica alcuni atti **due volte**, con due pagine di scheda e due
@@ -662,12 +761,27 @@ correzioni ad atti diversi). Cancellarle sarebbe perdere normativa, e il
 riconoscimento pretende percio' testo identico di almeno 400 caratteri, stesso
 numero di articoli e titoli conciliabili.
 
-**35 gruppi restano come guasto aperto**, ed e' peggio di un doppione: hanno lo
-stesso testo e titoli inconciliabili - `L-0-1910` si intitola "dei cadaveri" e
-ha 97 articoli identici a quelli di "sulle scuole elementari". Sono atti
-diversi a uno dei quali e' stato caricato il testo dell'altro: le schede hanno
-URL distinti ma il PDF che se ne scarica e' lo stesso file byte per byte, e il
-guasto sta a monte del caricamento. Lo script li elenca a ogni esecuzione.
+**I testi scambiati.** 35 gruppi erano peggio di un doppione: stesso testo e
+titoli inconciliabili. `L-0-1910` si intitola "dei cadaveri" e aveva i 97
+articoli di "sulle scuole elementari". Il guasto era nostro, non del portale:
+due schede con lo stesso id canonico avevano scritto nella stessa cartella, e
+il PDF della seconda aveva preso il posto di quello della prima. Riaperto il
+portale, ogni scheda serve il proprio documento.
+
+`src/21_testi_scambiati.py` riscarica il documento di ogni scheda dei gruppi
+segnalati e lo confronta con quello in `data/raw`: il 17/09 **33 erano
+diversi** e sono stati sostituiti (il vecchio resta accanto come
+`testo.scambiato.pdf`), 38 erano già giusti. Poi
+`15_ricostruisci_articoli.py --atti <elenco> --testo-nuovo` ricarica quegli
+atti dal PDF nuovo. Con `--testo-nuovo` 15 non confronta il testo con quello del
+grafo, che era di un altro atto, e riscrive anche il preambolo e le sue
+citazioni.
+
+Restano **3 coppie con lo stesso testo, e sono giuste**: il decreto di ratifica
+e il decreto di esecuzione della stessa convenzione (1903, 1906, 1907). I due
+PDF sono diversi e riportano gli stessi articoli, ognuno sotto il proprio
+preambolo. `11` ora confronta anche il preambolo, perché un PDF scambiato ha
+anche quello identico, e non le segnala più.
 
 ### Marcature di vigenza
 
@@ -676,13 +790,43 @@ sul nodo che ha già in mano, senza un `MATCH` in più su ogni ricerca.
 
 | Proprietà | Su | Quantità | Significato |
 |---|---|---:|---|
-| `Norma.abrogata` / `abrogataDa` | `:Norma` | **424** | L'atto è caduto per intero |
-| `Articolo.abrogato` / `abrogatoDa` | `:Articolo` | **186** | Articolo soppresso dentro un atto vivo |
-| `Comma.abrogato` / `abrogatoDa` | `:Comma` | **68** | Comma soppresso dentro un atto vivo |
+| `Norma.abrogata` / `abrogataDa` | `:Norma` | **528** | L'atto è caduto per intero |
+| `Articolo.abrogato` / `abrogatoDa` | `:Articolo` | **242** | Articolo soppresso dentro un atto vivo |
+| `Comma.abrogato` / `abrogatoDa` | `:Comma` | **72** | Comma soppresso dentro un atto vivo |
 
 Le si ricalcola da zero a ogni esecuzione di `src/08_abrogazioni.py --scrivi`,
 archi `ABROGA` compresi: senza cancellarli prima, un arco che smette di essere
 riconosciuto sopravvive alla correzione del filtro che lo escludeva.
+
+#### Il decreto e la sua ratifica cadono insieme
+
+Un decreto e la sua ratifica portano lo stesso testo, e l'atto che abroga la
+disciplina di solito ne nomina uno solo. Il 17/09 le coppie con una sola delle
+due abrogata erano 30, e sempre la caduta era la ratifica. Il caso che l'ha
+fatto vedere:
+- il DD-1-2018 abroga il DD-12-2017;
+- il DD-12-2017 è la ratifica del DD-149-2016;
+- il DD-149-2016, le violazioni amministrative del 2016, risultava quindi in
+  vigore.
+
+`ratifiche()` trova le coppie fra gli atti caricati: **534** il 17/09.
+- **Riferimento.** Il decreto ratificato è il primo atto nominato dopo
+  "Ratifica" nell'intestazione del preambolo, o nel titolo della scheda se lì
+  manca. L'intestazione è il testo ufficiale: il titolo di DD-15-2008 dice
+  "28-12-2008 n.137", il preambolo "28 dicembre 2007 n.137".
+- **Controlli.** Sono quelli delle abrogazioni: il tipo sceglie fra gli
+  omonimi, la data dev'essere quella dell'atto, la ratifica non precede il
+  decreto.
+- **Esclusioni.** Le errata corrige, che nominano la ratifica nel titolo senza
+  esserlo.
+
+`per_ratifica()` passa la marcatura al gemello:
+- l'arco `ABROGA` porta `perRatifica`, l'atto da cui è passata;
+- un atto non ne abroga mai uno posteriore;
+- se il caduto era marcato solo dal titolo, passa la marcatura senza arco.
+
+Risultato: **32 norme** in più abrogate, con 45 archi. `08` le elenca a ogni
+esecuzione.
 
 #### Questo indice ha una scadenza
 
@@ -845,7 +989,8 @@ flowchart TD
 
     subgraph P["2. Parsing Strutturale Deterministico"]
         C --> E["02_parse.py (PyMuPDF / regex)"]
-        E --> E2["commi.py: rubriche, capoversi, punti, allegati"]
+        E --> E1["articoli.py: allegati e refusi; allegati.py: tabelle"]
+        E1 --> E2["commi.py: rubriche, capoversi, punti, allegati"]
         E2 --> F["data/parsed/&lt;id&gt;.json"]
         F --> G["Articoli, Commi, Rubriche, Citazioni puntuali"]
     end

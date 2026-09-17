@@ -16,6 +16,9 @@ Struttura riconosciuta nel testo (verificata sui PDF del portale):
     Si definisce governo ...          <- testo del comma
 
 Output: data/parsed/<norma-id>.json
+
+    .venv/Scripts/python.exe src/02_parse.py                     # solo i nuovi
+    .venv/Scripts/python.exe src/02_parse.py --atti <file.json>  # rilegge gli atti elencati
 """
 
 import json
@@ -27,6 +30,7 @@ import fitz
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from comune import PREFISSI, norma_id  # noqa: E402
+from allegati import allegati_tabellari  # noqa: E402
 from articoli import ristruttura_articoli  # noqa: E402
 from commi import ristruttura  # noqa: E402
 
@@ -741,6 +745,9 @@ def parse(id_norma, meta):
     # allegati: commi.py. Rinumerano e rinominano, quindi vanno prima delle
     # citazioni, che portano l'id del comma.
     articoli = ristruttura_articoli(id_norma, articoli)
+    # Le tabelle dopo la firma lette come articoli ("art. 166 / sanzione da
+    # ...") tornano tabelle: un articolo per allegato, un comma per voce.
+    articoli = allegati_tabellari(id_norma, righe, articoli)
     for art in articoli:
         art.pop("origine", None)
     for art in articoli:
@@ -774,9 +781,13 @@ if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(line_buffering=True)
 
 
-def main(force=False):
+def main(force=False, atti=None):
     PARSED.mkdir(parents=True, exist_ok=True)
     cartelle = sorted(p for p in RAW.iterdir() if p.is_dir())
+    # Con --atti si rileggono solo gli atti della lista, sovrascrivendo il JSON.
+    if atti is not None:
+        cartelle = [c for c in cartelle if c.name in set(atti)]
+        force = True
     if not cartelle:
         raise RuntimeError("data/raw/ e' vuota: eseguire prima 01_scrape.py")
 
@@ -826,4 +837,7 @@ def main(force=False):
 
 
 if __name__ == "__main__":
-    main(force="--force" in sys.argv)
+    elenco = None
+    if "--atti" in sys.argv:
+        elenco = json.loads(Path(sys.argv[sys.argv.index("--atti") + 1]).read_text(encoding="utf-8"))
+    main(force="--force" in sys.argv, atti=elenco)

@@ -282,6 +282,13 @@ i cinque decreti che la riportano su una riga sola.
 Esito complessivo sulle dieci domande da sportello: **10 su 10 hanno l'atto
 giusto nei primi tre**, contro 6 su 10 prima di questi interventi.
 
+**Quale atto rappresenta il passo.** Fino al 17/09 era il primo trovato. Le
+venticinque annate delle violazioni amministrative ripetono le stesse voci, e
+alla domanda sull'art. 184 del Codice Penale usciva il DD-209-2011, abrogato,
+con le annate successive in `ancheIn`. Ora `_accorpa()` mostra l'atto non
+abrogato e, a parità, il più recente; gli altri vanno in `ancheIn`. La regola
+vale sia nella fusione ibrida sia nel ramo solo lessicale.
+
 ### 4.4 Il punteggio non e' esposto, e non e' una svista
 
 Il retriever ibrido normalizza ciascun ramo sul proprio massimo prima di

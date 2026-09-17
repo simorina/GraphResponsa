@@ -37,6 +37,8 @@ Uso:
     .venv/Scripts/python.exe src/15_ricostruisci_articoli.py            # solo misura
     .venv/Scripts/python.exe src/15_ricostruisci_articoli.py --scrivi --backup <file.json>
     .venv/Scripts/python.exe src/15_ricostruisci_articoli.py --atti <elenco.json> [--scrivi --backup ...]
+    .venv/Scripts/python.exe src/15_ricostruisci_articoli.py --atti <elenco.json> --testo-nuovo ...
+        (PDF sostituito da 21_testi_scambiati.py: niente controllo sulle parole)
 
 Dopo --atti: anche 19_frammenti.py --scrivi e 20_pulizia_grafo.py --scrivi.
 
@@ -197,12 +199,15 @@ def leggi(dati):
 
 def parole_perse(stato, nuovo):
     """Le parole dei commi del grafo che la lettura nuova non ha da nessuna
-    parte: ne' nei commi, ne' nelle rubriche, ne' nel preambolo."""
+    parte: ne' nei commi, ne' nelle rubriche o nei titoli d'allegato, ne' nel
+    preambolo. L'intestazione "Allegato A / Costituiscono violazioni..." era
+    testo di un comma, e allegati.py la sposta nel titolo e nella rubrica."""
     def parole(testo):
         return collections.Counter(re.findall(r"[a-zà-ù]{4,}", (testo or "").lower()))
     prima = parole(" ".join(c["testo"] or "" for r in stato for c in r["commi"] if c["id"]))
     dopo = parole(" ".join(c["testo"] for a in nuovo["articoli"] for c in a["commi"])
-                  + " " + " ".join(a.get("rubrica") or "" for a in nuovo["articoli"])
+                  + " " + " ".join(f'{a.get("rubrica") or ""} {a.get("allegato") or ""}'
+                                   for a in nuovo["articoli"])
                   + " " + (nuovo.get("preambolo") or ""))
     # "articolo" delle intestazioni riconosciute non e' testo perso
     persi = prima - dopo
@@ -243,7 +248,14 @@ def main():
         # testo fuori dai commi, da qui il margine.
         prima = sum(len(re.sub(r"\s+", "", c["testo"] or "")) for r in stato for c in r["commi"] if c["id"])
         dopo = sum(len(re.sub(r"\s+", "", c["testo"])) for a in nuovo["articoli"] for c in a["commi"])
-        if indicati is not None:
+        if indicati is not None and "--testo-nuovo" in sys.argv:
+            # Il PDF e' stato sostituito (21_testi_scambiati.py): il testo cambia
+            # per davvero, e quello "perso" e' dell'atto sbagliato. Basta che
+            # la lettura nuova non sia vuota.
+            if not dopo:
+                saltati["la lettura nuova e' vuota"].append(dati["id"])
+                continue
+        elif indicati is not None:
             persi, totale = parole_perse(stato, nuovo)
             if persi > max(3, 0.01 * totale):
                 saltati["la lettura nuova perde parole del grafo"].append(f"{dati['id']} ({persi}/{totale})")
@@ -328,7 +340,18 @@ def main():
                    if e["tipo"] == "CITA_ARTICOLO" and e["proprieta"].get("origine")]
 
         g.query(Q_CANCELLA, {"norma": norma})
-        articoli, citazioni, _ = carica.prepara(nuovo)
+        articoli, citazioni, cit_preambolo = carica.prepara(nuovo)
+        if "--testo-nuovo" in sys.argv:
+            # Col PDF sbagliato era sbagliato anche il preambolo, e le sue
+            # citazioni: si riscrivono insieme agli articoli.
+            g.query("""MATCH (n:Norma {id: $norma}) SET n.preambolo = $preambolo
+                       WITH n MATCH (n)-[k:CITA {origine: 'preambolo'}]->() DELETE k""",
+                    {"norma": norma, "preambolo": nuovo.get("preambolo")})
+            for c in cit_preambolo:
+                c["targetId"] = risolvi(c["targetId"], c["testo"])
+            cit_preambolo = [c for c in cit_preambolo if c["targetId"] != norma]
+            if cit_preambolo:
+                g.query(carica.Q_CITAZIONI_PREAMBOLO, {"citazioni": cit_preambolo})
         for c in citazioni:
             c["targetId"] = risolvi(c["targetId"], c["testo"])
         citazioni = [c for c in citazioni if c["targetId"] != norma]
