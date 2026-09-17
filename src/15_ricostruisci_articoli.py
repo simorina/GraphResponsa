@@ -26,9 +26,19 @@ ricomposti da 13_atto_composto.py. Il backup tiene gli articoli di prima con
 tutti gli archi, e i commi per intero - vettore compreso - solo dove il testo
 non torna nella lettura nuova.
 
+Con `--atti <file.json>` (un elenco di id) si ricaricano gli atti indicati
+invece di quelli con articoli fusi: e' cosi' che il 17/09 sono rientrati gli
+atti che il parser leggeva male (intestazioni "Art. 1 (Rubrica)", testo
+perso dopo un TITOLO). Per questi il controllo sul testo non e' "almeno il 90%
+dei caratteri" - le intestazioni riconosciute e gli indici passano fuori dai
+commi - ma "nessuna parola del grafo scompare".
+
 Uso:
     .venv/Scripts/python.exe src/15_ricostruisci_articoli.py            # solo misura
     .venv/Scripts/python.exe src/15_ricostruisci_articoli.py --scrivi --backup <file.json>
+    .venv/Scripts/python.exe src/15_ricostruisci_articoli.py --atti <elenco.json> [--scrivi --backup ...]
+
+Dopo --atti: anche 19_frammenti.py --scrivi e 20_pulizia_grafo.py --scrivi.
 
 Dopo: 14_rinumera_commi.py (deve trovare zero), 09_riallinea_citazioni.py
 --scrivi, 08_abrogazioni.py --scrivi, 07_embeddings.py,
@@ -50,6 +60,7 @@ if hasattr(sys.stdout, "reconfigure"):
 
 from agente.strumenti import grafo  # noqa: E402
 from articoli import ristruttura_articoli  # noqa: E402
+from comune import risolutore_per_data  # noqa: E402
 
 
 def _modulo(nome, file):
@@ -184,10 +195,28 @@ def leggi(dati):
     return parser.parse(dati["id"], meta)
 
 
+def parole_perse(stato, nuovo):
+    """Le parole dei commi del grafo che la lettura nuova non ha da nessuna
+    parte: ne' nei commi, ne' nelle rubriche, ne' nel preambolo."""
+    def parole(testo):
+        return collections.Counter(re.findall(r"[a-zà-ù]{4,}", (testo or "").lower()))
+    prima = parole(" ".join(c["testo"] or "" for r in stato for c in r["commi"] if c["id"]))
+    dopo = parole(" ".join(c["testo"] for a in nuovo["articoli"] for c in a["commi"])
+                  + " " + " ".join(a.get("rubrica") or "" for a in nuovo["articoli"])
+                  + " " + (nuovo.get("preambolo") or ""))
+    # "articolo" delle intestazioni riconosciute non e' testo perso
+    persi = prima - dopo
+    persi.pop("articolo", None)
+    return sum(persi.values()), sum(prima.values())
+
+
 def main():
     scrivi = "--scrivi" in sys.argv
     g = grafo()
     caricate = {r["id"] for r in g.query("MATCH (n:Norma) WHERE n.caricata RETURN n.id AS id")}
+    indicati = None
+    if "--atti" in sys.argv:
+        indicati = set(json.loads(Path(sys.argv[sys.argv.index("--atti") + 1]).read_text(encoding="utf-8")))
 
     piani, saltati, esempi = [], collections.defaultdict(list), []
     for f in sorted(PARSED.glob("*.json")):
@@ -195,7 +224,9 @@ def main():
             dati = json.loads(f.read_text(encoding="utf-8"))
         except ValueError:
             continue
-        if dati.get("id") not in caricate or dati.get("fonteParsing") or not coinvolto(dati):
+        if dati.get("id") not in caricate or dati.get("fonteParsing"):
+            continue
+        if (dati["id"] not in indicati) if indicati is not None else not coinvolto(dati):
             continue
         stato = g.query(Q_STATO, {"norma": dati["id"]})
         if any(r["coordinato"] for r in stato):
@@ -212,7 +243,12 @@ def main():
         # testo fuori dai commi, da qui il margine.
         prima = sum(len(re.sub(r"\s+", "", c["testo"] or "")) for r in stato for c in r["commi"] if c["id"])
         dopo = sum(len(re.sub(r"\s+", "", c["testo"])) for a in nuovo["articoli"] for c in a["commi"])
-        if dopo < 0.9 * prima:
+        if indicati is not None:
+            persi, totale = parole_perse(stato, nuovo)
+            if persi > max(3, 0.01 * totale):
+                saltati["la lettura nuova perde parole del grafo"].append(f"{dati['id']} ({persi}/{totale})")
+                continue
+        elif dopo < 0.9 * prima:
             saltati["la lettura nuova ha meno testo del grafo"].append(f"{dati['id']} ({dopo / prima:.0%})")
             continue
         ids = [a["id"] for a in nuovo["articoli"]]
@@ -278,6 +314,8 @@ def main():
     file.write_text(json.dumps(copia, ensure_ascii=False, default=str), encoding="utf-8")
     print(f"\n    backup: {file} ({file.stat().st_size / 1e6:.0f} MB, {len(copia)} atti)")
 
+    risolvi = risolutore_per_data((r["id"], r["data"]) for r in g.query(
+        "MATCH (n:Norma) WHERE n.caricata RETURN n.id AS id, toString(n.data) AS data"))
     for n, (p, b) in enumerate(zip(piani, copia), 1):
         norma, nuovo = p["dati"]["id"], p["nuovo"]
         vettori = g.query(Q_VETTORI, {"norma": norma})
@@ -291,6 +329,9 @@ def main():
 
         g.query(Q_CANCELLA, {"norma": norma})
         articoli, citazioni, _ = carica.prepara(nuovo)
+        for c in citazioni:
+            c["targetId"] = risolvi(c["targetId"], c["testo"])
+        citazioni = [c for c in citazioni if c["targetId"] != norma]
         for i in range(0, len(articoli), LOTTO):
             g.query(carica.Q_ARTICOLI, {"normaId": norma, "articoli": articoli[i:i + LOTTO]})
         for i in range(0, len(citazioni), 2000):

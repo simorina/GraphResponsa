@@ -35,7 +35,7 @@ sys.path.insert(0, str(ROOT / "src"))
 if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8", line_buffering=True)
 
-from comune import norma_id  # noqa: E402
+from comune import norma_id, risolutore_per_data  # noqa: E402
 
 # Si importano le espressioni DAL PARSER invece di ricopiarle: se un giorno
 # divergessero, il grafo smetterebbe di corrispondere a cio' che un
@@ -48,7 +48,13 @@ RE_BERSAGLIO = _parse.RE_BERSAGLIO
 FINESTRA = 90   # quanto testo prima della citazione guarda RE_BERSAGLIO
 
 
-def bersagli(testo, id_corrente):
+def risolutore(g):
+    """Il tipo scritto nella citazione non e' sempre quello dell'archivio."""
+    return risolutore_per_data((r["id"], r["data"]) for r in g.query(
+        "MATCH (n:Norma) WHERE n.caricata RETURN n.id AS id, toString(n.data) AS data"))
+
+
+def bersagli(testo, id_corrente, risolvi=None):
     """Le coppie (id della norma citata, numero d'articolo) leggibili nel testo.
 
     Passa da estrai_citazioni(), cosi' le forme che il parser riconosce - e le
@@ -58,7 +64,12 @@ def bersagli(testo, id_corrente):
     for c in _parse.estrai_citazioni(testo, id_corrente):
         if not c["anno"] or not c["articoloCitato"]:
             continue          # norma non identificabile, o citazione d'atto
-        voce = (norma_id(c["tipo"], c["numero"], c["anno"]), c["articoloCitato"])
+        bersaglio = norma_id(c["tipo"], c["numero"], c["anno"])
+        if risolvi:
+            bersaglio = risolvi(bersaglio, c["testo"])
+        if bersaglio == id_corrente:
+            continue          # l'atto che nomina se stesso con un altro tipo
+        voce = (bersaglio, c["articoloCitato"])
         if voce not in fuori:
             fuori.append(voce)
     return fuori
@@ -130,14 +141,16 @@ RETURN count(x) AS stub
 
 
 def citazioni_d_atto(g, scrivi):
+    risolvi = risolutore(g)
     lotto = []
     for r in g.query(Q_TESTI) + g.query(Q_PREAMBOLI):
         testo = " ".join((r["testo"] or "").split())
         preambolo = r.get("comma") is None
         for c in _parse.estrai_citazioni(testo, r["fonte"], preambolo=preambolo):
-            if c["anno"]:
+            destinazione = risolvi(norma_id(c["tipo"], c["numero"], c["anno"]), c["testo"]) if c["anno"] else None
+            if c["anno"] and destinazione != r["fonte"]:
                 lotto.append({**c, "comma": r.get("comma"), "fonte": r["fonte"],
-                              "targetId": norma_id(c["tipo"], c["numero"], c["anno"]),
+                              "targetId": destinazione,
                               "origine": "preambolo" if preambolo else None})
     esistenti = set()
     for i in range(0, len(lotto), 5000):
@@ -206,9 +219,10 @@ def main():
     nuovi, scarti = [], {"atto non in archivio": 0, "articolo inesistente": 0,
                          "arco gia' presente": 0}
     cache_norma, cache_art = {}, {}
+    risolvi = risolutore(g)
     for r in righe:
         testo = " ".join((r["testo"] or "").split())
-        for bersaglio, numero in bersagli(testo, r["fonte"]):
+        for bersaglio, numero in bersagli(testo, r["fonte"], risolvi):
             chiave = (bersaglio, numero)
             if chiave not in cache_art:
                 if bersaglio not in cache_norma:

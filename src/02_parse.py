@@ -42,6 +42,19 @@ MESI = {
 
 RE_PARTIZIONE = re.compile(r"^(TITOLO|CAPO|SEZIONE)\s+([IVXLC]+)\s*$", re.I)
 RE_ARTICOLO = re.compile(r"^(?:Art\.|Articolo)\s*(\d+|[Uu]nico)\.?\s*(bis|ter|quater|quinquies|sexies|septies|octies|nonies|decies)?\s*[-:.]?\s*$", re.I)
+# L'intestazione con la rubrica sulla stessa riga, o fra trattini: "Art. 1
+# (Prima seduta della legislatura)", "Art.1 - Quorum per la validita' delle
+# deliberazioni", "- Art. 3 -". RE_ARTICOLO vuole la riga col solo numero, e
+# queste righe finivano nel testo: la L-21-1981 (53 articoli) era un articolo
+# unico, lo Statuto allegato al D-100-1995 spariva del tutto. Si accettano
+# solo in sequenza (vedi parse), perche' "Art. 3 Legge n.5/2000" a inizio riga
+# puo' essere il seguito di una frase.
+RE_ARTICOLO_ESTESO = re.compile(
+    r"^[-–—\s]*(?i:Art\.|Articolo)\s*(\d{1,3})\s*"
+    r"((?i:bis|ter|quater|quinquies|sexies|septies|octies|nonies|decies))?\s*"
+    r"(?:[-–—:.]\s*)?"
+    r"(?:\((?P<tra_parentesi>[^()]{1,150})\)|(?P<in_linea>[A-ZÀ-ÖØ-Ý\"«'][^;]{2,160}?))?"
+    r"\s*[-–—]*\s*$")
 RE_COMMA = re.compile(r"^(\d+)\.\s*$")
 RE_COMMA_INLINE = re.compile(r"^(\d+)\.\s+(\S.*)$")
 
@@ -348,6 +361,18 @@ assert [(c["numero"], c["anno"], c["articoloCitato"]) for c in estrai_citazioni(
 ] == [(42, 2010, "1")]
 
 
+for _riga, _atteso in [
+    ("Art. 1 (Prima seduta della legislatura)", ("1", "Prima seduta della legislatura", None)),
+    ("Art.12- Rappresentanza e difesa davanti al Collegio", ("12", None, "Rappresentanza e difesa davanti al Collegio")),
+    ("- Art. 3 -", ("3", None, None)),
+    ("Art. 4 bis (Deroghe)", ("4", "Deroghe", None)),
+    ("Art. 5 della Legge 12 marzo 2003 n.4", None),
+    ("Art. 2 (1)", ("2", "1", None)),
+]:
+    _m = RE_ARTICOLO_ESTESO.match(_riga)
+    assert (_m and (_m.group(1), _m.group("tra_parentesi"), _m.group("in_linea"))) == _atteso or \
+        (_m is None and _atteso is None), (_riga, _m and _m.groupdict())
+
 _PROVE_CITAZIONE = [
     ("la Legge 17 marzo 2005, n. 37 e' abrogata", ("Legge", 37, 2005)),
     ("ai sensi della Legge del 17 marzo 2005 n. 37", ("Legge", 37, 2005)),
@@ -382,8 +407,53 @@ assert [c["tipo"] for c in estrai_citazioni("del Decreto – Legge n. 93/2017", 
 assert norma_id("Decreto – Legge", 93, 2017) == "DL-93-2017"
 
 
+# Una voce d'indice: il titolo seguito dai puntini e dal numero di pagina,
+# "Oggetto della Convenzione ....... 35".
+RE_VOCE_INDICE = re.compile(r"\.{4,}\s*\d{1,4}\s*$")
+
+
+def _indice_iniziale(righe):
+    """Le righe di un indice: "Art.1 - ...", "Art.2 - ..." una sotto l'altra,
+    prima che il testo ricominci da "Art. 1". Restano testo, non articoli: il
+    R-1-2004 apre con l'indice dei suoi 56 articoli, la L-2-2015 con quello dei
+    suoi 46, e poi il testo usa intestazioni semplici ("Art. 1"). La ripartenza
+    si cerca percio' fra tutte le intestazioni, non solo fra quelle estese.
+    Le voci coi puntini e il numero di pagina sono indice comunque.
+    """
+    estese, tutte = [], []
+    for k, r in enumerate(righe):
+        riga = r.strip()
+        if RE_ARTICOLO.match(riga):
+            m = re.match(r"^(?:Art\.|Articolo)\s*(\d+)", riga, re.I)
+            if m:
+                tutte.append((k, int(m.group(1))))
+        elif (m := RE_ARTICOLO_ESTESO.match(riga)):
+            estese.append((k, int(m.group(1))))
+            tutte.append((k, int(m.group(1))))
+    fuori = {k for k, r in enumerate(righe) if RE_VOCE_INDICE.search(r.strip())
+             and (RE_ARTICOLO_ESTESO.match(r.strip()) or re.match(r"^\s*(?:Art\.|Articolo)", r.strip(), re.I))}
+    primo = next((pos for pos, (_, n) in enumerate(estese) if n == 1), None)
+    if primo is None:
+        return fuori
+    inizio = estese[primo][0]
+    ripresa = next((k for k, n in tutte if k > inizio and n == 1), None)
+    if ripresa is None:
+        return fuori
+    serie = [(k, n) for k, n in estese if inizio <= k < ripresa]
+    if len(serie) < 3:
+        return fuori
+    distanza = (serie[-1][0] - serie[0][0]) / (len(serie) - 1)
+    return fuori | ({k for k, _ in serie} if distanza <= 2.5 else set())
+
+
+assert _indice_iniziale(["INDICE", "Art.1 - Principi", "Art.2 - Unita'", "Art.3 - Sottosistemi",
+                         "", "Art. 1", "(Principi)", "testo", "Art. 2", "testo"]) == {1, 2, 3}
+assert _indice_iniziale(["Articolo 1 Oggetto della Convenzione ........ 35", "Art. 1", "testo"]) == {0}
+assert _indice_iniziale(["Art. 1 (Prima seduta)", "testo", "testo", "testo", "Art. 2 (Segreteria)", "testo"]) == set()
+
 def parse(id_norma, meta):
     righe = righe_pdf(RAW / id_norma / "testo.pdf")
+    indice = _indice_iniziale(righe)
 
     partizioni = []       # albero: Titoli con figli Capi
     articoli = []
@@ -398,6 +468,36 @@ def parse(id_norma, meta):
     rubrica_buffer = []
     preambolo = []
     iniziato = False
+    # Il testo che segue un TITOLO o un CAPO prima di un nuovo articolo. Di
+    # solito e' il resto della rubrica della partizione, e si lascia; ma se la
+    # riga dopo e' un'intestazione che il riconoscitore non vede, e' il corpo
+    # di un allegato, e prima andava perso tutto.
+    orfane = []
+
+    def recupera_orfane():
+        nonlocal orfane
+        testo = unisci(orfane)
+        orfane = []
+        if len(testo) <= 200 or not articoli:
+            return
+        ultimo = articoli[-1]
+        base = f"{ultimo['id']}/c-{len(ultimo['commi']) + 1}"
+        cid, n = base, 1
+        while cid in {c["id"] for c in ultimo["commi"]}:
+            n += 1
+            cid = f"{base}-{n}"
+        ultimo["commi"].append({"id": cid, "numero": str(len(ultimo["commi"]) + 1),
+                                "testo": testo, "numerazioneAnomala": False,
+                                "commaImplicito": True})
+
+    def in_sequenza(numero, suffisso):
+        """Se un'intestazione estesa continua la numerazione degli articoli."""
+        precedenti = [int(a["numero"].split()[0]) for a in articoli
+                      if a["numero"].split()[0].isdigit()]
+        if not precedenti:
+            return numero == 1
+        ultimo = precedenti[-1]
+        return numero == ultimo + 1 or (numero == ultimo and bool(suffisso))
 
     def chiudi_comma():
         """
@@ -473,6 +573,11 @@ def parse(id_norma, meta):
 
         m_part = RE_PARTIZIONE.match(riga)
         m_art = RE_ARTICOLO.match(riga)
+        m_esteso = None
+        if not m_art and not m_part and i not in indice:
+            m_esteso = RE_ARTICOLO_ESTESO.match(riga)
+            if m_esteso and not in_sequenza(int(m_esteso.group(1)), m_esteso.group(2)):
+                m_esteso = None
 
         # --- Partizione: TITOLO / CAPO / SEZIONE ---
         if m_part:
@@ -505,10 +610,12 @@ def parse(id_norma, meta):
             continue
 
         # --- Articolo ---
-        if m_art:
+        if m_art or m_esteso:
             chiudi_comma()
+            recupera_orfane()
             iniziato = True
-            numero = m_art.group(1) + (f" {m_art.group(2).lower()}" if m_art.group(2) else "")
+            m_intest = m_art or m_esteso
+            numero = m_intest.group(1) + (f" {m_intest.group(2).lower()}" if m_intest.group(2) else "")
             genitore = capo_corrente or titolo_corrente
             articolo_corrente = {
                 "id": f"{id_norma}/art-{numero.replace(' ', '-')}",
@@ -521,6 +628,22 @@ def parse(id_norma, meta):
             articoli.append(articolo_corrente)
             attesa_rubrica = True
             rubrica_buffer = []
+            if m_esteso:
+                rubrica = (m_esteso.group("tra_parentesi") or "").strip()
+                in_linea = (m_esteso.group("in_linea") or "").strip()
+                if rubrica and not re.fullmatch(r"[\d\s,]+", rubrica):
+                    # "(1)" e' il rimando a una nota, non una rubrica
+                    articolo_corrente["rubrica"] = rubrica
+                    articolo_corrente["_rubricaVera"] = True
+                    attesa_rubrica = False
+                elif in_linea and len(in_linea) <= 100 and not in_linea.endswith("."):
+                    articolo_corrente["rubrica"] = in_linea
+                    articolo_corrente["_rubricaVera"] = True
+                    attesa_rubrica = False
+                elif in_linea:
+                    # una frase intera: e' il primo comma, non la rubrica
+                    buffer = [in_linea]
+                    attesa_rubrica = False
             i += 1
             continue
 
@@ -579,9 +702,12 @@ def parse(id_norma, meta):
             buffer.append(riga)
         elif not iniziato:
             preambolo.append(riga)
+        else:
+            orfane.append(riga)
         i += 1
 
     chiudi_comma()
+    recupera_orfane()
 
     # Se non e' stato riconosciuto nemmeno un articolo, l'atto non e' vuoto:
     # e' scritto con una struttura che il riconoscitore non prevede. Meglio

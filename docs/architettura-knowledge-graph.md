@@ -3,11 +3,12 @@
 Grafo Neo4j della normativa della Repubblica di San Marino, costruito per essere
 interrogato da un agente in modalità Graph RAG.
 
-**Stato aggiornato:** **247.397 nodi**, **314.205 relazioni**, **11.054 norme con testo
-integrale** su 11.136 scaricabili dal portale, distribuite su 16 tipologie di atto:
-leggi, decreti in tutte le loro forme, regolamenti, notifiche, ordinanze, statuti,
-errata corrige e verbali. Tutti i 162.826 commi hanno un embedding, e 433 norme,
-231 articoli e 68 commi portano una marcatura di abrogazione.
+**Stato aggiornato (17/09/2026):** **267.903 nodi**, **339.606 relazioni**, **11.054
+norme con testo integrale** su 11.136 scaricabili dal portale, distribuite su 16
+tipologie di atto: leggi, decreti in tutte le loro forme, regolamenti, notifiche,
+ordinanze, statuti, errata corrige e verbali. Tutti i 164.669 commi e i 17.766
+frammenti dei commi lunghissimi hanno un embedding; 476 norme (38 decadute), 240
+articoli e 68 commi portano una marcatura di abrogazione.
 
 ---
 
@@ -92,23 +93,26 @@ Nel nostro Knowledge Graph, le rubriche svolgono due funzioni cruciali:
 
 | Entità / Label | Quantità | Ruolo nel Modello |
 |---|---|---|
-| **`:Comma`** | **`162.826`** | Unità atomica di testo, ricerca semantica e retrieval |
-| **`:Articolo`** | **`72.393`** | Articoli con rubriche, capi e collocazione tematica |
-| **`:Norma`** | **`12.177`** | Tutti gli atti normativi censiti: |
+| **`:Comma`** | **`164.669`** | Unità atomica di testo, ricerca semantica e retrieval |
+| **`:Articolo`** | **`74.120`** | Articoli con rubriche, capi e collocazione tematica |
+| **`:Norma`** | **`11.347`** | Tutti gli atti normativi censiti: |
 | ↳ *con testo integrale (`caricata: true`)* | *`11.054`* | *Su 11.136 scaricabili dal portale, 16 tipologie* |
-| ↳ *stub citati (`caricata: false`)* | *`1.123`* | *Atti richiamati nei testi per tracciare i rinvii* |
-| **TOTALE NODI** | **`247.397`** | |
+| ↳ *stub citati (`caricata: false`)* | *`293`* | *Atti richiamati nei testi per tracciare i rinvii* |
+| **`:Frammento`** | **`17.766`** | Pezzi dei commi oltre 6.000 caratteri, con vettore proprio (vedi 4.6) |
+| **`:StatoVigenza`** | **`1`** | Stato del calcolo delle abrogazioni |
+| **TOTALE NODI** | **`267.903`** | |
 
 ### Relazioni (Archi)
 
 | Relazione | Quantità | Direzione | Significato |
 |---|---|---|---|
-| **`HA_COMMA`** | **`162.826`** | `Articolo ➔ Comma` | Contenimento strutturale |
-| **`HA_ARTICOLO`** | **`72.393`** | `Norma ➔ Articolo` | Contenimento strutturale |
-| **`CITA`** | **`56.634`** | `(Comma/Norma) ➔ Norma` | Rinvio normativo formale |
-| **`CITA_ARTICOLO`** | **`21.816`** | `Comma ➔ Articolo` | Rinvio puntuale ad articolo specifico risolto |
-| **`ABROGA`** | **`536`** | `Norma ➔ Norma` | Abrogazione di un atto per intero, riconosciuta senza ambiguità |
-| **TOTALE ARCHI** | **`314.205`** | | |
+| **`HA_COMMA`** | **`164.669`** | `Articolo ➔ Comma` | Contenimento strutturale |
+| **`HA_ARTICOLO`** | **`74.120`** | `Norma ➔ Articolo` | Contenimento strutturale |
+| **`CITA`** | **`58.574`** | `(Comma/Norma) ➔ Norma` | Rinvio normativo formale |
+| **`CITA_ARTICOLO`** | **`23.935`** | `Comma ➔ Articolo` | Rinvio puntuale ad articolo specifico risolto |
+| **`ABROGA`** | **`542`** | `Norma ➔ Norma` | Abrogazione di un atto per intero, riconosciuta senza ambiguità |
+| **`HA_FRAMMENTO`** | **`17.766`** | `Comma ➔ Frammento` | Il comma lunghissimo e i suoi pezzi |
+| **TOTALE ARCHI** | **`339.606`** | | |
 
 `CITA_ARTICOLO` era fermo a 16.763 finche' `RE_BERSAGLIO`, nel parser,
 pretendeva che il numero d'articolo fosse **adiacente** al nome dell'atto. Nel
@@ -135,10 +139,80 @@ accetta `°`/`º`; `09_riallinea_citazioni.py` rilegge i testi che contengono
 l'ordinale e aggiunge gli archi che mancano, senza toccare gli esistenti (i
 quattro nodi in più sono stub citati).
 
+**Le altre forme di citazione (17/09).** Il parser perdeva anche:
+
+- la virgola dopo l'anno ("27 febbraio 1947, n. 2", 1.444 citazioni);
+- le abbreviazioni ("D.D. n.128/2013", 572);
+- il plurale ("Leggi 28 giugno 1974 n. 46", 221);
+- "del" davanti alla data (118);
+- "Decreto Consigliare".
+
+Di "Decreto – Legge" col trattino leggeva solo "Legge n. X": 1.858 archi
+puntavano alla legge con quel numero. L'intestazione in apertura del
+preambolo ("REPUBBLICA DI SAN MARINO DECRETO 20 settembre 2004 n. 119")
+diventava la citazione di un atto inesistente quando il tipo scritto non era
+quello dell'archivio: 716 archi. `09_riallinea_citazioni.py` rilegge tutti i
+testi con `estrai_citazioni()`: +4.461 `CITA`, +1.655 `CITA_ARTICOLO`, e gli
+archi sbagliati sono stati tolti.
+
+**Il tipo sbagliato nella citazione.** Il testo chiama un atto con un tipo,
+l'archivio lo cataloga con un altro: "Decreto Reggenziale 1° settembre 2003
+n.113" è in archivio come D-113-2003. L'id costruito dal tipo scritto non
+esisteva, e 769 citazioni finivano su atti fantasma con la stessa data di un
+atto caricato. `comune.risolutore_per_data` le porta sull'atto giusto quando la
+citazione ha una data e un solo atto caricato con quel numero e anno ha
+quella data. Tipi diversi possono avere lo stesso numero nello stesso anno
+(DD-12-2017 e R-12-2017): senza data non si decide.
+
+Un atto che nomina se stesso con un altro tipo ("Decreto Delegato 26
+febbraio 2021 n.33" dentro il DC-33-2021) si ritroverebbe, risolto, come
+citazione di se stesso: quelle si scartano. Lo usano 03, 09 e 15.
+`20_pulizia_grafo.py` l'ha applicato al grafo esistente
+(l'arco spostato ricorda l'id di prima in `risoltoDa`) e ha tolto 333 atti
+fantasma rimasti isolati.
+
+**Titoli e date del portale.**
+
+- 269 titoli erano letti con la codifica sbagliata ("NÂ° 27"):
+  `comune.ripara_mojibake` li ripara coppia per coppia.
+- 23 date erano segnaposto ("1200-01-01", tolte) o avevano l'anno troncato
+  ("0006-01-11", completata con l'anno dell'atto), con `comune.data_pulita`.
+
+03 applica entrambe al caricamento; `20_pulizia_grafo.py` le ha applicate al
+grafo.
+
+**Intestazioni che il parser non vedeva, e testo che perdeva.** Due difetti del
+parser, trovati confrontando il testo del grafo con quello dei PDF (101 atti
+sospetti):
+
+- **Intestazioni con la rubrica sulla stessa riga.** `RE_ARTICOLO` voleva la
+  riga col solo numero. "Art. 1 (Prima seduta della legislatura)", "Art.1 -
+  Quorum...", "- Art. 3 -" finivano nel testo: la L-21-1981 (53 articoli) era
+  un articolo unico. `RE_ARTICOLO_ESTESO` le riconosce, ma solo se il numero
+  continua la sequenza, perché una riga che comincia con "Art. 3 Legge..."
+  può essere il seguito di una frase. Una serie fitta di intestazioni che poi
+  ricomincia da 1 è un indice e resta testo, anche quando il testo usa
+  intestazioni semplici ("Art. 1"): la prima versione guardava solo quelle
+  estese, e l'indice della L-2-2015 era diventato 46 articoli vuoti. Le voci
+  coi puntini e il numero di pagina sono indice comunque; "(1)" è il rimando a
+  una nota, non una rubrica.
+- **Testo scartato dopo un TITOLO o un CAPO.** Il parser chiudeva l'articolo
+  corrente, e se l'intestazione successiva non veniva riconosciuta tutto il
+  testo fino a lì andava perso: lo Statuto allegato al D-100-1995 (30.000
+  caratteri) non era nel grafo. Ora il testo oltre i 200 caratteri si
+  attacca all'articolo precedente.
+
+Riletto tutto l'archivio, cambiano 201 atti e rientrano 2,18 milioni di
+caratteri (più altri 86.000 dopo la correzione sugli indici). Nessuna parola del grafo va persa: le intestazioni riconosciute e
+gli indici passano in rubriche e preambolo. `15_ricostruisci_articoli.py
+--atti` ne ha ricaricati 169; 4 hanno testo coordinato e restano com'erano.
+Le L-200-2011, L-106-1993 e L-100-1982 (bilanci) e i decreti del 1995 con lo
+statuto allegato sono i guadagni maggiori.
+
 I `:Comma` erano 180.932 fino alla riparazione del parser: i **316 in più** sono
 il testo che si perdeva su 312 articoli, dove il buffer della rubrica non si
 chiudeva su `)` seguito da punteggiatura. Il conteggio dei nodi per etichetta
-somma a 259.574 e non a 247.397 perché ogni `:Norma` ne porta due — quella
+somma a 279.186 e non a 267.903 perché quasi ogni `:Norma` ne porta due — quella
 generica e quella del tipo (`:Legge`, `:DecretoDelegato`, e così via).
 
 **I nodi `:Allegato` non ci sono più.** Erano 519 su 27 norme e portavano solo
