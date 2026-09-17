@@ -64,6 +64,14 @@ def grafo() -> Neo4jGraph:
     return _grafo
 
 
+# Quanto testo chiedere a Neo4j per un risultato: un carattere oltre MAX_TESTO,
+# quanto basta per sapere se e' tagliato. Si chiedeva il testo intero, e un
+# comma o un articolo possono superare il milione di caratteri (337 articoli
+# oltre i 20.000 al 17/09): megabyte trasferiti a ogni ricerca per mostrarne
+# duemila.
+LETTI = MAX_TESTO + 1
+
+
 def _taglia(testo, limite=MAX_TESTO):
     testo = (testo or "").strip()
     return testo if len(testo) <= limite else testo[:limite] + " [...]"
@@ -220,21 +228,25 @@ def _full_text(query, limite, dal_anno=None, al_anno=None, prefissi=None,
                art.numero AS articolo, art.rubrica AS rubrica,
                art.titolo AS partizioneTitolo, art.capoRubrica AS partizioneCapo,
                CASE WHEN node:Comma THEN node.numero ELSE null END AS comma,
-               node.testo AS testo,
+               left(node.testo, $letti) AS testo,
                coalesce(art.urlDocumento, norma.urlDocumento) AS urlDocumento,
                art.paginaDocumento AS paginaDocumento,
                norma.abrogata AS abrogata, norma.abrogataDa AS abrogataDa,
                coalesce(node.abrogato, art.abrogato) AS passoAbrogato,
-               coalesce(node.abrogatoDa, art.abrogatoDa) AS passoAbrogatoDa
+               coalesce(node.abrogatoDa, art.abrogatoDa) AS passoAbrogatoDa,
+               score AS punteggio
         ORDER BY score DESC, norma.anno DESC LIMIT $ampio
     """, {"query": _lucene(query), "limite": limite, "ampio": limite * 3,
           "dal_anno": dal_anno, "al_anno": al_anno, "prefissi": prefissi,
-          "escludi_abrogati": bool(escludi_abrogati)})
+          "escludi_abrogati": bool(escludi_abrogati), "letti": LETTI})
+    filtri = {"dal_anno": dal_anno, "al_anno": al_anno, "prefissi": prefissi,
+              "escludi_abrogati": bool(escludi_abrogati)}
+    righe = _intreccia(righe, _frammenti(query, limite * 3, True, **filtri))
 
     # Stessa potatura dei doppioni del ramo ibrido: due rami, una semantica.
     tenute, viste = [], {}
     for r in righe:
-        impronta = _firma(r["testo"])
+        impronta = r.get("impronta") or _firma(r["testo"])
         if impronta in viste:
             gia = viste[impronta]
             if r["normaId"] != gia["normaId"] and r["normaId"] not in gia.get("ancheIn", []):
@@ -312,12 +324,13 @@ RETURN norma.id AS normaId, norma.titolo AS normaTitolo, norma.anno AS anno,
        toString(norma.data) AS dataAtto,
        art.numero AS articolo, art.rubrica AS rubrica,
        art.titolo AS partizioneTitolo, art.capoRubrica AS partizioneCapo,
-       node.numero AS comma, node.testo AS testo,
+       node.numero AS comma, left(node.testo, $letti) AS testo,
        coalesce(art.urlDocumento, norma.urlDocumento) AS urlDocumento,
        art.paginaDocumento AS paginaDocumento,
        norma.abrogata AS abrogata, norma.abrogataDa AS abrogataDa,
        coalesce(node.abrogato, art.abrogato) AS passoAbrogato,
-       coalesce(node.abrogatoDa, art.abrogatoDa) AS passoAbrogatoDa
+       coalesce(node.abrogatoDa, art.abrogatoDa) AS passoAbrogatoDa,
+       score AS punteggio
 ORDER BY score DESC
 """
 
@@ -340,13 +353,97 @@ RETURN norma.id AS normaId, norma.titolo AS normaTitolo, norma.anno AS anno,
        toString(norma.data) AS dataAtto,
        art.numero AS articolo, art.rubrica AS rubrica,
        art.titolo AS partizioneTitolo, art.capoRubrica AS partizioneCapo,
-       null AS comma, art.testo AS testo,
+       null AS comma, left(art.testo, $letti) AS testo,
        coalesce(art.urlDocumento, norma.urlDocumento) AS urlDocumento,
        art.paginaDocumento AS paginaDocumento,
        norma.abrogata AS abrogata, norma.abrogataDa AS abrogataDa,
        art.abrogato AS passoAbrogato, art.abrogatoDa AS passoAbrogatoDa
 ORDER BY score DESC
 """
+
+
+# I commi lunghissimi hanno anche i loro frammenti (19_frammenti.py), con un
+# vettore e un indice full-text propri: un comma di 338.513 caratteri - i
+# profili di ruolo del DD-165-2014 - aveva un vettore che non somigliava a
+# nessuna domanda, e "OPSPAMMI", che vi compare, non lo trovava. Un frammento
+# trovato si presenta come il suo comma, col passo al posto dell'inizio.
+INDICE_FRAMMENTI = "frammenti_vettoriale"
+INDICE_TESTO_FRAMMENTI = "testo_frammenti"
+
+FRAMMENTO_AL_COMMA = """
+MATCH (node:Comma)-[:HA_FRAMMENTO]->(fr)
+MATCH (art:Articolo)-[:HA_COMMA]->(node)
+MATCH (norma:Norma)-[:HA_ARTICOLO]->(art)
+WHERE ($dal_anno IS NULL OR norma.anno >= $dal_anno)
+  AND ($al_anno IS NULL OR norma.anno <= $al_anno)
+  AND ($prefissi IS NULL OR split(norma.id, '-')[0] IN $prefissi)
+  AND (NOT $escludi_abrogati OR NOT (coalesce(norma.abrogata, false)
+       OR coalesce(node.abrogato, false) OR coalesce(art.abrogato, false)))
+RETURN norma.id AS normaId, norma.titolo AS normaTitolo, norma.anno AS anno,
+       toString(norma.dataEntrataVigore) AS inVigoreDal,
+       toString(norma.data) AS dataAtto,
+       art.numero AS articolo, art.rubrica AS rubrica,
+       art.titolo AS partizioneTitolo, art.capoRubrica AS partizioneCapo,
+       node.numero AS comma, fr.testo AS testo,
+       fr.da AS daCarattere, size(node.testo) AS lunghezzaComma,
+       left(node.testo, 1000) AS inizioComma,
+       coalesce(art.urlDocumento, norma.urlDocumento) AS urlDocumento,
+       art.paginaDocumento AS paginaDocumento,
+       norma.abrogata AS abrogata, norma.abrogataDa AS abrogataDa,
+       coalesce(node.abrogato, art.abrogato) AS passoAbrogato,
+       coalesce(node.abrogatoDa, art.abrogatoDa) AS passoAbrogatoDa,
+       score AS punteggio
+ORDER BY score DESC
+"""
+RISALITA_FRAMMENTI = ("CALL db.index.vector.queryNodes($indice, $k, $vettore) "
+                      "YIELD node AS fr, score" + FRAMMENTO_AL_COMMA)
+LESSICALE_FRAMMENTI = ("CALL db.index.fulltext.queryNodes('" + INDICE_TESTO_FRAMMENTI
+                       + "', $query) YIELD node AS fr, score" + FRAMMENTO_AL_COMMA
+                       + " LIMIT $ampio")
+
+
+def _intreccia(commi, frammenti):
+    """Commi e frammenti in una lista sola, ordinata per punteggio.
+
+    Non a ranghi reciproci: la lista dei frammenti ha sempre un primo
+    classificato, anche quando non c'entra nulla, e fonderla alla pari avrebbe
+    messo un pezzo di tabella in cima a ogni ricerca. I punteggi invece si
+    confrontano: i vettori vengono dallo stesso modello, e i due indici
+    full-text usano lo stesso analizzatore.
+
+    Di ogni comma resta la voce migliore. Se il comma e' uscito intero e un
+    suo frammento piu' in basso, si mostra il frammento: di un comma di
+    300.000 caratteri l'inizio non dice perche' e' stato trovato.
+    """
+    for r in commi:
+        r["impronta"] = _firma(r.get("testo"))
+    for r in frammenti:
+        r["impronta"] = _firma(r.pop("inizioComma", None) or r.get("testo"))
+    tenute, per_comma = [], {}
+    for r in sorted(commi + frammenti, key=lambda x: -(x.get("punteggio") or 0)):
+        chiave = (r.get("normaId"), str(r.get("articolo")), str(r.get("comma")))
+        gia = per_comma.get(chiave)
+        if gia is None:
+            per_comma[chiave] = r
+            tenute.append(r)
+        elif r.get("daCarattere") is not None and gia.get("daCarattere") is None:
+            gia.update(testo=r["testo"], daCarattere=r["daCarattere"],
+                       lunghezzaComma=r.get("lunghezzaComma"))
+    for r in tenute:
+        r.pop("punteggio", None)
+    return tenute
+
+
+def _frammenti(query_o_vettore, k, lessicale, **filtri):
+    """I frammenti piu' vicini, gia' risaliti al comma. [] se l'indice manca."""
+    try:
+        if lessicale:
+            return grafo().query(LESSICALE_FRAMMENTI, {
+                "query": _lucene(query_o_vettore), "ampio": k, **filtri})
+        return grafo().query(RISALITA_FRAMMENTI, {
+            "indice": INDICE_FRAMMENTI, "k": k, "vettore": query_o_vettore, **filtri})
+    except Exception:
+        return []
 
 
 def _vettore_domanda(query):
@@ -381,20 +478,21 @@ def _semantico(query, limite, dal_anno=None, al_anno=None, prefissi=None,
         return None
     filtrato = any(v is not None for v in (dal_anno, al_anno, prefissi)) or escludi_abrogati
     k = limite * AMPIEZZA_FILTRATA if filtrato else limite
+    filtri = {"dal_anno": dal_anno, "al_anno": al_anno, "prefissi": prefissi,
+              "escludi_abrogati": bool(escludi_abrogati)}
     liste = []
     for indice, risalita in ((INDICE_VETTORIALE, RISALITA_COMMI),
                              (INDICE_RUBRICHE, RISALITA_RUBRICHE)):
         try:
             liste.append(grafo().query(risalita, {
-                "indice": indice, "k": k, "vettore": vettore,
-                "dal_anno": dal_anno, "al_anno": al_anno, "prefissi": prefissi,
-                "escludi_abrogati": bool(escludi_abrogati)}))
+                "indice": indice, "k": k, "vettore": vettore, "letti": LETTI, **filtri}))
         except Exception:
             # L'indice delle rubriche puo' non esserci ancora: si prosegue con
             # quello dei commi invece di far fallire tutta la ricerca.
             continue
     if not liste:
         return None
+    liste[0] = _intreccia(liste[0], _frammenti(vettore, k, False, **filtri))
     # I commi pesano piu' delle rubriche: una rubrica dice di cosa tratta
     # l'articolo, un comma contiene la disposizione. Ma una rubrica centrata
     # vale piu' di un comma alla lontana, quindi non si azzera.
@@ -540,6 +638,8 @@ def _compatta(righe):
     """
     visti = {}
     for r in righe:
+        for k in ("impronta", "punteggio", "inizioComma"):
+            r.pop(k, None)
         for k in [k for k, v in r.items() if v is None or v == [] or (k == "troncato" and v is False)]:
             del r[k]
         if r.get("urlDocumento"):
@@ -748,14 +848,19 @@ def _fondi(liste, limite, taglia=True):
     punti, primo = {}, {}
     for righe, peso in liste:
         for rango, r in enumerate(righe, 1):
-            impronta = _firma(r["testo"])
+            impronta = r.get("impronta") or _firma(r["testo"])
             punti[impronta] = punti.get(impronta, 0.0) + peso / (K_RRF + rango)
             if impronta not in primo:
                 primo[impronta] = dict(r)
             else:
+                gia = primo[impronta]
+                if r.get("daCarattere") is not None and gia.get("daCarattere") is None:
+                    # Lo stesso comma trovato intero da un ramo e per un suo
+                    # passo dall'altro: si mostra il passo.
+                    gia.update(testo=r["testo"], daCarattere=r["daCarattere"],
+                               lunghezzaComma=r.get("lunghezzaComma"))
                 # Stesso testo sotto un altro atto: si annota dove ricorre,
                 # invece di spendere un posto utile per ripeterlo.
-                gia = primo[impronta]
                 altro = r.get("normaId")
                 if altro and altro != gia["normaId"] and altro not in gia.get("ancheIn", []):
                     gia.setdefault("ancheIn", []).append(altro)
@@ -817,6 +922,12 @@ def cerca_testo(query: str, limite: int = 8, dal_anno: int | None = None,
 
     Se un risultato ha `troncato: true` il testo mostrato e' tagliato: per il
     contenuto completo chiama leggi_articolo().
+
+    Se porta `daCarattere`, il testo e' un passo di un comma molto lungo
+    (`lunghezzaComma` caratteri: un allegato, una tabella): e' il punto che
+    corrisponde alla ricerca. Si cita con il numero del comma; per leggerlo nel
+    suo contesto chiama leggi_articolo(norma_id, numero, comma=...,
+    da_carattere=...).
 
     Ogni risultato porta due date, che non vanno confuse: `inVigoreDal` e' la
     data in cui l'atto ha cominciato ad applicarsi, `dataAtto` quella in cui e'

@@ -157,8 +157,8 @@ classDiagram
 
 | Strumento | Input Principali | Output Restituito | Uso Ottimale |
 |---|---|---|---|
-| **`cerca_testo`** | `query`, `limite` (default 8), `dal_anno` | Commi e articoli pertinenti + metadati risaliti nel grafo, con `rango` e `troncato` | Ricerca tematica per concetti o parole chiave. `dal_anno` restringe alla disciplina recente |
-| **`leggi_articolo`** | `norma_id`, `numero` articolo | Testo integrale di tutti i commi, senza troncamenti. Se il numero non esiste, l'elenco dei numeri reali | Lettura puntuale di disposizioni prima di citarle, e ogni volta che un risultato e' `troncato` |
+| **`cerca_testo`** | `query`, `limite` (default 8), `dal_anno`, `al_anno`, `tipi`, `escludi_abrogati` | Commi e articoli pertinenti + metadati risaliti nel grafo, con `rango` e `troncato`. Un comma lunghissimo trovato per un suo passo (i `Frammento`, vedi l'architettura del grafo, 4.6) mostra quel passo, con `daCarattere` e `lunghezzaComma` | Ricerca tematica per concetti o parole chiave |
+| **`leggi_articolo`** | `norma_id`, `numero` articolo, `comma`, `da_carattere` | Il testo dei commi, al piu' 10.000 caratteri per comma e 40.000 per articolo: oltre, `parziale`, `troncato`/`continua`, `omesso`, e il seguito si legge con `comma` e `da_carattere`. Se il numero non esiste, l'elenco dei numeri reali | Lettura puntuale di disposizioni prima di citarle, e ogni volta che un risultato e' `troncato` |
 | **`struttura_norma`** | `norma_id` (es. `LQ-186-2005`) | Elenco completo di articoli, rubriche, capi | Panoramica e conteggio articoli in una sola chiamata |
 | **`trova_norma`** | `numero`, `anno`, `tipo` oppure `testo` del titolo | ID normativo e metadati. Se non trova, lo stesso numero negli altri anni | Risoluzione rapida degli estremi normativi |
 | **`elenco_norme`** | `tipo`, `anno`, `limite` (max 100) | Statistiche per tipologia + estratto leggi | Verifica copertura senza saturare il contesto |

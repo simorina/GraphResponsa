@@ -916,6 +916,51 @@ caricamento: è idempotente e calcola solo i commi che non ce l'hanno.
 
 ---
 
+### 4.6 I commi lunghissimi e i loro frammenti
+
+**Un vettore solo non basta per un allegato.** Il comma mediano è di 297
+caratteri, ma 887 superano i 6.000 e alcuni contengono un allegato intero: i
+profili di ruolo del DD 165/2014 (338.513 caratteri), lo schema XBRL dei
+bilanci nel DD 19/2019 (1.018.781), le tabelle delle leggi di bilancio.
+Misurato il 17/09:
+
+- `voyage-4` legge al massimo 32.000 token e la libreria taglia in silenzio.
+  43 commi li superano, e 2,3 milioni di token non erano rappresentati. Il
+  vettore dell'art. 8 del DD 19/2019 ha somiglianza 0,975 con quello dei suoi
+  primi 100.000 caratteri;
+- anche sotto il limite, il vettore di un testo così lungo è una media, e
+  l'indice full-text penalizza la lunghezza. "OPSPAMMI", che compare nei
+  profili di ruolo del DD 165/2014, non trovava quel decreto.
+
+`19_frammenti.py` spezza ogni comma oltre 6.000 caratteri in frammenti di al
+più 1.700 caratteri (fino a 2.000 con la coda), tagliati a fine frase o a fine
+riga, con 200 caratteri di sovrapposizione: **16.707 frammenti** per 887 commi,
+circa 8,6 M token.
+
+```
+(:Comma)-[:HA_FRAMMENTO]->(:Frammento {id, ordine, da, a, testo, improntaComma, embedding})
+```
+
+- `id` è l'id del comma seguito da `#fN`.
+- `da` e `a` sono posizioni nel testo del comma, le stesse che usa
+  `leggi_articolo(comma=..., da_carattere=...)`.
+- `testo` è il passo puro. Il vettore invece si calcola sul passo preceduto da
+  titolo della norma, articolo e rubrica: una riga di tabella da sola non dice
+  di che cosa parla.
+- `improntaComma` è l'impronta del testo del comma. Se il comma cambia, lo
+  script rifà i frammenti; se il comma sparisce o si accorcia, li toglie. Va
+  rieseguito dopo 07 e dopo ogni script che tocca i commi.
+
+`cerca_testo` interroga i frammenti accanto ai commi, nei due rami. Le due
+liste si uniscono **per punteggio** e non a ranghi reciproci: la lista dei
+frammenti ha sempre un primo classificato, e fonderla alla pari avrebbe messo
+un pezzo di tabella in cima a ogni ricerca. Di ogni comma resta una voce sola;
+se è stato trovato per un suo passo, la voce mostra quel passo e porta
+`daCarattere` e `lunghezzaComma`. 07_embeddings.py avvisa quando ci sono commi
+oltre i 90.000 caratteri.
+
+---
+
 ## 5. Indici e Vincoli di Integrità
 
 ```cypher
@@ -923,6 +968,7 @@ caricamento: è idempotente e calcola solo i commi che non ce l'hanno.
 CREATE CONSTRAINT norma_id    FOR (n:Norma)    REQUIRE n.id IS UNIQUE;
 CREATE CONSTRAINT articolo_id FOR (a:Articolo) REQUIRE a.id IS UNIQUE;
 CREATE CONSTRAINT comma_id    FOR (c:Comma)    REQUIRE c.id IS UNIQUE;
+CREATE CONSTRAINT frammento_id FOR (f:Frammento) REQUIRE f.id IS UNIQUE;
 
 -- Indici Full-Text per ricerca lessicale italiana
 CREATE FULLTEXT INDEX testo_normativo FOR (n:Comma|Articolo) ON EACH [n.testo, n.rubrica]
@@ -933,16 +979,19 @@ CREATE FULLTEXT INDEX titoli_norme FOR (n:Norma) ON EACH [n.titolo];
 -- rubriche degli articoli. Sono due perche' rispondono a domande diverse -
 -- vedi 5.1 - e la ricerca li interroga entrambi con UN SOLO embedding della
 -- domanda, per non pagare Voyage due volte.
-VECTOR INDEX commi_vettoriale    FOR (c:Comma)    ON c.embedding
-VECTOR INDEX rubriche_vettoriale FOR (a:Articolo) ON a.embedding
+VECTOR INDEX commi_vettoriale     FOR (c:Comma)     ON c.embedding
+VECTOR INDEX rubriche_vettoriale  FOR (a:Articolo)  ON a.embedding
+VECTOR INDEX frammenti_vettoriale FOR (f:Frammento) ON f.embedding   -- vedi 4.6
+CREATE FULLTEXT INDEX testo_frammenti FOR (f:Frammento) ON EACH [f.testo]
+  OPTIONS {indexConfig: {`fulltext.analyzer`: 'italian'}};
 -- configurazione effettiva in esercizio:
 --   vector.dimensions           1024
 --   vector.similarity_function  COSINE
 --   vector.hnsw.m               16
 --   vector.hnsw.ef_construction 100
---   vector.quantization.type    SCALAR   comprime i vettori in memoria: ricerca
---                                        piu' leggera, perdita di precisione
---                                        trascurabile su 181.000 commi
+--   vector.quantization.type    BINARY sui commi, SCALAR su rubriche e
+--                               frammenti: comprime i vettori in memoria,
+--                               ricerca piu' leggera
 ```
 
 ### 5.1 I tre indici non coprono le stesse cose

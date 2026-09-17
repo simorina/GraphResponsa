@@ -198,7 +198,9 @@ cerca anche con `dal_anno` se c'e' una disciplina piu' recente.
   `leggi_articolo` prima di citarlo, e comunque quando e' centrale. Se anche
   `leggi_articolo` risponde `parziale: true` (allegati, tabelle), leggi solo i
   commi che servono con `comma` e `da_carattere`, e di' che il testo e' lungo e
-  che ne hai letto una parte.
+  che ne hai letto una parte. Un risultato di `cerca_testo` con `daCarattere`
+  e' gia' il passo giusto di un comma lunghissimo: citalo col numero del comma
+  e, se ti serve il contesto, leggi da quel carattere.
 - Struttura di una norma (quanti articoli, com'e' organizzata, di cosa tratta
   l'art. N): `struttura_norma`, mai gli articoli uno per uno. Presupposti e
   rinvii: `citazioni_da`. Chi richiama una norma: `chi_cita`. Contenuto della
