@@ -879,16 +879,31 @@ def _piu_recenti(righe):
 def _accorpa(gia, r):
     """Fra due passi identici di atti diversi, quello da mostrare.
 
-    L'altro atto finisce in `ancheIn`. Si mostra l'atto non abrogato e, fra
-    pari, il piu' recente. Prima vinceva il primo trovato: le venticinque
-    annate delle violazioni amministrative ripetono le stesse voci, e alla
-    domanda sull'art. 184 del Codice Penale usciva il DD-209-2011, abrogato,
-    con il decreto successivo nascosto in `ancheIn`.
+    L'altro atto finisce in `ancheIn`. Si mostra il piu' recente, e a parita'
+    d'anno quello non abrogato: e' il criterio di _piu_recenti(), applicato
+    qui al testo identico invece che alla rubrica uguale. Prima vinceva il
+    primo trovato: le venticinque annate delle violazioni amministrative
+    ripetono le stesse voci, e alla domanda sull'art. 184 del Codice Penale
+    usciva il DD-209-2011 con il decreto del 2016 nascosto in `ancheIn`.
+
+    Non si mette davanti l'atto non abrogato: la marcatura copre il 3% delle
+    norme ed e' un segnale solo positivo (vedi 08_abrogazioni.py), quindi
+    "non abrogato" vuol dire soltanto che nessuno l'ha dichiarato. Cosi' la
+    voce dell'art. 184 usciva sotto una scheda del 1998 mai marcata, al posto
+    del decreto del 2001 che la sostituisce.
     """
+    def chiave(x):
+        # A parita' di anno e di marcatura decidono l'id canonico (quello senza
+        # `~`, che e' la scheda principale) e poi l'id stesso: senza un ultimo
+        # criterio a vincere sarebbe il primo arrivato, e i rami girano in
+        # parallelo - la stessa domanda dava risposte diverse.
+        return (x.get("anno") or 0, not x.get("abrogata"),
+                "~" not in (x.get("normaId") or ""), x.get("normaId") or "")
+
     altro = r.get("normaId")
     if not altro or altro == gia.get("normaId"):
         return gia
-    if (not r.get("abrogata"), r.get("anno") or 0) > (not gia.get("abrogata"), gia.get("anno") or 0):
+    if chiave(r) > chiave(gia):
         scelto = dict(r)
         if r.get("altriPassi"):
             scelto["altriPassi"] = list(r["altriPassi"])
@@ -900,12 +915,26 @@ def _accorpa(gia, r):
 
 
 _vecchio = {"normaId": "DD-209-2011", "anno": 2011, "abrogata": True}
-_vivo = {"normaId": "DD-1-2018", "anno": 2018, "abrogata": None}
-assert _accorpa(_vecchio, _vivo)["normaId"] == "DD-1-2018"
-assert _accorpa(_vecchio, _vivo)["ancheIn"] == ["DD-209-2011"]
-assert _accorpa(dict(_vivo), {"normaId": "DD-5-2025", "anno": 2025, "abrogata": True})["ancheIn"] == ["DD-5-2025"]
+_nuovo = {"normaId": "DD-149-2016", "anno": 2016, "abrogata": True}
+assert _accorpa(dict(_vecchio), _nuovo)["normaId"] == "DD-149-2016"
+assert _accorpa(dict(_vecchio), _nuovo)["ancheIn"] == ["DD-209-2011"]
+# Il piu' recente anche se e' l'unico marcato: l'altro non e' dichiarato vivo.
+assert _accorpa({"normaId": "D-68-1998", "anno": 1998}, {"normaId": "DR-69-2001", "anno": 2001,
+                                                        "abrogata": True})["normaId"] == "DR-69-2001"
+# A parita' d'anno decide la marcatura.
+assert _accorpa({"normaId": "D-1-2005", "anno": 2005, "abrogata": True},
+                {"normaId": "D-2-2005", "anno": 2005})["normaId"] == "D-2-2005"
+assert _accorpa({"normaId": "D-2-2005", "anno": 2005},
+                {"normaId": "D-1-2005", "anno": 2005, "abrogata": True})["normaId"] == "D-2-2005"
 assert _accorpa({"normaId": "L-1-2000", "anno": 2000, "ancheIn": ["L-2-2010"]},
                 {"normaId": "L-2-2010", "anno": 2010})["ancheIn"] == ["L-1-2000"]
+# L'id canonico prima della scheda doppia, e poi l'id: mai l'ordine d'arrivo.
+assert _accorpa({"normaId": "D-68-1998~17014649", "anno": 1998},
+                {"normaId": "D-68-1998", "anno": 1998})["normaId"] == "D-68-1998"
+assert _accorpa({"normaId": "DD-67-2008", "anno": 2008},
+                {"normaId": "DD-81-2008", "anno": 2008})["normaId"] == "DD-81-2008"
+assert _accorpa({"normaId": "DD-81-2008", "anno": 2008},
+                {"normaId": "DD-67-2008", "anno": 2008})["normaId"] == "DD-81-2008"
 
 
 def _fondi(liste, limite, taglia=True):

@@ -282,12 +282,19 @@ i cinque decreti che la riportano su una riga sola.
 Esito complessivo sulle dieci domande da sportello: **10 su 10 hanno l'atto
 giusto nei primi tre**, contro 6 su 10 prima di questi interventi.
 
-**Quale atto rappresenta il passo.** Fino al 17/09 era il primo trovato. Le
-venticinque annate delle violazioni amministrative ripetono le stesse voci, e
-alla domanda sull'art. 184 del Codice Penale usciva il DD-209-2011, abrogato,
-con le annate successive in `ancheIn`. Ora `_accorpa()` mostra l'atto non
-abrogato e, a parità, il più recente; gli altri vanno in `ancheIn`. La regola
-vale sia nella fusione ibrida sia nel ramo solo lessicale.
+**Quale atto rappresenta il passo.** Fino al 17/09 era il primo trovato, e i
+rami girano in parallelo: la stessa domanda dava risposte diverse. Le annate
+delle violazioni amministrative ripetono le stesse voci, e sull'art. 184 del
+Codice Penale usciva il DD-209-2011 con il decreto del 2016 in `ancheIn`. Ora
+`_accorpa()` sceglie in quest'ordine: **l'anno più recente**, poi l'atto non
+marcato abrogato, poi l'id canonico (senza `~`), poi l'id. La regola vale sia
+nella fusione ibrida sia nel ramo solo lessicale.
+
+Non si mette davanti l'atto non abrogato: la marcatura copre il 3% delle norme
+ed è un segnale solo positivo, quindi *«non abrogato»* significa soltanto che
+nessuno l'ha dichiarato. Con quel criterio la voce sull'art. 184 usciva sotto
+una scheda del 1998 mai marcata, al posto del decreto del 2001 che la
+sostituisce.
 
 ### 4.4 Il punteggio non e' esposto, e non e' una svista
 
