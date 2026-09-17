@@ -23,24 +23,25 @@ function mancante(iso: string, adesso: number): string {
   return `${minuti}m`;
 }
 
-/** Una delle due barre di consumo. Sopra il nome e la percentuale, sotto i
- *  valori assoluti e quando riparte: la percentuale da sola non dice se
- *  restano due messaggi o duecento. */
+/** Una delle due barre di consumo: nome e valore in alto, la barra, e sotto
+ *  quando riparte.
+ *
+ *  Il valore lo decide chi la usa perche' le due barre misurano cose diverse:
+ *  i messaggi si contano ("12/50", e sapere che ne restano 38 e' cio' che
+ *  serve), la spesa si guarda in proporzione al tetto - la cifra esatta in
+ *  dollari non direbbe niente a chi non sa quanto costa una domanda. */
 const Barra: React.FC<{
   nome: string;
-  usato: string;
-  totale: string;
+  valore: string;
   frazione: number;
   riparte: string;
-}> = ({ nome, usato, totale, frazione, riparte }) => {
-  const pieno = Math.min(1, Math.max(0, frazione));
+}> = ({ nome, valore, frazione, riparte }) => {
+  const pieno = Math.min(1, Math.max(0, frazione)) || 0;
   return (
-    <div className="mb-2.5">
-      <div className="mb-1 flex items-baseline justify-between">
+    <div className="mb-3">
+      <div className="mb-1 flex items-baseline justify-between gap-2">
         <span className="text-[11.5px] text-ink-2">{nome}</span>
-        <span className="font-mono text-[11.5px] tabular-nums text-ink">
-          {Math.round(pieno * 100)}%
-        </span>
+        <span className="font-mono text-[11.5px] tabular-nums text-ink">{valore}</span>
       </div>
       <div className="h-[3px] overflow-hidden rounded-full bg-raise-2">
         <div
@@ -50,13 +51,7 @@ const Barra: React.FC<{
           style={{ width: `${pieno * 100}%` }}
         />
       </div>
-      <div className="mt-1 text-[10.5px] text-ink-3">
-        <span className="font-mono tabular-nums">
-          {usato}/{totale}
-        </span>
-        {' · riparte fra '}
-        {riparte}
-      </div>
+      <div className="mt-1 text-[10.5px] text-ink-3">riparte fra {riparte}</div>
     </div>
   );
 };
@@ -204,16 +199,16 @@ export const Sidebar: React.FC<SidebarProps> = ({
           {consumi && (
             <div className="mb-3">
               <Barra
-                nome="Consultazioni oggi"
-                usato={String(consumi.richiesteOggi)}
-                totale={String(consumi.limiteGiorno)}
+                nome="Consultazioni giornaliere"
+                valore={`${consumi.richiesteOggi}/${consumi.limiteGiorno}`}
                 frazione={consumi.richiesteOggi / consumi.limiteGiorno}
                 riparte={mancante(consumi.azzeraGiorno, adesso)}
               />
               <Barra
-                nome="Spesa del mese"
-                usato={`$${consumi.costoMese.toFixed(2)}`}
-                totale={`$${consumi.limiteMese.toFixed(2)}`}
+                nome="Consumo mensile"
+                valore={`${Math.round(
+                  Math.min(1, consumi.costoMese / consumi.limiteMese || 0) * 100
+                )}%`}
                 frazione={consumi.costoMese / consumi.limiteMese}
                 riparte={mancante(consumi.azzeraMese, adesso)}
               />
