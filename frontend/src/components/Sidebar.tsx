@@ -1,9 +1,65 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import { SquarePen, PanelLeft, LogOut, ArrowUpRight } from 'lucide-react';
 import type { StatsState } from '../types';
 import type { VoceConversazione, Consumi, Profilo } from '../hooks/useConversazioni';
 import { Sigillo } from './Sigillo';
 import { esci } from '../auth/cognito';
+
+/**
+ * Quanto manca, in forma breve: "3g 4h", "4h 12m", "38m".
+ *
+ * Un istante gia' passato non e' un errore: il contatore si azzera al primo
+ * messaggio dopo la mezzanotte, non alla mezzanotte esatta, e fra i due
+ * momenti la pagina mostrerebbe un tempo negativo.
+ */
+function mancante(iso: string, adesso: number): string {
+  const ms = new Date(iso).getTime() - adesso;
+  if (!isFinite(ms) || ms <= 0) return 'a momenti';
+  const minuti = Math.floor(ms / 60_000);
+  const giorni = Math.floor(minuti / 1440);
+  const ore = Math.floor((minuti % 1440) / 60);
+  if (giorni > 0) return `${giorni}g ${ore}h`;
+  if (ore > 0) return `${ore}h ${minuti % 60}m`;
+  return `${minuti}m`;
+}
+
+/** Una delle due barre di consumo. Sopra il nome e la percentuale, sotto i
+ *  valori assoluti e quando riparte: la percentuale da sola non dice se
+ *  restano due messaggi o duecento. */
+const Barra: React.FC<{
+  nome: string;
+  usato: string;
+  totale: string;
+  frazione: number;
+  riparte: string;
+}> = ({ nome, usato, totale, frazione, riparte }) => {
+  const pieno = Math.min(1, Math.max(0, frazione));
+  return (
+    <div className="mb-2.5">
+      <div className="mb-1 flex items-baseline justify-between">
+        <span className="text-[11.5px] text-ink-2">{nome}</span>
+        <span className="font-mono text-[11.5px] tabular-nums text-ink">
+          {Math.round(pieno * 100)}%
+        </span>
+      </div>
+      <div className="h-[3px] overflow-hidden rounded-full bg-raise-2">
+        <div
+          className={`h-full rounded-full transition-[width] duration-500 ease-[cubic-bezier(0.16,1,0.3,1)] ${
+            pieno > 0.9 ? 'bg-rosso' : 'bg-dorato-2'
+          }`}
+          style={{ width: `${pieno * 100}%` }}
+        />
+      </div>
+      <div className="mt-1 text-[10.5px] text-ink-3">
+        <span className="font-mono tabular-nums">
+          {usato}/{totale}
+        </span>
+        {' · riparte fra '}
+        {riparte}
+      </div>
+    </div>
+  );
+};
 
 interface SidebarProps {
   isOpen: boolean;
@@ -44,7 +100,15 @@ export const Sidebar: React.FC<SidebarProps> = ({
   stats,
 }) => {
   const d = stats.fase === 'pronto' ? stats.dati : null;
-  const quota = consumi ? consumi.richiesteOggi / consumi.limiteGiorno : 0;
+
+  // L'orologio avanza da solo: il server manda l'istante dell'azzeramento, non
+  // quanto manca, perche' una durata calcolata la' invecchia mentre si guarda
+  // la pagina. Mezzo minuto basta: si mostrano i minuti.
+  const [adesso, setAdesso] = useState(() => Date.now());
+  useEffect(() => {
+    const t = setInterval(() => setAdesso(Date.now()), 30_000);
+    return () => clearInterval(t);
+  }, []);
 
   return (
     <aside
@@ -131,25 +195,28 @@ export const Sidebar: React.FC<SidebarProps> = ({
         </div>
 
         <div className="shrink-0 border-t border-line px-4 py-3.5">
-          {/* Quota: compare solo quando comincia a contare davvero. Un contatore
-              sempre acceso e' rumore; a due terzi diventa un'informazione. */}
-          {consumi && quota > 0.6 && (
+          {/* I due tetti, sempre visibili: misurano cose diverse e nessuno dei
+              due implica l'altro. Una domanda che costringe l'agente a otto
+              ricerche resta un messaggio solo ma spende otto volte i token,
+              quindi si puo' finire la spesa del mese con la giornata ancora
+              quasi intatta - e senza entrambe le barre non si capirebbe
+              perche' il servizio si e' fermato. */}
+          {consumi && (
             <div className="mb-3">
-              <div className="mb-1.5 flex items-baseline justify-between">
-                <span className="text-[11.5px] text-ink-2">Consultazioni oggi</span>
-                <span className="font-mono text-[11.5px] tabular-nums text-ink">
-                  {consumi.richiesteOggi}
-                  <span className="text-ink-3">/{consumi.limiteGiorno}</span>
-                </span>
-              </div>
-              <div className="h-[3px] overflow-hidden rounded-full bg-raise-2">
-                <div
-                  className={`h-full rounded-full transition-[width] duration-500 ease-[cubic-bezier(0.16,1,0.3,1)] ${
-                    quota > 0.9 ? 'bg-rosso' : 'bg-dorato-2'
-                  }`}
-                  style={{ width: `${Math.min(100, quota * 100)}%` }}
-                />
-              </div>
+              <Barra
+                nome="Consultazioni oggi"
+                usato={String(consumi.richiesteOggi)}
+                totale={String(consumi.limiteGiorno)}
+                frazione={consumi.richiesteOggi / consumi.limiteGiorno}
+                riparte={mancante(consumi.azzeraGiorno, adesso)}
+              />
+              <Barra
+                nome="Spesa del mese"
+                usato={`$${consumi.costoMese.toFixed(2)}`}
+                totale={`$${consumi.limiteMese.toFixed(2)}`}
+                frazione={consumi.costoMese / consumi.limiteMese}
+                riparte={mancante(consumi.azzeraMese, adesso)}
+              />
             </div>
           )}
 

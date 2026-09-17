@@ -38,9 +38,18 @@ class Utente:
     id: str          # il "sub" di Cognito: stabile, non cambia se cambia la mail
     email: str
     nome: str
+    # I gruppi Cognito a cui appartiene, che `archivio.limiti_di` traduce in
+    # tetti. Vengono dal token e non da una tabella: sono gia' firmati, e
+    # leggerli non costa una query per ogni domanda.
+    fasce: tuple[str, ...] = ()
 
 
-UTENTE_LOCALE = Utente(id="locale", email="locale@sviluppo", nome="Sviluppo locale")
+# In locale la fascia si sceglie con FASCIA_LOCALE, altrimenti valgono i
+# limiti globali: e' l'unico modo di vedere le barre di una fascia diversa
+# senza un pool Cognito sottomano.
+UTENTE_LOCALE = Utente(
+    id="locale", email="locale@sviluppo", nome="Sviluppo locale",
+    fasce=tuple(f for f in os.environ.get("FASCIA_LOCALE", "").split(",") if f.strip()))
 
 
 def autenticazione_attiva() -> bool:
@@ -106,4 +115,5 @@ def utente_corrente(authorization: str | None = Header(default=None)) -> Utente:
         # quest'ultimo e' il sub, cioe' un UUID, che mostrato a schermo non
         # dice niente a nessuno.
         nome=d.get("name") or d.get("email") or d.get("cognito:username") or "",
+        fasce=tuple(d.get("cognito:groups") or ()),
     )
