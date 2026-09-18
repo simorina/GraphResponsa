@@ -1,0 +1,140 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "ServiziDelProgettoInEuCentral1",
+      "Effect": "Allow",
+      "Action": [
+        "ecs:*",
+        "ecr:*",
+        "elasticloadbalancing:*",
+        "application-autoscaling:*",
+        "dynamodb:*",
+        "s3:*",
+        "cognito-idp:*",
+        "cognito-identity:*",
+        "secretsmanager:*",
+        "logs:*",
+        "cloudwatch:*",
+        "cloudformation:*",
+        "ec2:*",
+        "acm:*",
+        "kms:Decrypt",
+        "kms:DescribeKey",
+        "kms:ListAliases"
+      ],
+      "Resource": "*",
+      "Condition": {
+        "StringEquals": {
+          "aws:RequestedRegion": "eu-central-1"
+        }
+      }
+    },
+    {
+      "Sid": "ServiziSenzaRegione",
+      "Effect": "Allow",
+      "Action": [
+        "cloudfront:*",
+        "s3:ListAllMyBuckets",
+        "s3:GetBucketLocation",
+        "ce:*",
+        "budgets:ViewBudget",
+        "budgets:DescribeBudget*",
+        "sts:GetCallerIdentity",
+        "iam:Get*",
+        "iam:List*",
+        "iam:Simulate*",
+        "iam:GenerateServiceLastAccessedDetails"
+      ],
+      "Resource": "*"
+    },
+    {
+      "Sid": "CertificatiPerCloudFront",
+      "Effect": "Allow",
+      "Action": [
+        "acm:*"
+      ],
+      "Resource": "*",
+      "Condition": {
+        "StringEquals": {
+          "aws:RequestedRegion": "us-east-1"
+        }
+      }
+    },
+    {
+      "Sid": "RuoliDelProgetto",
+      "Effect": "Allow",
+      "Action": [
+        "iam:CreateRole",
+        "iam:DeleteRole",
+        "iam:AttachRolePolicy",
+        "iam:DetachRolePolicy",
+        "iam:PutRolePolicy",
+        "iam:DeleteRolePolicy",
+        "iam:UpdateAssumeRolePolicy",
+        "iam:TagRole",
+        "iam:UntagRole",
+        "iam:CreateInstanceProfile",
+        "iam:DeleteInstanceProfile",
+        "iam:AddRoleToInstanceProfile",
+        "iam:RemoveRoleFromInstanceProfile",
+        "iam:CreateServiceLinkedRole"
+      ],
+      "Resource": [
+        "arn:aws:iam::392900064778:role/graphresponsa*",
+        "arn:aws:iam::392900064778:instance-profile/graphresponsa*",
+        "arn:aws:iam::392900064778:role/aws-service-role/*"
+      ]
+    },
+    {
+      "Sid": "ConsegnaRuoliAiServizi",
+      "Effect": "Allow",
+      "Action": "iam:PassRole",
+      "Resource": "*",
+      "Condition": {
+        "StringEquals": {
+          "iam:PassedToService": [
+            "ecs.amazonaws.com",
+            "ecs-tasks.amazonaws.com",
+            "ec2.amazonaws.com",
+            "cloudformation.amazonaws.com",
+            "application-autoscaling.amazonaws.com"
+          ]
+        }
+      }
+    },
+    {
+      "Sid": "MaiSuUtentiCredenzialiEAccount",
+      "Effect": "Deny",
+      "Action": [
+        "iam:CreateUser",
+        "iam:DeleteUser",
+        "iam:UpdateUser",
+        "iam:CreateAccessKey",
+        "iam:UpdateAccessKey",
+        "iam:DeleteAccessKey",
+        "iam:CreateLoginProfile",
+        "iam:UpdateLoginProfile",
+        "iam:DeleteLoginProfile",
+        "iam:AttachUserPolicy",
+        "iam:DetachUserPolicy",
+        "iam:PutUserPolicy",
+        "iam:DeleteUserPolicy",
+        "iam:CreateGroup",
+        "iam:DeleteGroup",
+        "iam:AttachGroupPolicy",
+        "iam:DetachGroupPolicy",
+        "iam:PutGroupPolicy",
+        "iam:AddUserToGroup",
+        "iam:RemoveUserFromGroup",
+        "iam:CreatePolicyVersion",
+        "iam:SetDefaultPolicyVersion",
+        "iam:DeletePolicy",
+        "iam:CreateAccountAlias",
+        "organizations:*",
+        "account:*"
+      ],
+      "Resource": "*"
+    }
+  ]
+}
