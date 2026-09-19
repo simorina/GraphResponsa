@@ -1,4 +1,4 @@
-# Limiti noti del parser — stato al 17/09/2026
+# Limiti noti del parser — stato al 19/09/2026
 
 Elenco dei problemi **non risolti** in questa sessione di lavoro su
 `src/02_parse.py`. Ogni voce riporta l'impatto misurato sull'intero corpus
@@ -9,32 +9,43 @@ stime: dove un numero è incerto è detto esplicitamente.
 Cosa è stato invece corretto: la formula di promulgazione (allegati assorbiti
 come commi), la rubrica presunta, tre varianti di intestazione d'articolo, gli
 id duplicati fra articoli, i tipi di citazione mancanti, le intestazioni
-minuscole, le convenzioni nel dispositivo e le errata corrige. Vedi `git log`
-sul branch `fix-parser`.
+minuscole, le convenzioni nel dispositivo, le errata corrige e gli articoli di
+una legge citata da una novella (P1, per la parte annunciata: punto 1). Vedi
+`git log` sul branch `fix-parser`.
 
 ---
 
-## 1. Articoli citati trattati come articoli propri (P1)
+## 1. Citazioni senza riga di annuncio (residuo di P1)
 
-**Impatto**: 114 documenti, 287 intestazioni. Due livelli di certezza: 56
-documenti (221 occorrenze) dove la numerazione riprende da dove si era
-interrotta (prova strutturale forte), 58 documenti (66 occorrenze) dove la
-sola prova è il contesto testuale.
+**Impatto residuo**: 71 documenti dei 114 misurati.
 
-**Cos'è**: un atto che modifica un'altra legge ne riporta gli articoli
-("Dopo l'articolo 44 è inserito: Art. 44-bis…"), e quelle intestazioni
-diventano articoli dell'atto che cita. Esempio: L-168-2005 assorbe gli
-articoli 11–29 della Legge n.65/2000.
+**Risolto**: 44 documenti, 197 articoli inventati in meno — i 43 coperti fra
+i 114, più DL-152-2023 che la misura non aveva visto. Nessun documento con
+più articoli di prima, nessun carattere di testo perso, nessun id duplicato.
+Commit: "Gli articoli di una legge citata non sono piu' articoli dell'atto
+che la cita".
 
-**Perché rimandato**: sul campione di 15 casi "solo contesto" ne sono emersi
-2 falsi positivi (LC-41-2004 e LC-27-2004, due leggi costituzionali che
-iniziano da "Art. 2" per un'intestazione non riconosciuta). Un fix
-automatico richiede di distinguere i due livelli di prova e di gestire i
-falsi positivi: troppo per il tempo disponibile, e il rischio è di perdere
-articoli veri.
+**Cos'è il residuo**: un atto che ne modifica un altro ne riporta gli
+articoli, ma senza la riga che annuncia il testo sostituito ("è così
+modificato:", "è così sostituito:", seguita da TITOLO/CAPO/ALLEGATO o
+dall'intestazione citata). Senza quella riga non c'è niente da riconoscere
+che distingua una citazione da una numerazione che salta per altri motivi, e
+sono proprio quegli altri motivi ad avere generato i falsi positivi del
+criterio precedente (vedi punti 10 e 11). Fra i non coperti c'è L-54-1974,
+che era stato verificato a mano come caso vero: le leggi anteriori agli anni
+'90 introducono il testo citato senza formula fissa.
 
-**Nota**: il testo non si perde più. Dal fix sugli id duplicati ogni articolo
-citato ha un id proprio, quindi nessun testo viene sovrascritto a valle.
+**Perché rimandato**: il criterio per i casi non annunciati è "la numerazione
+riprende più avanti da dove si era interrotta" (prova strutturale, 56
+documenti). È forte ma richiede di guardare avanti nel documento e di
+decidere cosa fare quando il rientro non arriva: il rischio è inghiottire
+articoli veri fino in fondo al testo, che è esattamente quello che è successo
+in prova su DD-19-2016 (otto articoli veri persi) prima di aggiungere il
+controllo sulla struttura citata.
+
+**Nota**: il testo non si perde comunque. Ogni articolo citato ha un id
+proprio dal fix sugli id duplicati, quindi a valle nessun testo ne cancella
+un altro.
 
 Misura riproducibile: `.venv/Scripts/python.exe scripts/misura_citazioni_articoli.py`
 
@@ -149,6 +160,39 @@ propri, e se i documenti con `idResoUnivoco` vanno caricati o segnalati.
 **Nota sull'ambiente**: l'istanza Neo4j Aura indicata in `.env`
 (`caf5539f.databases.neo4j.io`) non esiste più — il dominio non risolve.
 Il grafo va ricostruito da zero su una nuova istanza.
+
+## 10. Tabelle a colonne appiattite dall'estrazione
+
+**Impatto**: accertato su DD-12-2017 (2 intestazioni, pagine 5 e 6). Non
+misurato sul corpus.
+
+**Cos'è**: l'Allegato A elenca le violazioni in una tabella — numero, legge,
+articolo, comma. L'estrazione del testo appiattisce le colonne e la cella
+"Art. 6" finisce su una riga da sola, dove il parser legge l'intestazione di
+un articolo del decreto. Somiglia a P1 ma la causa è il layout, non una
+citazione: non c'è nessuna riga di annuncio, quindi la sentinella del punto 1
+non lo tocca — correttamente, perché quel criterio qui non c'entra.
+
+**Perché rimandato**: prima va misurato quanti documenti hanno tabelle di
+questa forma. Il riconoscimento richiede informazioni che le righe di testo
+non hanno (le coordinate dei blocchi, che PyMuPDF può dare con
+`get_text("dict")`), quindi è un lavoro a sé, non una regex in più.
+
+## 11. Numerazione sbagliata nel testo originale
+
+**Impatto**: accertato su L-52-1947 aprendo il PDF. Non misurato sul corpus:
+non è distinguibile da un'estrazione difettosa se non a occhio.
+
+**Cos'è**: nel testo di L-52-1947 "Art. 4." compare due volte di seguito e
+l'articolo successivo è "Art. 6." — o la stampa originale ha sbagliato, o il
+"5" è stato letto come "4". Sono articoli veri con un numero sbagliato: il
+parser li tiene tutti, il secondo con l'id reso univoco (`/art-4-2`).
+
+**Perché non risolvibile**: non c'è niente da riconoscere. Rinumerarli
+d'ufficio significherebbe inventare un dato che nel documento non c'è, e le
+citazioni in entrata che puntano all'articolo 5 di questa legge non hanno
+comunque un bersaglio corretto a cui puntare. La cosa giusta è che l'anomalia
+resti visibile: l'id reso univoco la segnala già.
 
 ---
 
