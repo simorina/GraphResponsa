@@ -88,8 +88,43 @@ for _riga, _atteso in _PROVE_ARTICOLO:
     _m = RE_ARTICOLO.match(_riga)
     _numero = (_m.group(1).lower() + (f" {_m.group(2).lower()}" if _m.group(2) else "")) if _m else None
     assert _numero == _atteso, f"RE_ARTICOLO: {_riga!r} -> {_numero!r}"
-RE_COMMA = re.compile(r"^(\d+)\.\s*$")
-RE_COMMA_INLINE = re.compile(r"^(\d+)\.\s+(\S.*)$")
+# Un comma aggiunto da una novella prende il suffisso ordinale, come gli
+# articoli: "All'articolo 97 e' aggiunto il seguente comma 1-bis)". Senza
+# riconoscerlo, "1 bis." resta testo e il comma novellato si fonde con quello
+# che lo precede (misurate 572 righe in 228 documenti). Il numero prende la
+# forma "1-bis", la stessa dell'id degli articoli bis.
+SUFFISSO_ORDINALE = (r"(bis|ter|quater|quinquies|sexies|septies|octies"
+                     r"|nonies|decies)")
+RE_COMMA = re.compile(rf"^(\d+)(?:(?:\s*-\s*|\s+){SUFFISSO_ORDINALE})?\.\s*$", re.I)
+RE_COMMA_INLINE = re.compile(
+    rf"^(\d+)(?:(?:\s*-\s*|\s+){SUFFISSO_ORDINALE})?\.\s+(\S.*)$", re.I)
+
+
+def numero_comma(m):
+    """Numero del comma da RE_COMMA/RE_COMMA_INLINE, suffisso compreso."""
+    return m.group(1) + (f"-{m.group(2).lower()}" if m.group(2) else "")
+
+
+_PROVE_COMMA = [
+    ("1.", "1", None),
+    ("12.", "12", None),
+    ("2 bis.", "2-bis", None),
+    ("3-ter.", "3-ter", None),
+    ("4 QUATER.", "4-quater", None),
+    ("1-bis. Il canone e' dovuto per intero.", "1-bis", "Il canone e' dovuto per intero."),
+    ("5. Il termine decorre dalla notifica.", "5", "Il termine decorre dalla notifica."),
+    # negativi: senza punto e' un riferimento, con la parentesi e' un elenco
+    ("5 quinquies", None, None),
+    ("1)", None, None),
+    ("1-bis)", None, None),
+    ("Art. 5 bis", None, None),
+    ("bis.", None, None),
+]
+for _riga, _atteso, _testo in _PROVE_COMMA:
+    _m = RE_COMMA.match(_riga) or RE_COMMA_INLINE.match(_riga)
+    assert (numero_comma(_m) if _m else None) == _atteso, f"RE_COMMA: {_riga!r}"
+    if _testo is not None:
+        assert _m.group(3) == _testo, f"testo inline: {_riga!r}"
 
 # Una citazione normativa: tipo, eventuale data estesa, numero, eventuale /anno.
 RE_CITAZIONE = re.compile(
@@ -1138,13 +1173,18 @@ def parse(id_norma, meta, righe=None):
         # --- Comma ---
         m_comma = RE_COMMA.match(riga)
         m_comma_inline = RE_COMMA_INLINE.match(riga)
-        if articolo_corrente is not None and (m_comma or m_comma_inline):
+        m_c = m_comma or m_comma_inline
+        # Dentro un testo citato il comma novellato ("1-bis.") e' dell'altro
+        # atto: aprirlo qui darebbe a questo articolo la numerazione altrui.
+        # I commi semplici restano come sono sempre stati: il loro testo
+        # finisce comunque nell'articolo che cita.
+        if m_c is not None and m_c.group(2) and i in citate:
+            m_c = None
+        if articolo_corrente is not None and m_c is not None:
             chiudi_comma()
-            if m_comma:
-                comma_corrente = m_comma.group(1)
-            else:
-                comma_corrente = m_comma_inline.group(1)
-                buffer = [m_comma_inline.group(2)]
+            comma_corrente = numero_comma(m_c)
+            if m_comma is None:
+                buffer = [m_c.group(3)]
             i += 1
             continue
 
@@ -1309,6 +1349,29 @@ for _nome, _righe_test, _attesi in _PROVE_CITATE_PARSE:
     _testi = " ".join(c["testo"] for a in _d["articoli"] for c in a["commi"]) + " " + _d["preambolo"]
     for _r in _righe_test:
         if _r.endswith(".") and " " in _r and not intestazione_articolo(_r):
+            assert _r.strip('"') in _testi, f"testo perso ({_nome}): {_r!r}"
+
+
+_PROVE_COMMA_BIS = [
+    ("il comma novellato apre un comma proprio, con l'id nella forma c-1-bis",
+     ["Art. 1", "1.", "Il canone e' dovuto in via anticipata.",
+      "1 bis.", "Il canone non e' dovuto dagli esenti.",
+      "2.", "Le somme sono versate entro il mese."],
+     ["T-3-2000/art-1/c-1", "T-3-2000/art-1/c-1-bis", "T-3-2000/art-1/c-2"]),
+    ("il comma citato dentro una novella non diventa un comma di questo atto",
+     ["Art. 1", "Il Titolo III della Legge 28 aprile 1999 n.53 e' cosi' modificato:",
+      '"TITOLO III', "Art. 7", "1-bis.", "Il testo citato del comma.",
+      "Art. 2", "1.", "Il testo vero dell'atto."],
+     ["T-3-2000/art-1/c-1", "T-3-2000/art-2/c-1"]),
+]
+for _nome, _righe_test, _attesi in _PROVE_COMMA_BIS:
+    _d = parse("T-3-2000", {}, righe=_righe_test)
+    _ids = [c["id"] for a in _d["articoli"] for c in a["commi"]]
+    assert _ids == _attesi, f"comma bis ({_nome}): {_ids}"
+    _testi = " ".join(c["testo"] for a in _d["articoli"] for c in a["commi"])
+    for _r in _righe_test:
+        if (_r.endswith(".") and " " in _r
+                and not intestazione_articolo(_r) and not RE_COMMA.match(_r)):
             assert _r.strip('"') in _testi, f"testo perso ({_nome}): {_r!r}"
 
 

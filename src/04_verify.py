@@ -18,7 +18,10 @@ ROOT = Path(__file__).resolve().parent.parent
 CYPHER = ROOT / "src" / "04_verify.cypher"
 
 ATTESI = {
-    1: {"titoli": 8, "capi": 18, "articoli": 60, "commi": 240},
+    # 245 e non piu' 240: i cinque commi con suffisso ordinale della L.87/2026
+    # (art.52 comma 3 ter, art.57 commi da 16 ter a 16 sexies) prima si
+    # fondevano con il comma precedente, perche' RE_COMMA voleva cifre pure.
+    1: {"titoli": 8, "capi": 18, "articoli": 60, "commi": 245},
     2: {"articoli_senza_commi": 0},
     3: {"commi_vuoti": 0},
 }
