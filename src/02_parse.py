@@ -419,6 +419,200 @@ for _riga, _atteso in _PROVE_INTESTAZIONE:
     assert (_m.group(1) if _m else None) == _atteso, f"intestazione minuscola: {_riga!r}"
 
 
+# --- Articoli citati da una novella, non articoli propri ---
+#
+# Un atto che ne modifica un altro ne riporta il testo, intestazioni comprese:
+# "Il Titolo III della Legge 28 aprile 1999 n.53 e' cosi' modificato:" e
+# seguono "Art. 7" ... "Art. 14", che sono articoli della legge modificata.
+# Senza riconoscerli diventano articoli di questo atto: misurate 287
+# intestazioni in 114 documenti (L-162-2004 ne assorbe 29 di due leggi
+# diverse).
+#
+# La sentinella e' la riga di annuncio, non il contesto generico. Fra
+# l'intestazione precedente e quella che rompe la numerazione deve esserci
+# una frase di sostituzione che apre una citazione (due punti o virgolette
+# aperte). Ispezionando otto PDF a mano, l'annuncio c'e' in tutti i casi veri
+# e manca in tutti quelli che sembravano tali ma non lo sono:
+#   LC-41-2004, LC-27-2004  il PDF scrive "Art.l" con la elle al posto
+#                           dell'uno, la numerazione salta da 0 a 2;
+#   L-5-1921                un secondo atto stampato in nota a pie' di pagina;
+#   L-52-1947               due "Art. 4." di seguito nel testo originale.
+# Il criterio precedente (una citazione qualsiasi nelle righe sopra) scattava
+# su tutti e quattro.
+#
+# Dall'annuncio le intestazioni sono citate fino al rientro nella sequenza
+# dell'atto - il numero che l'atto si aspettava - o fino alla fine del testo.
+# Misurato sul corpus: 197 articoli inventati in meno in 44 documenti, nessun
+# documento con un articolo in piu' e nessun carattere di testo perso. Dei
+# 114 documenti del pattern, 71 non annunciano la citazione in nessun modo
+# riconoscibile e restano come sono: vedi LIMITI_NOTI.md.
+RE_ANNUNCIO_CITAZIONE = re.compile(
+    r"\b(?:[eè]'?|é|sono|siano|viene|vengono|venga)\s+"
+    r"(?:cos[iì]'?\s+)?(?:\w+mente\s+)?(?:cos[iì]'?\s+)?"
+    r"(?:modificat|sostituit|riformulat|integrat|inserit|introdott|aggiunt)\w*"
+    r"|\bsostituit\w+\s+(?:dal|dai|dalla|con)\s+(?:il\s+|i\s+|la\s+)?seguent\w+"
+    r"|\bapportat\w+\s+le\s+seguenti\s+modific\w*"
+    r"|\b(?:dopo|prima)\s+(?:l['’]|il\s+|la\s+)?"
+    r"(?:articol|comma|allegat|titol|cap|sezion)\w*"
+    r".{0,80}?\b(?:inserit|aggiunt|introdott)\w+"
+    r"|\bcos[iì]'?\s+(?:\w+mente\s+)?(?:modificat|sostituit|riformulat)\w*", re.I)
+# Dopo l'annuncio la citazione si apre: "... e' cosi' modificato:", oppure le
+# virgolette del testo riportato ("ALLEGATO A). Senza apertura la frase parla
+# di una modifica avvenuta altrove e non introduce niente.
+RE_APERTURA_CITAZIONE = re.compile('[:«“"]')
+# ... e quello che si apre e' una struttura: un titolo, un capo, un allegato o
+# l'intestazione stessa. Se il testo riportato comincia con un comma
+# ("All'articolo 97, comma 1, e' aggiunto il seguente comma 1-bis): <<1-bis)
+# ...") allora la citazione non contiene articoli, e l'intestazione che segue
+# piu' avanti e' dell'atto: senza questo controllo DD-19-2016 perdeva otto
+# articoli veri, inghiottiti fino in fondo al documento.
+RE_STRUTTURA_CITATA = re.compile(
+    '^[\\s\'"«“]*(?:TITOLO|CAPO|SEZIONE|PARTE|LIBRO|ALLEGATO|TABELLA|Art)\\b', re.I)
+FINESTRA_ANNUNCIO = 12   # righe non vuote sopra l'intestazione, mai oltre la precedente
+
+
+def _inizio_citazione(righe, prec, i):
+    """Riga da cui parte il testo citato prima dell'intestazione i, se annunciato."""
+    idx = [j for j in range(prec + 1, i) if righe[j].strip()][-FINESTRA_ANNUNCIO:]
+    for k, j in enumerate(idx):
+        # l'annuncio puo' spezzarsi in due righe: "... e' cosi'" / "sostituito:"
+        testo = " ".join(righe[x].strip() for x in idx[max(0, k - 1):k + 1])
+        m = RE_ANNUNCIO_CITAZIONE.search(testo)
+        if not m:
+            continue
+        apertura = RE_APERTURA_CITAZIONE.search(testo, m.end())
+        if not apertura:
+            continue
+        # cosa si apre: la struttura puo' stare subito dopo i due punti,
+        # oppure sulla riga seguente, oppure essere l'intestazione stessa.
+        coda = testo[apertura.end():].strip()
+        seguito = idx[k + 1:]
+        if RE_STRUTTURA_CITATA.match(coda) or (
+                not coda and (not seguito
+                              or RE_STRUTTURA_CITATA.match(righe[seguito[0]].strip()))):
+            return prec + 1
+    return None
+
+
+def _teste_articolo(righe):
+    """(indice, numero|None, suffisso) delle intestazioni, come le vede parse()."""
+    teste = []
+    for i, r in enumerate(righe):
+        s = r.strip()
+        if not s:
+            continue
+        if teste and _cerca_promulgazione(righe, i):
+            break      # oltre la promulgazione parse() non cerca piu' articoli
+        m = intestazione_articolo(s)
+        if m:
+            numero = m.group(1)
+            teste.append((i, int(numero) if numero.isdigit() else None,
+                          (m.group(2) or "").lower()))
+    return teste
+
+
+def righe_citate(righe):
+    """Righe che appartengono al testo di un altro atto, riportato qui dentro."""
+    citate = set()
+    main = 0          # ultimo numero della sequenza propria dell'atto
+    atteso = None     # numero con cui l'atto riprende dopo la citazione
+    inizio = None     # prima riga del blocco citato, se e' aperto
+    prec = -1         # intestazione precedente: oltre non si cerca l'annuncio
+    for i, n, suff in _teste_articolo(righe):
+        if n is None:             # "Articolo unico": la sequenza riparte
+            if inizio is not None:
+                citate.update(range(inizio, i))
+                inizio = None
+            main, prec = 0, i
+            continue
+        if inizio is not None:
+            if n == atteso:       # rientro: l'atto riprende il suo discorso
+                citate.update(range(inizio, i))
+                inizio, main = None, n
+            prec = i
+            continue
+        if n == main + 1 or (suff and n == main) or (main == 0 and n == 1):
+            main = n              # prosegue la sequenza
+        else:
+            da = _inizio_citazione(righe, prec, i)
+            if da is not None:
+                inizio, atteso = da, main + 1
+            else:
+                main = n          # salto senza annuncio: numerazione dell'atto
+        prec = i
+    if inizio is not None:        # nessun rientro: citato fino in fondo
+        citate.update(range(inizio, len(righe)))
+    return citate
+
+
+_PROVE_CITATE = [
+    ("L-162-2004: l'articolo 1 riscrive il Titolo III di un'altra legge",
+     ["Art. 1", "Il Titolo III della Legge 28 aprile 1999 n.53 e' cosi' modificato:",
+      '"TITOLO III', "Art. 7", "Per procedere alla costituzione non e' necessario il Nulla Osta.",
+      "Art. 8", "Nel presente Titolo l'espressione Regolamento indica quanto segue.",
+      "Art. 2", "La presente legge entra in vigore il quindicesimo giorno."],
+     set(range(1, 7))),
+    ("DD-204-2020: annuncio spezzato su due righe",
+     ["Art.3", "1.", "Il Titolo II del Decreto Delegato n.146/2018 e' cosi'",
+      "sostituito:", "«TITOLO II - COSTITUZIONE DELL'AUTORITA' ICT",
+      "Art.6", "1.", "E' istituita l'Autorita' per la vigilanza.",
+      "Art. 7", "1.", "Si assumono le seguenti definizioni.",
+      "Art.4", "1.", "Il presente decreto entra in vigore."],
+     set(range(1, 11))),
+    ("L-119-2015: allegato di un'altra legge, poi rientro sulla sequenza propria",
+     ["Art.34", "L'articolo 1 dell'Allegato A alla Legge 10 agosto 2012 n.122 e' cosi' modificato:",
+      '"ALLEGATO A', "Art.1", "I requisiti psicofisici minimi sono i seguenti.",
+      "Art.35", "L'articolo 2 dell'Allegato A alla Legge 10 agosto 2012 n.122 e' cosi' modificato:",
+      '"ALLEGATO A', "Art.2", "L'accertamento e' effettuato dall'Ufficio competente.",
+      "Art.36"],
+     set(range(1, 5)) | set(range(6, 10))),
+    ("anche i CAPO e i TITOLO riportati nella citazione sono testo citato",
+     ["Art. 1", "Il Titolo III della Legge 28 aprile 1999 n.53 e' cosi' modificato:",
+      '"TITOLO III', "CAPO I", "Delle disposizioni generali",
+      "Art. 7", "La costituzione avviene con atto pubblico.",
+      "Art. 2", "La presente legge entra in vigore il quindicesimo giorno."],
+     set(range(1, 7))),
+    # I quattro casi in cui la numerazione salta ma nessuno cita niente.
+    ("LC-41-2004: \"Art.l\" letto male, la sequenza parte da 2",
+     ["Art.l", "(Istituzione)",
+      "Nel rispetto dei principi fondamentali dell'Ordinamento della Repubblica, ed ai sensi",
+      "dell'articolo 4 della Legge 26 febbraio 2002 n.36, e' istituito il Collegio di Controllo.",
+      "Art.2", "(Funzioni)", "Al Collegio sono affidate le funzioni di controllo."],
+     set()),
+    ("LC-27-2004: stesso difetto di lettura, stesso salto",
+     ["Art.l", "(Istituzione)",
+      "Nel rispetto dei principi fondamentali dell'Ordinamento della Repubblica e' istituito",
+      "il Collegio di Controllo della Finanza Pubblica, organo di rilievo costituzionale.",
+      "Art.2", "(Funzioni)", "Al Collegio sono affidate le funzioni giurisdizionali."],
+     set()),
+    ("L-5-1921: un secondo atto riportato in nota a pie' di pagina",
+     ["Art. 34.", "- La nomina dei rappresentanti verra' fatta quindici giorni dopo.",
+      "(1) Statuto Agrario: R. pag. 197.",
+      "(2) Decreto Reggenziale 24 Luglio 1921 N.25: Decreto Reggenziale 4 Luglio 1923 N. 18:",
+      "Art. 1.", "- L'Articolo 15 della Legge aggiuntiva agraria e' modificato come segue."],
+     set()),
+    ("L-52-1947: due \"Art. 4.\" di seguito nel testo originale",
+     ["Art. 3.", "In relazione all'art. 156 del Codice Penale ogni giorno corrisponde a lire cento.",
+      "Art. 4.", "Il limite di applicazione del Decreto Penale e' elevato a lire seimila.",
+      "Art. 4.", "E' fissato in lire cinquecento il deposito prescritto per gli appelli.",
+      "Art. 6.", "La competenza del Giudice Conciliatore e' elevata a lire duemila."],
+     set()),
+    ("l'annuncio di un comma non apre una citazione di articoli",
+     ["Art. 14", "1.",
+      "All'articolo 97, comma 1, della Legge n.166/2013 e' aggiunto il seguente comma 1-bis):",
+      "«1-bis) Per i ricavi certificati non e' obbligatoria la certificazione.».",
+      "Art. 16", "1.", "Il presente decreto entra in vigore il giorno successivo."],
+     set()),
+    ("una modifica gia' avvenuta, senza testo riportato, non e' un annuncio",
+     ["Art. 1", "La legge 5 dicembre 2011 n.188 e' stata modificata in materia di personale.",
+      "Art. 7", "Restano ferme le disposizioni vigenti."],
+     set()),
+]
+for _nome, _righe_test, _atteso in _PROVE_CITATE:
+    assert righe_citate(_righe_test) == _atteso, \
+        f"righe citate ({_nome}): {sorted(righe_citate(_righe_test))}"
+
+
 # --- Convenzione estera dentro il dispositivo ---
 #
 # Stessa famiglia del taglio alla promulgazione: un atto di ratifica riporta
@@ -683,6 +877,9 @@ def parse(id_norma, meta, righe=None):
     # dell'atto corretto. Il testo passa da struttura_dedotta().
     errata = e_errata_corrige(id_norma, meta)
     taglio_convenzione = inizio_convenzione(righe)
+    # Le intestazioni di un testo citato restano testo del comma in corso:
+    # e' l'articolo che cita a contenerle.
+    citate = set() if errata else righe_citate(righe)
 
     partizioni = []       # albero: Titoli con figli Capi
     articoli = []
@@ -835,6 +1032,14 @@ def parse(id_norma, meta, righe=None):
 
         m_part = RE_PARTIZIONE.match(riga)
         m_art = None if errata else intestazione_articolo(riga)
+
+        # Dentro un testo citato niente e' struttura di questo atto: ne'
+        # "Art. 7" ne' il "TITOLO III"/"CAPO I" riportati nella citazione.
+        # Senza togliere anche le partizioni, "CAPO I" chiude l'articolo in
+        # corso e il testo che segue, non piu' raccolto da nessun articolo,
+        # viene buttato via: L-168-2005 ci perdeva 35.953 caratteri.
+        if i in citate:
+            m_part, m_art = None, None
 
         # --- Partizione: TITOLO / CAPO / SEZIONE ---
         if m_part:
@@ -1071,6 +1276,40 @@ for _nome, _righe_test, _attesi, _parti in _PROVE_DUE_ATTI:
     for _r in _righe_test:
         if _r.endswith(".") and " " in _r:      # riga di testo, non un numero di comma
             assert _r in _testi, f"testo perso ({_nome}): {_r!r}"
+
+
+_PROVE_CITATE_PARSE = [
+    ("gli articoli citati non diventano articoli propri, e il testo resta",
+     ["Art. 1", "Il Titolo III della Legge 28 aprile 1999 n.53 e' cosi' modificato:",
+      '"TITOLO III', "Art. 7", "Per procedere alla costituzione serve il Nulla Osta.",
+      "Art. 8", "Nel presente Titolo l'espressione Regolamento indica quanto segue.",
+      "Art. 2", "La presente legge entra in vigore il quindicesimo giorno."],
+     ["T-2-2000/art-1", "T-2-2000/art-2"]),
+    ("una partizione dentro la citazione non porta via il testo",
+     ["Art. 1", "Il Titolo III della Legge 28 aprile 1999 n.53 e' cosi' modificato:",
+      '"TITOLO III', "CAPO I", "Delle disposizioni generali",
+      "Art. 7", "La costituzione avviene con atto pubblico.",
+      "Art. 2", "La presente legge entra in vigore il quindicesimo giorno."],
+     ["T-2-2000/art-1", "T-2-2000/art-2"]),
+    ("nessun annuncio: il salto di numerazione resta un articolo dell'atto",
+     ["Art.l", "(Istituzione)", "E' istituito il Collegio di Controllo della Finanza Pubblica.",
+      "Art.2", "(Funzioni)", "Al Collegio sono affidate le funzioni di controllo."],
+     ["T-2-2000/art-2"]),
+    ("numerazione rotta nell'originale: due articoli 4, id reso univoco",
+     ["Art. 3.", "Ogni giorno di prigionia corrisponde a lire cento di multa.",
+      "Art. 4.", "Il limite di applicazione del Decreto Penale e' elevato a lire seimila.",
+      "Art. 4.", "E' fissato in lire cinquecento il deposito prescritto per gli appelli.",
+      "Art. 6.", "La competenza del Giudice Conciliatore e' elevata a lire duemila."],
+     ["T-2-2000/art-3", "T-2-2000/art-4", "T-2-2000/art-4-2", "T-2-2000/art-6"]),
+]
+for _nome, _righe_test, _attesi in _PROVE_CITATE_PARSE:
+    _d = parse("T-2-2000", {}, righe=_righe_test)
+    assert [a["id"] for a in _d["articoli"]] == _attesi, \
+        f"articoli citati ({_nome}): {[a['id'] for a in _d['articoli']]}"
+    _testi = " ".join(c["testo"] for a in _d["articoli"] for c in a["commi"]) + " " + _d["preambolo"]
+    for _r in _righe_test:
+        if _r.endswith(".") and " " in _r and not intestazione_articolo(_r):
+            assert _r.strip('"') in _testi, f"testo perso ({_nome}): {_r!r}"
 
 
 if hasattr(sys.stdout, "reconfigure"):
