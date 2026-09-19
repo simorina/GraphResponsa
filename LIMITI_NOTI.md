@@ -1,4 +1,4 @@
-# Limiti noti del parser — stato al 19/09/2026
+# Limiti noti del parser — stato al 19/09/2026 (secondo giro)
 
 Elenco dei problemi **non risolti** in questa sessione di lavoro su
 `src/02_parse.py`. Ogni voce riporta l'impatto misurato sull'intero corpus
@@ -9,9 +9,10 @@ stime: dove un numero è incerto è detto esplicitamente.
 Cosa è stato invece corretto: la formula di promulgazione (allegati assorbiti
 come commi), la rubrica presunta, tre varianti di intestazione d'articolo, gli
 id duplicati fra articoli, i tipi di citazione mancanti, le intestazioni
-minuscole, le convenzioni nel dispositivo, le errata corrige e gli articoli di
-una legge citata da una novella (P1, per la parte annunciata: punto 1). Vedi
-`git log` sul branch `fix-parser`.
+minuscole, le convenzioni nel dispositivo, le errata corrige, gli articoli di
+una legge citata da una novella (P1, per la parte annunciata: punto 1), gli
+articoli "Art. 5-bis" con il trattino (1.2) e i commi con suffisso ordinale
+(1.3). Vedi `git log` sul branch `fix-parser`.
 
 ---
 
@@ -64,25 +65,40 @@ puntano quindi alla voce d'indice.
 correzione richiede di scartare un blocco di testo all'inizio del documento,
 il che è rischioso senza un controllo a campione più ampio.
 
-## 3. "Art. 5-bis" con il trattino non riconosciuto (1.2)
+## 3. Un articolo bis attaccato a un articolo citato (residuo di 1.2)
 
-**Impatto**: 341 intestazioni in 136 documenti.
+**Impatto residuo**: non misurato in modo esatto; il solo caso trovato
+aprendo i documenti è L-24-2022, e lì non si verifica.
 
-**Perché rimandato**: accettarlo recupera 186 articoli veri in 91 documenti,
-ma in **41 documenti** le intestazioni con il trattino appartengono ad
-articoli citati da una modifica ("Dopo l'articolo 44 è inserito: Art.
-44-bis"), e diventerebbero articoli spuri: DD-103-2025 passerebbe da 9 a 15
-articoli. Separare i due casi richiede il controllo sulla sequenza del
-punto 1, quindi i due fix vanno fatti insieme.
+**Risolto**: `RE_ARTICOLO` accetta il trattino prima del suffisso. Sul corpus:
+174 articoli veri in più in 92 documenti, e 24 articoli citati in meno in 15
+(fra cui il "58 bis" di L-162-2004, che era il residuo noto del punto 1).
+DD-103-2025, il caso peggiore del tentativo precedente, resta a 9 articoli:
+i suoi 44-bis...44-septies stanno dentro un blocco citato.
 
-## 4. "comma 5 bis" non riconosciuto (1.3)
+**Cos'è il residuo**: un "Art. N-bis" viene accettato come articolo dell'atto
+quando N è il numero in corso o il successivo. Se l'articolo N è a sua volta
+un articolo citato che il punto 1 non ha riconosciuto — perché l'annuncio è
+troppo lontano — allora anche il suo bis passa. In L-24-2022 il blocco
+residuo (articoli 59-67 del codice di procedura penale) non contiene bis,
+quindi il caso non si presenta, ma la strada esiste.
 
-**Impatto**: 572 occorrenze in 228 documenti. Il comma novellato si fonde con
-il precedente.
+**Perché rimandato**: dipende interamente dal residuo del punto 1. Chiuso
+quello, si chiude anche questo; una regola in più qui non aggiungerebbe
+niente.
 
-**Perché rimandato**: mai affrontato in questa sessione. Stessa famiglia del
-punto 3, e con lo stesso rischio: dentro una novella i "5 bis" citati non
-sono commi dell'atto che li cita.
+## 4. Commi con suffisso dentro un testo citato (residuo di 1.3)
+
+**Risolto**: `RE_COMMA` e `RE_COMMA_INLINE` accettano il suffisso ordinale.
+Sul corpus: 527 commi riconosciuti in 209 documenti, 50 commi oltre i 1.400
+caratteri in meno. L-87-2026 passa da 240 a 245 commi, i cinque veri della
+legge (l'atteso di `04_verify.py` è aggiornato).
+
+**Cos'è il residuo**: dentro un blocco citato il comma con suffisso non apre
+un comma — sarebbe la numerazione di un altro atto — e il suo testo resta nel
+comma dell'articolo che cita. È la scelta giusta finché il testo citato non
+diventa una struttura propria nel grafo (punto 9), ma significa che un
+"1-bis)" citato non è interrogabile come comma a sé.
 
 ## 5. Collasso strutturale residuo (1.4)
 
