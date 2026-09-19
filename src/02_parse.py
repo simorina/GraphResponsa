@@ -53,8 +53,15 @@ RE_PARTIZIONE = re.compile(r"^(TITOLO|CAPO|SEZIONE)\s+([IVXLC]+)\s*$", re.I)
 # di articoli CITATI da una novella ("Dopo l'articolo 44 e' inserito: Art.
 # 44-bis ...") e diventerebbero articoli spuri del decreto che le cita. Serve
 # prima un controllo sulla sequenza in parse().
+# Il trattino prima del suffisso ("Art. 5-bis") e' la forma piu' usata dalle
+# novelle: 341 intestazioni in 136 documenti. Accettarlo recupera 186 articoli
+# veri, ma in una parte dei documenti quelle righe sono articoli CITATI
+# ("Dopo l'articolo 44 e' inserito il seguente articolo: Art. 44-bis"): il
+# trattino resta fuori finche' non c'e' il riconoscimento del testo citato,
+# che ora c'e' (righe_citate). Il trattino lungo resta escluso: in L-59-2016
+# "Articolo 9 –" e' una voce del sommario, e accettarla creava 42 doppioni.
 RE_ARTICOLO = re.compile(
-    r"^(?:Art\.?|Articolo)\s*(\d+|[Uu]nico)\s*[°º]?\.?\s*"
+    r"^(?:Art\.?|Articolo)\s*(\d+|[Uu]nico)\s*[°º]?\.?\s*-?\s*"
     r"(bis|ter|quater|quinquies|sexies|septies|octies|nonies|decies)?\.?\s*"
     r"(?:\(\d+\))?\s*[-:.]?\s*$", re.I)
 
@@ -76,8 +83,11 @@ _PROVE_ARTICOLO = [
     ("Articolo 7°", "7"),
     ("Art 11° - I due segretari terranno il registro", None),
     ("Art. 12° bis", "12 bis"),
-    # trattino prima del suffisso: escluso finche' non c'e' il controllo sulle novelle
-    ("Art.1-bis", None),
+    # trattino prima del suffisso
+    ("Art.1-bis", "1 bis"),
+    ("Art. 44-bis", "44 bis"),
+    ("Art. 5 - quater", "5 quater"),
+    ("Art.9-bis.", "9 bis"),
     # trattino lungo finale: in L-59-2016 "Articolo 9 –" e' una voce del sommario
     ("Articolo 9 –", None),
     # riferimento nel testo, non intestazione
@@ -572,6 +582,18 @@ def righe_citate(righe):
             da = _inizio_citazione(righe, prec, i)
             if da is not None:
                 inizio, atteso = da, main + 1
+            elif suff:
+                # Un articolo bis appartiene all'atto quando la sua base e' il
+                # numero in corso o quello successivo: "Art. 3" e poi
+                # "Art.3-bis" (DD-19-2016). Se la base e' altrove, e'
+                # l'articolo di un'altra legge riportato qui: L-24-2022
+                # sostituisce gli articoli da 53 a 58 del codice di procedura
+                # penale e ne riporta dodici bis, a partire dal proprio
+                # articolo 1. L'annuncio c'e' ma resta troppo lontano
+                # (l'articolo 53 citato occupa trenta righe), quindi la
+                # sentinella non lo vede: il bis fuori sequenza apre il blocco
+                # al posto suo, e come ogni blocco si chiude al rientro.
+                inizio, atteso = prec + 1, main + 1
             else:
                 main = n          # salto senza annuncio: numerazione dell'atto
         prec = i
@@ -607,6 +629,21 @@ _PROVE_CITATE = [
       "Art. 7", "La costituzione avviene con atto pubblico.",
       "Art. 2", "La presente legge entra in vigore il quindicesimo giorno."],
      set(range(1, 7))),
+    # L-24-2022 sostituisce gli articoli da 53 a 58 del codice di procedura
+    # penale e ne riporta dodici bis a partire dal proprio articolo 1:
+    # l'annuncio c'e' ma resta trenta righe piu' su, fuori dalla finestra.
+    ("l'articolo bis con la base lontana dalla sequenza e' citato lo stesso",
+     ["Art. 1", "(Misure cautelari personali)", "1.",
+      "Il Giudice ordina limitazioni della liberta' personale del prevenuto.",
+      "Art. 53-bis", "(Esigenze cautelari)", "1.",
+      "Le misure cautelari sono disposte dal Giudice Inquirente.",
+      "Art. 2", "1.", "La presente legge entra in vigore il quindicesimo giorno."],
+     set(range(1, 8))),
+    ("l'articolo bis che segue la propria base resta dell'atto",
+     ["Art. 3", "1.", "Il punto vi. della Legge n.166/2013 e' cosi' modificato.",
+      "Art.3-bis", "1.", "All'articolo 13 e' aggiunto il seguente punto.",
+      "Art. 4", "1.", "Il presente decreto entra in vigore."],
+     set()),
     # I quattro casi in cui la numerazione salta ma nessuno cita niente.
     ("LC-41-2004: \"Art.l\" letto male, la sequenza parte da 2",
      ["Art.l", "(Istituzione)",
@@ -1373,6 +1410,30 @@ for _nome, _righe_test, _attesi in _PROVE_COMMA_BIS:
         if (_r.endswith(".") and " " in _r
                 and not intestazione_articolo(_r) and not RE_COMMA.match(_r)):
             assert _r.strip('"') in _testi, f"testo perso ({_nome}): {_r!r}"
+
+
+_PROVE_ART_BIS = [
+    ("l'articolo bis dell'atto apre un articolo proprio",
+     ["Art. 5", "1.", "Il canone e' dovuto in via anticipata.",
+      "Art. 5-bis", "1.", "Il canone non e' dovuto dagli esenti.",
+      "Art. 6", "1.", "Le somme sono versate entro il mese."],
+     ["T-4-2000/art-5", "T-4-2000/art-5-bis", "T-4-2000/art-6"]),
+    ("l'articolo bis citato da una novella resta testo dell'articolo che cita",
+     ["Art. 3", "1.",
+      "Dopo l'articolo 44 della Legge 5 dicembre 2011 n.188 e' inserito il seguente articolo:",
+      "Art. 44-bis", "1.", "La domanda e' presentata per via telematica.",
+      "Art. 4", "1.", "Il presente decreto entra in vigore il giorno successivo."],
+     ["T-4-2000/art-3", "T-4-2000/art-4"]),
+]
+for _nome, _righe_test, _attesi in _PROVE_ART_BIS:
+    _d = parse("T-4-2000", {}, righe=_righe_test)
+    _ids = [a["id"] for a in _d["articoli"]]
+    assert _ids == _attesi, f"articolo bis ({_nome}): {_ids}"
+    _testi = " ".join(c["testo"] for a in _d["articoli"] for c in a["commi"])
+    for _r in _righe_test:
+        if (_r.endswith(".") and " " in _r
+                and not intestazione_articolo(_r) and not RE_COMMA.match(_r)):
+            assert _r.strip('"«»') in _testi, f"testo perso ({_nome}): {_r!r}"
 
 
 if hasattr(sys.stdout, "reconfigure"):
