@@ -97,9 +97,22 @@ export function useChat() {
       });
 
       if (!response.ok) {
+        // Il 403 arriva quando l'id di conversazione ricordato non e' di chi
+        // sta scrivendo: si cambia account, si passa dalla produzione allo
+        // sviluppo, o la riga e' scaduta e ricreata da un altro. Ricordarlo e
+        // ripresentarlo a ogni messaggio lasciava l'utente in un vicolo cieco
+        // - "Conversazione non tua" all'infinito - da cui si usciva solo
+        // svuotando il browser. Lo si dimentica e si riparte da capo.
+        if (response.status === 403) {
+          localStorage.removeItem('gr_conv_id');
+          setConversazione('');
+          throw new Error(
+            'Quella conversazione non risulta tua: ne ho aperta una nuova. Riprova a scrivere.'
+          );
+        }
         // 429 non e' un guasto: e' il tetto di spesa o di frequenza che scatta,
         // e il messaggio del server spiega quale. Va mostrato com'e'.
-        if (response.status === 429 || response.status === 403) {
+        if (response.status === 429) {
           const d = await response.json().catch(() => null);
           throw new Error(d?.detail || 'Limite raggiunto.');
         }
