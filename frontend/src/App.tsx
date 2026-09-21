@@ -13,6 +13,9 @@ import type { StatsState, Fonte } from './types';
 
 type Sessione = 'verifica' | 'dentro' | 'fuori';
 
+// Il segno che in questa sessione del browser l'accesso e' gia' stato chiesto.
+const ACCESSO_CHIESTO = 'gr_accesso_chiesto';
+
 export function App() {
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [stats, setStats] = useState<StatsState>({ fase: 'attesa' });
@@ -35,11 +38,22 @@ export function App() {
 
   // Al caricamento si guarda solo se esiste gia' una sessione valida:
   // non c'e' nessun giro di ritorno da gestire, l'accesso avviene qui dentro.
+  //
+  // In sviluppo il cancello si vede comunque, una volta per sessione del
+  // browser: altrimenti la sessione salvata viene rinnovata in silenzio e non
+  // si prova mai il percorso d'accesso, che e' il primo che un utente
+  // incontra. I ricaricamenti successivi non richiedono di nuovo le
+  // credenziali, perche' sviluppare ricaricando ogni due minuti sarebbe una
+  // tortura.
   useEffect(() => {
     let vivo = true;
     (async () => {
       if (!configurato()) {          // sviluppo senza Cognito: nessuna identita'
         if (vivo) setSessione('dentro');
+        return;
+      }
+      if (import.meta.env.DEV && !sessionStorage.getItem(ACCESSO_CHIESTO)) {
+        if (vivo) setSessione('fuori');
         return;
       }
       const t = await token();       // rinnova se sta per scadere
@@ -91,7 +105,14 @@ export function App() {
   }
 
   if (sessione === 'fuori') {
-    return <Accesso onEntrato={() => setSessione('dentro')} />;
+    return (
+      <Accesso
+        onEntrato={() => {
+          sessionStorage.setItem(ACCESSO_CHIESTO, '1');
+          setSessione('dentro');
+        }}
+      />
+    );
   }
 
   return (
