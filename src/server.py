@@ -32,6 +32,15 @@ from pydantic import BaseModel, Field
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "src"))
 
+# Il .env si carica QUI, prima degli import locali. servizio/archivio.py legge
+# i nomi delle tabelle all'import e, se non le trova, diventa un no-op
+# silenzioso: niente conversazioni, niente contatori, barre a zero. Finora
+# funzionava solo perche' agente.agente, importato una riga sopra, caricava il
+# .env per conto suo - un ordine di import che nessuno avrebbe saputo di dover
+# rispettare.
+from dotenv import load_dotenv                            # noqa: E402
+load_dotenv(ROOT / ".env")
+
 from agente.agente import rispondi, nuova_conversazione   # noqa: E402
 from agente.strumenti import grafo, url_documento         # noqa: E402
 from servizio import archivio                             # noqa: E402
