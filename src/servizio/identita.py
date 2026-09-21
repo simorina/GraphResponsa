@@ -71,8 +71,19 @@ def _scarica_chiavi():
 
 
 def _decodifica(token: str) -> dict:
-    from jose import jwt
-    from jose.utils import base64url_decode  # noqa: F401  (import esplicito, la libreria e' opzionale)
+    try:
+        from jose import jwt
+        from jose.utils import base64url_decode  # noqa: F401
+    except ImportError as e:
+        # Senza la libreria il token non si verifica, ma non e' colpa di chi
+        # sta entrando: chiamarlo "sessione non valida" - come faceva il
+        # blocco che raccoglie tutte le eccezioni - manda a cercare il guasto
+        # dalla parte sbagliata. E' capitato in sviluppo, dove si installa
+        # requirements.txt e python-jose sta in requirements-servizio.txt.
+        raise HTTPException(
+            status_code=500,
+            detail="Il server non puo' verificare l'accesso: manca python-jose. "
+                   "Installa requirements-servizio.txt.") from e
 
     intestazione = jwt.get_unverified_header(token)
     chiave = next((k for k in _scarica_chiavi() if k["kid"] == intestazione.get("kid")), None)
