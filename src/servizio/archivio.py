@@ -171,13 +171,28 @@ def elenca_conversazioni(utente_id: str, limite: int = 50) -> list[dict]:
 
 
 def appartiene(utente_id: str, conversazione: str) -> bool:
-    """Una conversazione si legge solo se e' tua. Senza questo, un id indovinato
-    aprirebbe le consultazioni di chiunque."""
+    """Una conversazione si continua solo se e' tua, o se non e' di nessuno.
+
+    Senza il controllo, un id indovinato aprirebbe le consultazioni di
+    chiunque. Ma un id che non esiste in tabella non appartiene a nessuno, e
+    rifiutarlo lascia l'utente in un vicolo cieco: il sito ricorda l'ultima
+    conversazione in `localStorage` e la ripropone, quindi bastava passare
+    dalla produzione allo sviluppo - o aspettare i 90 giorni della scadenza -
+    per vedersi rispondere "Conversazione non tua" a ogni messaggio, senza
+    modo di uscirne se non svuotando il browser. Qui si riparte da capo con
+    quell'id, che e' esattamente cosa ci si aspetta.
+    """
     if not T_CONVERSAZIONI:
         return True
     r = _tabella(T_CONVERSAZIONI).get_item(
         Key={"utente": utente_id, "conversazione": conversazione})
-    return "Item" in r
+    if "Item" in r:
+        return True
+    # Di qualcun altro, o inesistente? Si guarda se l'id esiste per chiunque.
+    altrui = _tabella(T_CONVERSAZIONI).scan(
+        FilterExpression="conversazione = :c",
+        ExpressionAttributeValues={":c": conversazione}, Limit=1).get("Items")
+    return not altrui
 
 
 # -------------------------------------------------------------- riscontri
