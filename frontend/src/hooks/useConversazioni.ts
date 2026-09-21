@@ -1,6 +1,6 @@
 import type { Fonte } from '../types';
 import { useCallback, useEffect, useState } from 'react';
-import { token } from '../auth/cognito';
+import { configurato, token } from '../auth/cognito';
 
 export interface VoceConversazione {
   conversazione: string;
@@ -45,6 +45,15 @@ export function useConversazioni() {
   const ricarica = useCallback(async (segnale?: AbortSignal) => {
     try {
       const t = await token();
+      // Senza token non si chiama: l'effetto di montaggio parte prima
+      // dell'accesso, e il server risponderebbe 401 - un errore in console a
+      // ogni caricamento, e la barra laterale in stato di errore invece che in
+      // attesa. Con Cognito spento (sviluppo senza identita') `token()` da'
+      // null ma la chiamata va fatta lo stesso: li' l'utente e' `locale`.
+      if (configurato() && !t) {
+        setStato({ fase: 'attesa' });
+        return;
+      }
       const r = await fetch('/conversazioni', {
         signal: segnale,
         headers: t ? { Authorization: `Bearer ${t}` } : {},
