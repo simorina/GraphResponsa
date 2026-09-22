@@ -118,7 +118,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
           <div className="flex items-center gap-2.5 pl-1.5">
             <Sigillo className="h-[18px] w-[18px]" />
             <span className="text-[14.5px] font-semibold tracking-[-0.015em] text-ink">
-              Graph<span className="text-azzurro">Responsa</span>
+              Responsa
             </span>
           </div>
           <button

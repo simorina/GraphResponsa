@@ -243,19 +243,17 @@ export const Accesso: React.FC<AccessoProps> = ({ onEntrato }) => {
               <Sigillo className="h-5 w-5" animato />
             </div>
             <div>
-              <div className="text-[15px] font-semibold tracking-[-0.02em] text-white">GraphResponsa</div>
+              <div className="text-[15px] font-semibold tracking-[-0.02em] text-white">Responsa</div>
               <div className="font-mono text-[10.5px] uppercase tracking-[0.14em] text-white/75">
                 Repubblica di San Marino
               </div>
             </div>
           </div>
           <p
-            className="rise font-editorial text-[26px] italic leading-[1.15] tracking-[-0.01em] text-white sm:text-[30px]"
+            className="rise max-w-[24ch] font-editorial text-[22px] leading-[1.22] tracking-[-0.01em] text-white sm:text-[26px]"
             style={{ ['--i' as string]: 1 }}
           >
-            Da mihi factum,
-            <br />
-            dabo tibi ius.
+            L’intelligenza artificiale dedicata alla legge sammarinese.
           </p>
         </div>
       </header>
@@ -271,7 +269,7 @@ export const Accesso: React.FC<AccessoProps> = ({ onEntrato }) => {
             </div>
             <div>
               <div className="text-[16px] font-semibold tracking-[-0.02em] text-ink">
-                Graph<span className="text-azzurro">Responsa</span>
+                Responsa
               </div>
               <div className="font-mono text-[11px] uppercase tracking-[0.14em] text-ink-2">
                 Repubblica di San Marino
@@ -598,24 +596,28 @@ export const Accesso: React.FC<AccessoProps> = ({ onEntrato }) => {
             <div className="rise flex items-center gap-3">
               <span className="h-px w-7 bg-white/70" />
               <span className="font-mono text-[11px] uppercase tracking-[0.18em] text-white/80">
-                Responsa prudentium
+                Repubblica di San Marino
               </span>
             </div>
-            <p
-              className="rise mt-7 max-w-[14ch] font-editorial text-[48px] italic leading-[1.06] tracking-[-0.02em] text-white xl:text-[56px]"
+            <h2
+              className="rise mt-7 font-editorial text-[64px] leading-none tracking-[-0.025em] text-white xl:text-[76px]"
               style={{ ['--i' as string]: 1 }}
             >
-              Da mihi factum,
-              <br />
-              dabo tibi ius.
-            </p>
+              Responsa
+            </h2>
             <p
-              className="rise mt-6 max-w-[40ch] text-[15.5px] leading-relaxed text-white/85"
+              className="rise mt-5 max-w-[22ch] font-editorial text-[27px] italic leading-[1.25] tracking-[-0.01em] text-white/95 xl:text-[31px]"
               style={{ ['--i' as string]: 2 }}
             >
-              Esponi il caso. Ogni risposta si fonda sulla norma, con articolo e
-              comma di ciascuna fonte; dove il testo manca, lo dichiara invece
-              di supplirvi.
+              L’intelligenza artificiale dedicata alla consultazione della legge
+              sammarinese.
+            </p>
+            <p
+              className="rise mt-6 max-w-[40ch] text-[15px] leading-relaxed text-white/80"
+              style={{ ['--i' as string]: 3 }}
+            >
+              Leggi, decreti e regolamenti in un solo archivio: ogni risposta
+              cita articolo e comma delle fonti su cui si fonda.
             </p>
           </div>
 

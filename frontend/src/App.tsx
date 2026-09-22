@@ -158,7 +158,7 @@ export function App() {
             <div className="flex min-w-0 items-center gap-2.5 md:hidden">
               <Sigillo className="h-[17px] w-[17px]" />
               <span className="text-[14.5px] font-semibold tracking-[-0.015em] text-ink">
-                Graph<span className="text-azzurro">Responsa</span>
+                Responsa
               </span>
             </div>
 
