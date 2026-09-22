@@ -40,6 +40,24 @@ LOTTO = 16                           # commi per richiesta: tiene sotto i limiti
 # Quanti giri prima di arrendersi su un errore di rete. Ogni giro riparte dai
 # commi ancora senza vettore, quindi ritentare non costa lavoro rifatto.
 TENTATIVI = 6
+DIMENSIONI = 1024                    # voyage-4
+
+# L'indice vettoriale dei commi si crea QUI, non lo si lascia creare a
+# LangChain: from_existing_graph lo fa con le sole dimensioni e la similarita',
+# e il risultato e' un indice senza compressione binaria ne' espansione della
+# ricerca. Misurato il 22/09/2026 sulla copia da Aura: con l'espansione, dei
+# dieci vicini veri se ne ritrovano dieci; senza, otto o sette. LangChain
+# riusa l'indice se lo trova gia' fatto.
+INDICE_COMMI = f"""
+    CREATE VECTOR INDEX {INDICE_VETTORIALE} IF NOT EXISTS
+    FOR (c:Comma) ON (c.embedding)
+    OPTIONS {{indexConfig: {{
+        `vector.dimensions`: {DIMENSIONI},
+        `vector.similarity_function`: 'cosine',
+        `vector.quantization.type`: 'BINARY',
+        `vector.default_search_expansion_factor`: 3.0
+    }}}}
+"""
 
 
 CONTEGGIO = """
@@ -82,6 +100,12 @@ def main():
     db = os.environ.get("NEO4J_DATABASE", "neo4j")
 
     auth = (utente, password)
+
+    # Prima di tutto l'indice, anche quando non c'e' nessun embedding da
+    # calcolare: se e' stato cancellato, lanciare questo script lo rifa'.
+    with GraphDatabase.driver(uri, auth=auth) as d, d.session(database=db) as s:
+        s.run(INDICE_COMMI).consume()
+
     prima = conta(uri, auth, db)
     print(f"Commi nel grafo: {prima['totali']}, gia' con embedding: {prima['con_embedding']}")
 
@@ -111,7 +135,7 @@ def main():
     )
 
     # from_existing_graph legge i nodi :Comma, calcola l'embedding del campo
-    # `testo` e lo salva su ogni nodo. Crea anche l'indice vettoriale.
+    # `testo` e lo salva su ogni nodo, e riusa l'indice creato sopra.
     #
     # Sulla corsa intera - 171.165 commi, oltre due ore - una connessione che
     # cade e' quasi certa, e succedeva da entrambi i lati: "RemoteDisconnected"
