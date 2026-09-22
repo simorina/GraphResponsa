@@ -148,7 +148,7 @@ export function App() {
           <div className="flex min-w-0 items-center gap-3">
             <button
               onClick={() => setSidebarOpen((v) => !v)}
-              className="-ml-1.5 rounded-lg p-1.5 text-ink-2 transition-colors duration-200 hover:bg-panel hover:text-ink active:translate-y-px"
+              className="-ml-1.5 flex h-11 w-11 items-center justify-center rounded-lg text-ink-2 transition-colors duration-200 hover:bg-panel hover:text-ink active:translate-y-px sm:h-9 sm:w-9"
               title={sidebarOpen ? 'Nascondi il pannello' : 'Mostra il pannello'}
               aria-label={sidebarOpen ? 'Nascondi il pannello' : 'Mostra il pannello'}
             >
@@ -174,7 +174,7 @@ export function App() {
 
           <button
             onClick={resetChat}
-            className="rounded-lg p-1.5 text-ink-2 transition-colors duration-200 hover:bg-panel hover:text-ink active:translate-y-px md:hidden"
+            className="flex h-11 w-11 items-center justify-center rounded-lg text-ink-2 transition-colors duration-200 hover:bg-panel hover:text-ink active:translate-y-px md:hidden"
             title="Nuova consultazione"
             aria-label="Nuova consultazione"
           >

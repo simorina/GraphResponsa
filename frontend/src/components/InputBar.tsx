@@ -49,7 +49,7 @@ export const InputBar: React.FC<InputBarProps> = ({
   const pronto = input.trim().length > 0 && !loading;
 
   return (
-    <div className="pointer-events-none absolute inset-x-0 bottom-0 z-10 bg-gradient-to-t from-canvas via-canvas/95 to-transparent px-4 pb-4 pt-12 md:px-6">
+    <div className="pointer-events-none absolute inset-x-0 bottom-0 z-10 bg-gradient-to-t from-canvas via-canvas/95 to-transparent px-4 pb-[max(1rem,env(safe-area-inset-bottom))] pt-12 md:px-6">
       <div className="pointer-events-auto mx-auto max-w-3xl">
         <form
           onSubmit={(e) => {
@@ -71,7 +71,7 @@ export const InputBar: React.FC<InputBarProps> = ({
             onKeyDown={onKeyDown}
             rows={1}
             placeholder="Poni un quesito sulla normativa sammarinese…"
-            className="max-h-52 w-full resize-none bg-transparent px-5 pb-1.5 pt-4 text-[15.5px] leading-relaxed text-ink placeholder-ink-3 focus:outline-none focus-visible:outline-none"
+            className="max-h-52 w-full resize-none bg-transparent px-5 pb-1.5 pt-4 text-[16px] leading-relaxed text-ink placeholder-ink-3 focus:outline-none focus-visible:outline-none"
             style={{ minHeight: '48px' }}
           />
 
@@ -97,7 +97,7 @@ export const InputBar: React.FC<InputBarProps> = ({
                 onClick={onStop}
                 title="Interrompi"
                 aria-label="Interrompi la consultazione"
-                className="flex h-9 shrink-0 items-center gap-2 rounded-full bg-ink px-3.5 text-[13px] font-medium text-white transition-colors duration-200 hover:bg-ink-2 active:translate-y-px"
+                className="flex h-11 shrink-0 items-center gap-2 rounded-full bg-ink px-4 text-[13.5px] font-medium text-white transition-colors duration-200 hover:bg-ink-2 active:scale-[0.97] sm:h-9 sm:px-3.5"
               >
                 <Square className="h-2.5 w-2.5 fill-current" strokeWidth={0} />
                 Interrompi
@@ -108,7 +108,7 @@ export const InputBar: React.FC<InputBarProps> = ({
                 disabled={!pronto}
                 title="Invia il quesito"
                 aria-label="Invia il quesito"
-                className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-full transition-all duration-200 ease-[cubic-bezier(0.16,1,0.3,1)] ${
+                className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-full transition-all duration-200 ease-[cubic-bezier(0.16,1,0.3,1)] sm:h-9 sm:w-9 ${
                   pronto
                     ? 'bg-azzurro text-white shadow-[0_4px_12px_-4px_rgba(10,107,159,0.7)] hover:-translate-y-px hover:bg-azzurro-scuro active:translate-y-0'
                     : 'cursor-not-allowed bg-raise-2 text-ink-3'
@@ -121,7 +121,10 @@ export const InputBar: React.FC<InputBarProps> = ({
         </form>
 
         <p className="mt-2.5 text-center text-[12px] leading-relaxed text-ink-2">
-          Strumento di supporto all'analisi. Riscontrare i testi sul Bollettino Ufficiale.
+          <span className="sm:hidden">Riscontrare i testi sul Bollettino Ufficiale.</span>
+          <span className="hidden sm:inline">
+            Strumento di supporto all'analisi. Riscontrare i testi sul Bollettino Ufficiale.
+          </span>
         </p>
       </div>
     </div>

@@ -46,9 +46,11 @@ export const SourceDrawer: React.FC<SourceDrawerProps> = ({ source, onClose }) =
       <aside
         role="dialog"
         aria-modal="true"
-        className="drawer-in fixed inset-y-0 right-0 z-50 flex w-full max-w-lg flex-col border-l border-line-2 bg-canvas shadow-[-20px_0_50px_-28px_rgba(16,33,45,0.28)]"
+        className="foglio-in fixed inset-x-0 bottom-0 top-auto z-50 flex max-h-[88dvh] flex-col rounded-t-[26px] border-t border-line-2 bg-canvas shadow-[0_-18px_50px_-28px_rgba(16,33,45,0.35)] sm:drawer-in sm:inset-y-0 sm:left-auto sm:right-0 sm:max-h-none sm:w-full sm:max-w-lg sm:rounded-none sm:border-l sm:border-t-0 sm:shadow-[-20px_0_50px_-28px_rgba(16,33,45,0.28)]"
       >
-        <div className="flex shrink-0 items-start justify-between gap-4 border-b border-line px-6 py-4">
+        <div aria-hidden className="mx-auto mt-2.5 h-1 w-10 shrink-0 rounded-full bg-line-2 sm:hidden" />
+
+        <div className="flex shrink-0 items-start justify-between gap-4 border-b border-line px-5 py-4 sm:px-6">
           <div className="min-w-0">
             <div className="mb-1 font-mono text-[11px] uppercase tracking-[0.12em] text-ink-3">Testo ufficiale</div>
             <div className="font-mono text-[14px] font-medium text-ink">
@@ -61,7 +63,7 @@ export const SourceDrawer: React.FC<SourceDrawerProps> = ({ source, onClose }) =
           </div>
           <button
             onClick={onClose}
-            className="-mr-1.5 -mt-1 rounded-md p-1.5 text-ink-2 transition-colors duration-200 hover:bg-raise hover:text-ink active:translate-y-px"
+            className="-mr-2 -mt-2 flex h-11 w-11 shrink-0 items-center justify-center rounded-lg text-ink-2 transition-colors duration-200 hover:bg-raise hover:text-ink active:translate-y-px sm:h-9 sm:w-9"
             title="Chiudi (Esc)"
             aria-label="Chiudi la fonte"
           >
@@ -69,7 +71,7 @@ export const SourceDrawer: React.FC<SourceDrawerProps> = ({ source, onClose }) =
           </button>
         </div>
 
-        <div className="min-h-0 flex-1 overflow-y-auto px-6 py-6">
+        <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-5 py-6 sm:px-6">
           {(source.abrogata || source.passoAbrogato || source.novellataDa?.length || source.ancheIn?.length) ? (
             <div className="mb-5 flex flex-col gap-2">
               {source.passoAbrogato ? (
@@ -136,7 +138,7 @@ export const SourceDrawer: React.FC<SourceDrawerProps> = ({ source, onClose }) =
           </div>
         </div>
 
-        <div className="shrink-0 border-t border-line px-6 py-3">
+        <div className="shrink-0 border-t border-line px-5 pb-[max(0.75rem,env(safe-area-inset-bottom))] pt-3 sm:px-6">
           {source.haDocumento && (
             <button
               onClick={() => window.open(urlDocumento(source), '_blank', 'noopener,noreferrer')}

@@ -123,7 +123,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
           </div>
           <button
             onClick={onToggle}
-            className="rounded-lg p-1.5 text-ink-2 transition-colors duration-200 hover:bg-raise hover:text-ink active:translate-y-px"
+            className="flex h-11 w-11 items-center justify-center rounded-lg text-ink-2 transition-colors duration-200 hover:bg-raise hover:text-ink active:translate-y-px sm:h-9 sm:w-9"
             title="Nascondi il pannello"
             aria-label="Nascondi il pannello"
           >
@@ -190,7 +190,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
           )}
         </div>
 
-        <div className="shrink-0 border-t border-line px-4 py-3.5">
+        <div className="shrink-0 border-t border-line px-4 pb-[max(0.875rem,env(safe-area-inset-bottom))] pt-3.5">
           {/* I due tetti, sempre visibili: misurano cose diverse e nessuno dei
               due implica l'altro. Una domanda che costringe l'agente a otto
               ricerche resta un messaggio solo ma spende otto volte i token,
@@ -257,7 +257,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                 onClick={esci}
                 title="Esci"
                 aria-label="Esci"
-                className="shrink-0 rounded-lg p-1.5 text-ink-2 transition-colors duration-200 hover:bg-rosso-2 hover:text-rosso active:translate-y-px"
+                className="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg text-ink-2 transition-colors duration-200 hover:bg-rosso-2 hover:text-rosso active:translate-y-px sm:h-9 sm:w-9"
               >
                 <LogOut className="h-4 w-4" strokeWidth={1.75} />
               </button>

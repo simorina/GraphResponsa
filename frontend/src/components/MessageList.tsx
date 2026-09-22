@@ -27,8 +27,8 @@ export const MessageList: React.FC<MessageListProps> = ({
   }, [messages, loading, vuoto]);
 
   return (
-    <div className="min-h-0 flex-1 overflow-y-auto px-4 md:px-6">
-      <div className="mx-auto max-w-3xl pb-44 pt-4">
+    <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 md:px-6">
+      <div className="mx-auto max-w-3xl pb-56 pt-4 md:pb-44">
         {vuoto ? (
           <EmptyState onSelectPrompt={onSelectPrompt} />
         ) : (

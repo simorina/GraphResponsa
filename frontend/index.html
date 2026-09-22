@@ -3,7 +3,12 @@
   <head>
     <meta charset="UTF-8" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <!-- viewport-fit=cover: si disegna anche sotto la barra gesti, e i bordi
+         di sicurezza li gestisce il CSS (env(safe-area-inset-*)).
+         interactive-widget=resizes-content: all'apertura della tastiera la
+         pagina si accorcia invece di scorrere sotto, cosi' l'area di
+         scrittura resta visibile. -->
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, interactive-widget=resizes-content" />
     <meta name="theme-color" content="#ffffff" />
     <meta name="description" content="Responsa, l’intelligenza artificiale dedicata alla consultazione della legge sammarinese: ogni risposta cita articolo e comma delle fonti." />
     <title>Responsa — La legge sammarinese, consultata con l’intelligenza artificiale</title>
