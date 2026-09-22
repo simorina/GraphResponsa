@@ -99,9 +99,11 @@ if ($SoloVerifica) {
 }
 
 Passo 'Accesso al registro ECR'
-$password = aws ecr get-login-password --region $Regione
-if ($LASTEXITCODE -ne 0) { Fermati 'Impossibile ottenere la password del registro.' }
-$password | docker login --username AWS --password-stdin $Registro
+# Il token passa da un programma all'altro dentro cmd, non attraverso una
+# variabile di PowerShell: Windows PowerShell 5.1 ricodifica il testo che
+# manda a un comando nativo, e il registro rispondeva 400 Bad Request a un
+# token che da bash funzionava.
+cmd /c "aws ecr get-login-password --region $Regione | docker login --username AWS --password-stdin $Registro"
 if ($LASTEXITCODE -ne 0) { Fermati 'Accesso al registro non riuscito.' }
 Bene 'autenticato'
 
