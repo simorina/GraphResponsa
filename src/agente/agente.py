@@ -389,11 +389,17 @@ def agente():
         # il punto di rottura in coda alla richiesta, cosi' ogni giro rilegge
         # il precedente a un decimo del prezzo.
         #
+        # Cinque minuti e non un'ora: a un'ora le SCRITTURE in cache costano 2
+        # volte invece di 1,25, e sono il 76% del conto (misurato sulla chat
+        # sui teatri: 496.187 token scritti contro 1.474.457 riletti).
+        #
         # Restano care le RISCRITTURE: la cache dura cinque minuti, e chi
         # riprende una conversazione dopo una pausa ripaga per intero il
         # contesto accumulato. Per questo si pota al confine fra le domande
-        # (PotaturaFraDomande): quella riscrittura c'e' comunque, ma su un
-        # contesto molto piu' piccolo.
+        # (PotaturaFraDomande) e non a ogni passata, come farebbe
+        # ContextEditingMiddleware: quello riscrive la conversazione e quindi
+        # obbliga a riscrivere la cache, e provato il 21/09 faceva salire la
+        # prima domanda da 0,156 a 0,256 dollari.
         _agente = create_agent(
             model=modello,
             tools=STRUMENTI,
@@ -992,7 +998,7 @@ def rispondi(domanda, conversazione=None):
     # modello ha davvero avuto sotto gli occhi.
     grezzo_strumenti = []
     token_in = token_out = 0
-    token_letti = token_scritti = 0
+    token_letti = token_scritti = token_scritti_ora = 0
     # I nomi arrivano con l'AIMessage, i risultati dopo col ToolMessage:
     # questa mappa li ricongiunge per id di chiamata.
     nomi_per_id = {}
@@ -1029,12 +1035,25 @@ def rispondi(domanda, conversazione=None):
                         # costano un quarto in piu'. Sommarli al prezzo pieno
                         # gonfierebbe il costo mostrato all'utente e quello
                         # registrato sui consumi.
+                        # Le scritture non stanno in `cache_creation`: quando
+                        # l'API manda il dettaglio per durata della cache,
+                        # langchain-anthropic mette i token in
+                        # `ephemeral_5m/1h_input_tokens` e AZZERA `cache_creation`
+                        # per non contarli due volte. Leggendo solo quello, le
+                        # scritture finivano fra i token a prezzo pieno e il
+                        # costo usciva piu' basso del vero del 14% (misurato il
+                        # 22/09 su tutte le domande fatte con Sonnet).
                         d = uso.get("input_token_details") or {}
-                        letti = d.get("cache_read", 0)
-                        scritti = d.get("cache_creation", 0)
+                        letti = d.get("cache_read", 0) or 0
+                        cinque_min = d.get("ephemeral_5m_input_tokens", 0) or 0
+                        un_ora = d.get("ephemeral_1h_input_tokens", 0) or 0
+                        scritti = d.get("cache_creation", 0) or 0
+                        if cinque_min or un_ora:
+                            scritti = 0      # gia' contati nelle due voci sopra
                         token_in += uso.get("input_tokens", 0)
                         token_letti += letti
-                        token_scritti += scritti
+                        token_scritti += scritti + cinque_min
+                        token_scritti_ora += un_ora
                         token_out += uso.get("output_tokens", 0)
 
                     if type(messaggio).__name__ == "AIMessage":
@@ -1081,8 +1100,11 @@ def rispondi(domanda, conversazione=None):
 
     prezzo_in, prezzo_out = PREZZI.get(MODELLO, (5.0, 25.0))
     # Scrivere in cache costa 1,25 volte; rileggere 0,10.
-    pieni = token_in - token_letti - token_scritti
-    costo = (pieni + token_scritti * 1.25 + token_letti * 0.10) / 1e6 * prezzo_in         + token_out / 1e6 * prezzo_out
+    pieni = token_in - token_letti - token_scritti - token_scritti_ora
+    # Scrivere in cache costa 1,25 volte con la scadenza a 5 minuti e 2 volte
+    # con quella a un'ora; rileggere costa un decimo.
+    costo = ((pieni + token_scritti * 1.25 + token_scritti_ora * 2 + token_letti * 0.10)
+             / 1e6 * prezzo_in + token_out / 1e6 * prezzo_out)
     sospette = _citazioni_non_verificate(
         SEPARATORE.join(blocchi_testo), " ".join(grezzo_strumenti))
 

@@ -37,6 +37,13 @@ load_dotenv(ROOT / ".env")
 # resta tagliato viene ora dichiarato con `troncato: true`: prima il modello
 # vedeva un testo mutilo senza sapere che mancava qualcosa, e non aveva motivo
 # di chiamare leggi_articolo().
+# Lo snippet di un risultato. Provato a 1.200 il 22/09 per spendere meno:
+# e' andata al contrario. Con i passi tagliati il modello non trova quello che
+# gli serve e compensa con altre chiamate - sulla domanda sulla guida in stato
+# di ebbrezza 15 chiamate invece di 12, con quattro letture di articoli interi
+# in piu' - e la domanda e' passata da 0,2435 a 0,2851 dollari. Stessa cosa su
+# edilizia (0,0383 -> 0,0454) e trust (0,0128 -> 0,0269). I caratteri
+# risparmiati costano meno del giro in piu'.
 MAX_TESTO = 2000
 
 _grafo = None
@@ -87,6 +94,15 @@ _QUERY = ThreadPoolExecutor(max_workers=24, thread_name_prefix="query")
 
 # Quanti altri punti dello stesso comma segnalare, oltre a quello mostrato.
 ALTRI_PASSI = 3
+# Nelle liste di atti collegati basta riconoscere l'atto: il titolo per esteso
+# ("Decreto Delegato 7 agosto 2020 n.133 - Modifica delle procedure e delle
+# modalita' di presentazione delle pratiche di concessione edilizia in
+# sanatoria straordinaria") si ripete a ogni risultato e vale 140 caratteri.
+TITOLO_IN_ELENCO = 70
+NOVELLE_MOSTRATE = 2
+# Il tetto ai risultati: l'agente ne ha chiesti fino a 15, e una chiamata sola
+# e' arrivata a 42.223 caratteri.
+LIMITE_MASSIMO = 10
 
 
 def _taglia(testo, limite=MAX_TESTO):
@@ -654,8 +670,13 @@ def _novelle(righe):
             # a volte citava il testo scaduto pur avendone il riferimento
             # davanti. Se il testo nuovo arriva insieme, non c'e' piu' un passo
             # da ricordarsi di fare.
+            # Al massimo due novelle e 600 caratteri l'una: su un risultato
+            # solo questo campo pesava 2.369 caratteri. Il testo serve (senza,
+            # il modello citava il passo scaduto pur avendo il riferimento),
+            # ma non serve tutto, e non servono tutte.
             r["citatoDaAttiSuccessivi"] = [
-                {**n, "testo": _taglia(_senza_firma(n["testo"]), 900)} for n in novelle]
+                {**n, "testo": _taglia(_senza_firma(n["testo"]), 600)}
+                for n in novelle[:NOVELLE_MOSTRATE]]
     return righe
 
 
@@ -834,7 +855,8 @@ def _atti_novellati(righe):
         # sull'elenco intero, prima di tagliarlo per la risposta.
         mio = str(r.get("articolo") or "").strip()
         r["attoNovellatoDa"] = [
-            {**a, "articoli": a["articoli"][:6],
+            {**a, "titolo": _taglia(a.get("titolo"), TITOLO_IN_ELENCO),
+             "articoli": a["articoli"][:6],
              "toccaQuestoArticolo": bool(mio) and mio in a["articoli"]}
             for a in atti]
     return righe
@@ -877,7 +899,7 @@ def _piu_recenti(righe):
                     "norma": recente.get("normaId"), "anno": recente.get("anno"),
                     "articolo": recente.get("articolo"),
                     "comma": recente.get("comma"),
-                    "testo": _taglia(recente.get("testo"), 900),
+                    "testo": _taglia(recente.get("testo"), 400),
                 }
     return righe
 
@@ -1168,6 +1190,7 @@ def cerca_testo(query: str, limite: int = 4, dal_anno: int | None = None,
     prefissi, errore = _prefissi(tipi)
     if errore:
         return {"errore": errore}
+    limite = max(1, min(int(limite or 4), LIMITE_MASSIMO))
     filtri = {"dal_anno": dal_anno, "al_anno": al_anno, "prefissi": prefissi,
               "escludi_abrogati": escludi_abrogati}
     ramo_lessicale = _RAMI.submit(_full_text, query, limite * AMPIEZZA, **filtri)
@@ -1323,7 +1346,11 @@ def leggi_articolo(norma_id: str, numero: str, comma: str | None = None,
 # falliva. Al 17/09 143 articoli superavano i 50.000 caratteri (allegati,
 # tabelle, profili di ruolo). Il resto si legge a porzioni.
 LETTURA_COMMA = 10000
-LETTURA_ARTICOLO = 40000
+# 15.000 e non 40.000: una lettura da 40.000 caratteri sono 10.000 token che
+# poi viaggiano a ogni giro successivo del ciclo, ed erano i tre risultati piu'
+# pesanti della chat sui teatri. Solo 525 articoli su 77.344 (lo 0,7%) superano
+# questa soglia, e per loro c'e' `continua`: si paga la parte che serve.
+LETTURA_ARTICOLO = 15000
 ANTEPRIMA_OMESSO = 200
 
 
