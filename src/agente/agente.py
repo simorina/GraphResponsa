@@ -21,7 +21,9 @@ from pathlib import Path
 from dotenv import load_dotenv
 from langchain.agents import create_agent
 from langchain_anthropic import ChatAnthropic
+from langchain.agents.middleware import AgentMiddleware
 from langchain_anthropic.middleware import AnthropicPromptCachingMiddleware
+from langchain_core.messages import HumanMessage, ToolMessage
 from langchain_core.messages import SystemMessage
 from langgraph.checkpoint.memory import InMemorySaver
 
@@ -248,6 +250,61 @@ Prima di inviare, ricontrolla:
 - ogni atto nominato ha il suo marcatore.
 """
 
+ESTRATTO_STRUMENTO = 200
+POTATO = " […risultato accorciato: se serve, rileggi con leggi_articolo]"
+
+
+class PotaturaFraDomande(AgentMiddleware):
+    """Accorcia i risultati degli strumenti delle domande precedenti.
+
+    Una consultazione lunga costa quasi tutta in SCRITTURE di cache: sulla
+    chat sui teatri 496.187 token scritti contro 109 di ingresso pieno, e il
+    78% di quelle scritture erano riscritture a freddo - la cache dura cinque
+    minuti, e chi torna dopo mezz'ora si ripaga per intero il contesto
+    accumulato. L'ultima ripresa, dopo quattro giorni, valeva 147.000 token.
+
+    Dentro quel contesto i risultati degli strumenti sono il 92%; le domande
+    dell'utente lo 0,2%. Qui si accorciano quelli delle domande gia' chiuse,
+    tenendo per intero le risposte del modello: il filo del discorso resta, e
+    un articolo lo si rilegge se serve davvero.
+
+    Si pota **una volta per domanda**, in `before_agent`, non a soglia durante
+    il ragionamento. La differenza non e' un dettaglio: potare in mezzo al
+    ciclo riscrive la cronologia a ogni giro, quindi obbliga a riscrivere la
+    cache, e misurato faceva salire la prima domanda da 0,156 a 0,256 dollari.
+    Potare al confine paga una sola riscrittura, e su un contesto molto piu'
+    piccolo.
+
+    Il taglio e' idempotente - un risultato gia' accorciato si riconosce dalla
+    coda e si lascia stare - perche' fra una potatura e l'altra i messaggi
+    devono restare identici byte per byte, altrimenti la cache si invalida
+    lo stesso.
+    """
+
+    def __init__(self, estratto: int = ESTRATTO_STRUMENTO):
+        super().__init__()
+        self.estratto = estratto
+
+    def before_agent(self, state, runtime):
+        messaggi = list(state.get("messages") or [])
+        # La domanda appena arrivata e' l'ultima: si pota tutto cio' che la
+        # precede. Senza una domanda in coda non c'e' niente da chiudere.
+        ultima = next((i for i in range(len(messaggi) - 1, -1, -1)
+                       if isinstance(messaggi[i], HumanMessage)), None)
+        if ultima is None:
+            return None
+        potati = []
+        for m in messaggi[:ultima]:
+            if not isinstance(m, ToolMessage) or not isinstance(m.content, str):
+                continue
+            if m.content.endswith(POTATO) or len(m.content) <= self.estratto:
+                continue
+            copia = m.model_copy(update={"content": m.content[:self.estratto] + POTATO})
+            potati.append(copia)
+        # Stesso id: il riduttore dei messaggi sostituisce invece di aggiungere.
+        return {"messages": potati} if potati else None
+
+
 def _checkpointer():
     """
     Dove vivono le conversazioni.
@@ -331,12 +388,18 @@ def agente():
         # domande, e solo 104.088 venivano dalla cache. Il middleware aggiunge
         # il punto di rottura in coda alla richiesta, cosi' ogni giro rilegge
         # il precedente a un decimo del prezzo.
+        #
+        # Restano care le RISCRITTURE: la cache dura cinque minuti, e chi
+        # riprende una conversazione dopo una pausa ripaga per intero il
+        # contesto accumulato. Per questo si pota al confine fra le domande
+        # (PotaturaFraDomande): quella riscrittura c'e' comunque, ma su un
+        # contesto molto piu' piccolo.
         _agente = create_agent(
             model=modello,
             tools=STRUMENTI,
             system_prompt=istruzioni,
             checkpointer=_memoria,
-            middleware=[AnthropicPromptCachingMiddleware(ttl="5m")],
+            middleware=[PotaturaFraDomande(), AnthropicPromptCachingMiddleware(ttl="5m")],
         )
     return _agente
 
