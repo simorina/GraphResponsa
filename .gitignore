@@ -11,3 +11,4 @@ frontend/dist
 docs/superpowers/*
 old.txt
 .env.prima-tabelle-dev
+.env.prima-ec2
