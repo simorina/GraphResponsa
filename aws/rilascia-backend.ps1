@@ -36,7 +36,11 @@ param(
     [string]$Sito     = 'https://ds1t1vk405e45.cloudfront.net'
 )
 
-$ErrorActionPreference = 'Stop'
+# 'Continue' e non 'Stop': in Windows PowerShell 5.1, con 'Stop', la prima
+# riga che un comando nativo scrive su stderr diventa un'eccezione - prima che
+# lo script possa leggere $LASTEXITCODE e dire cosa manca. Ogni comando nativo
+# qui e' controllato uno per uno, e le chiamate web stanno in try/catch.
+$ErrorActionPreference = 'Continue'
 
 function Passo($testo) { Write-Host "`n== $testo" -ForegroundColor Cyan }
 function Bene($testo)  { Write-Host "   $testo" -ForegroundColor Green }
@@ -56,7 +60,7 @@ Passo 'Prerequisiti'
 foreach ($c in 'docker', 'aws', 'git') {
     if (-not (Get-Command $c -ErrorAction SilentlyContinue)) { Fermati "Manca $c." }
 }
-docker info --format '{{.ServerVersion}}' | Out-Null
+docker info --format "{{.ServerVersion}}" 2>$null | Out-Null
 if ($LASTEXITCODE -ne 0) { Fermati 'Docker non risponde: avvia Docker Desktop.' }
 $identita = aws sts get-caller-identity --query 'Arn' --output text
 if ($LASTEXITCODE -ne 0) { Fermati 'Credenziali AWS non valide.' }

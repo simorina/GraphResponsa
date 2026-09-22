@@ -41,7 +41,11 @@ param(
     [string]$Sito          = 'https://ds1t1vk405e45.cloudfront.net'
 )
 
-$ErrorActionPreference = 'Stop'
+# 'Continue' e non 'Stop': in Windows PowerShell 5.1, con 'Stop', la prima
+# riga che un comando nativo scrive su stderr diventa un'eccezione - prima che
+# lo script possa leggere $LASTEXITCODE e dire cosa manca. Ogni comando nativo
+# qui e' controllato uno per uno, e le chiamate web stanno in try/catch.
+$ErrorActionPreference = 'Continue'
 
 function Passo($testo) { Write-Host "`n== $testo" -ForegroundColor Cyan }
 function Bene($testo)  { Write-Host "   $testo" -ForegroundColor Green }
