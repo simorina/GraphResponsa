@@ -624,7 +624,10 @@ def _novelle(righe):
             // richiama di passaggio, e va detto al modello.
             WITH k, dopo, artDopo, c,
                  CASE WHEN c.testo =~ $riscrittura THEN true ELSE false END AS riscrive
-            ORDER BY riscrive DESC
+            // Gli spareggi servono: senza, fra due commi dello stesso atto
+            // decideva l'ordine fisico dei dati, e lo stesso articolo portava
+            // il comma 1 su Aura e il comma 2 sulla copia su EC2 (22/09).
+            ORDER BY riscrive DESC, coalesce(artDopo.ordine, 0), coalesce(c.ordine, 0), c.id
             // Un comma per ATTO, non i primi due commi in assoluto: un atto
             // recente con due rimandi si prendeva tutti i posti e l'atto che
             // l'articolo lo aveva riscritto restava fuori. Misurato sull'art.
@@ -633,7 +636,9 @@ def _novelle(righe):
             WITH k, dopo, collect({norma: dopo.id, anno: dopo.anno,
                                    articolo: artDopo.numero, comma: c.numero,
                                    testo: c.testo, riscrive: riscrive})[0] AS voce
-            ORDER BY voce.riscrive DESC, voce.anno DESC
+            // A parita' d'anno, l'atto piu' recente: DL-46 e DL-57 del 2021
+            // si scambiavano il terzo posto a seconda del database.
+            ORDER BY voce.riscrive DESC, voce.anno DESC, dopo.data DESC, dopo.id DESC
             WITH k, collect(voce)[..3] AS novelle
             RETURN k.n AS norma, k.a AS articolo, novelle
         """, {"chiavi": chiavi, "riscrittura": RISCRITTURA})
