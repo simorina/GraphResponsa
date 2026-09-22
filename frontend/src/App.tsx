@@ -17,7 +17,10 @@ type Sessione = 'verifica' | 'dentro' | 'fuori';
 const ACCESSO_CHIESTO = 'gr_accesso_chiesto';
 
 export function App() {
-  const [sidebarOpen, setSidebarOpen] = useState(true);
+  // Su telefono la barra laterale copre la chat: si parte chiusi, e la si apre
+  // quando serve. Prima si partiva aperti ovunque, e la prima cosa da fare
+  // entrando da telefono era chiuderla.
+  const [sidebarOpen, setSidebarOpen] = useState(() => window.innerWidth >= 768);
   const [stats, setStats] = useState<StatsState>({ fase: 'attesa' });
   const [fonteAperta, setFonteAperta] = useState<Fonte | null>(null);
   const [sessione, setSessione] = useState<Sessione>('verifica');
@@ -31,6 +34,7 @@ export function App() {
     input,
     setInput,
     loading,
+    sessionTitle,
     sendMessage,
     resetChat,
     stopGeneration,
@@ -98,8 +102,9 @@ export function App() {
 
   if (sessione === 'verifica') {
     return (
-      <div className="flex min-h-[100dvh] items-center justify-center bg-canvas">
-        <div className="skeleton h-[11px] w-40" />
+      <div className="flex min-h-[100dvh] flex-col items-center justify-center gap-5 bg-canvas">
+        <Sigillo className="h-9 w-9" animato />
+        <div className="skeleton h-[5px] w-24 rounded-full" />
       </div>
     );
   }
@@ -143,27 +148,37 @@ export function App() {
           <div className="flex min-w-0 items-center gap-3">
             <button
               onClick={() => setSidebarOpen((v) => !v)}
-              className="-ml-1.5 rounded-lg p-1.5 text-ink-3 transition-colors duration-200 hover:bg-panel hover:text-ink active:translate-y-px"
+              className="-ml-1.5 rounded-lg p-1.5 text-ink-2 transition-colors duration-200 hover:bg-panel hover:text-ink active:translate-y-px"
               title={sidebarOpen ? 'Nascondi il pannello' : 'Mostra il pannello'}
+              aria-label={sidebarOpen ? 'Nascondi il pannello' : 'Mostra il pannello'}
             >
-              <PanelLeft className="h-[18px] w-[18px]" strokeWidth={1.5} />
+              <PanelLeft className="h-[18px] w-[18px]" strokeWidth={1.75} />
             </button>
 
             <div className="flex min-w-0 items-center gap-2.5 md:hidden">
               <Sigillo className="h-[17px] w-[17px]" />
-              <span className="text-[14px] font-medium tracking-[-0.015em] text-ink">
+              <span className="text-[14.5px] font-semibold tracking-[-0.015em] text-ink">
                 Graph<span className="text-azzurro">Responsa</span>
               </span>
             </div>
+
+            {/* Su schermo largo, di cosa si sta parlando: con piu' consultazioni
+                aperte nella giornata, e' la prima cosa che si cerca. */}
+            {messages.length > 0 && (
+              <span className="hidden min-w-0 truncate text-[14px] font-medium text-ink md:block" title={sessionTitle}>
+                {sessionTitle}
+              </span>
+            )}
 
           </div>
 
           <button
             onClick={resetChat}
-            className="rounded-lg p-1.5 text-ink-3 transition-colors duration-200 hover:bg-panel hover:text-ink active:translate-y-px md:hidden"
+            className="rounded-lg p-1.5 text-ink-2 transition-colors duration-200 hover:bg-panel hover:text-ink active:translate-y-px md:hidden"
             title="Nuova consultazione"
+            aria-label="Nuova consultazione"
           >
-            <SquarePen className="h-[18px] w-[18px]" strokeWidth={1.5} />
+            <SquarePen className="h-[18px] w-[18px]" strokeWidth={1.75} />
           </button>
         </header>
 

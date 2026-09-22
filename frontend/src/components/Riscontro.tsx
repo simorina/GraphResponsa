@@ -80,8 +80,8 @@ export const Riscontro: React.FC<RiscontroProps> = ({
 
   if (dato) {
     return (
-      <span className="flex items-center gap-1.5 px-2 py-1 text-[11.5px] text-alloro">
-        <Check className="h-3.5 w-3.5" strokeWidth={1.8} />
+      <span className="flex items-center gap-1.5 px-2 py-1 text-[12.5px] font-medium text-ink-2">
+        <Check className="h-3.5 w-3.5 text-azzurro" strokeWidth={1.75} />
         {dato === 'utile' ? 'Grazie' : 'Grazie, ne terremo conto'}
       </span>
     );
@@ -94,26 +94,28 @@ export const Riscontro: React.FC<RiscontroProps> = ({
           onClick={() => manda('utile')}
           disabled={invio || !conversazione}
           title="Risposta utile"
-          className="rounded-lg p-1.5 text-ink-3 transition-colors duration-200 hover:bg-alloro-3/60 hover:text-alloro disabled:opacity-40 active:translate-y-px"
+          aria-label="Risposta utile"
+          className="rounded-lg p-1.5 text-ink-3 transition-colors duration-200 hover:bg-azzurro-3/50 hover:text-azzurro disabled:opacity-40 active:translate-y-px"
         >
-          <ThumbsUp className="h-3.5 w-3.5" strokeWidth={1.5} />
+          <ThumbsUp className="h-4 w-4" strokeWidth={1.75} />
         </button>
         <button
           onClick={() => setApertoModulo((v) => !v)}
           disabled={invio || !conversazione}
           title="Risposta da correggere"
+          aria-label="Risposta da correggere"
           className={`rounded-lg p-1.5 transition-colors duration-200 disabled:opacity-40 active:translate-y-px ${
             apertoModulo ? 'bg-rosso-2 text-rosso' : 'text-ink-3 hover:bg-rosso-2 hover:text-rosso'
           }`}
         >
-          <ThumbsDown className="h-3.5 w-3.5" strokeWidth={1.5} />
+          <ThumbsDown className="h-4 w-4" strokeWidth={1.75} />
         </button>
       </div>
 
       {apertoModulo && (
-        <div className="rise mt-2.5 rounded-xl border border-line bg-panel p-3.5">
+        <div className="rise mt-2.5 rounded-xl border border-line-2 bg-panel p-4">
           <div className="mb-2.5 flex items-start justify-between gap-3">
-            <p className="text-[12.5px] font-medium text-ink">
+            <p className="text-[13.5px] font-semibold text-ink">
               Perché questa risposta non va?
             </p>
             <button
@@ -121,7 +123,7 @@ export const Riscontro: React.FC<RiscontroProps> = ({
               className="-mr-1 -mt-0.5 rounded-md p-1 text-ink-3 transition-colors hover:bg-raise hover:text-ink"
               title="Chiudi"
             >
-              <X className="h-3.5 w-3.5" strokeWidth={1.5} />
+              <X className="h-3.5 w-3.5" strokeWidth={1.75} />
             </button>
           </div>
 
@@ -136,10 +138,11 @@ export const Riscontro: React.FC<RiscontroProps> = ({
                       s.includes(c.id) ? s.filter((x) => x !== c.id) : [...s, c.id]
                     )
                   }
-                  className={`rounded-lg border px-2.5 py-1 text-[11.5px] transition-all duration-200 active:translate-y-px ${
+                  aria-pressed={attiva}
+                  className={`rounded-lg border px-2.5 py-1.5 text-[12.5px] transition-all duration-200 active:translate-y-px ${
                     attiva
-                      ? 'border-azzurro bg-azzurro-3/60 text-ink'
-                      : 'border-line bg-canvas text-ink-2 hover:border-line-2'
+                      ? 'border-azzurro bg-azzurro-3/70 font-medium text-ink'
+                      : 'border-line-2 bg-canvas text-ink-2 hover:border-campo hover:text-ink'
                   }`}
                 >
                   {c.etichetta}
@@ -154,18 +157,18 @@ export const Riscontro: React.FC<RiscontroProps> = ({
             rows={3}
             maxLength={2000}
             placeholder="Racconta cosa non torna: quale passaggio, quale fonte, cosa ti aspettavi…"
-            className="w-full resize-none rounded-lg border border-line bg-canvas px-3 py-2 text-[13px] leading-relaxed text-ink placeholder-ink-3 transition-colors focus:border-azzurro focus:outline-none"
+            className="w-full resize-none rounded-lg border border-campo bg-canvas px-3 py-2 text-[14px] leading-relaxed text-ink placeholder-ink-3 transition-colors focus:border-azzurro focus:outline-none focus:ring-4 focus:ring-azzurro-3/70"
           />
 
           <div className="mt-2.5 flex items-center justify-between gap-3">
             {/* Non obbligatorio: costringere a scrivere fa perdere il riscontro. */}
-            <span className="text-[11px] text-ink-3">
+            <span className="text-[12px] text-ink-2">
               Puoi inviare anche senza scrivere nulla.
             </span>
             <button
               onClick={() => manda('non_utile', scelte, motivo)}
               disabled={invio}
-              className="shrink-0 rounded-lg bg-azzurro px-3.5 py-1.5 text-[12.5px] font-medium text-white transition-all duration-200 hover:-translate-y-px disabled:cursor-wait disabled:opacity-70 active:translate-y-0"
+              className="shrink-0 rounded-lg bg-azzurro px-4 py-2 text-[13px] font-semibold text-white transition-all duration-200 hover:-translate-y-px hover:bg-azzurro-scuro disabled:cursor-wait disabled:opacity-80 active:translate-y-0"
             >
               {invio ? 'Invio…' : 'Invia'}
             </button>

@@ -9,37 +9,45 @@
    ───────────────────────────────────────────────────────────── */
 
 @theme {
-  /* Superfici */
+  /* Superfici. Il pannello si stacca dalla tela quanto basta a vedere dove
+     finisce la barra laterale senza bisogno del filetto. */
   --color-canvas: #ffffff;
-  --color-panel: #f2f7fb;
-  --color-raise: #e8f2f9;
-  --color-raise-2: #dbeaf5;
+  --color-panel: #eef4f9;
+  --color-raise: #e3eef7;
+  --color-raise-2: #d3e4f1;
 
-  /* Filetti */
-  --color-line: #d9e6f0;
-  --color-line-2: #c1d7e7;
+  /* Filetti. `campo` e' per i bordi di cio' che si compila (moduli, area di
+     scrittura): regge 3:1 sul bianco, la soglia WCAG per i contorni dei
+     controlli. Gli altri due separano, e restano leggeri. */
+  --color-line: #cfdde9;
+  --color-line-2: #a9c3d7;
+  --color-campo: #7b96ab;
 
-  /* Inchiostro */
-  --color-ink: #10212d;
-  --color-ink-2: #47606f;
-  --color-ink-3: #6b8294;
+  /* Inchiostro. Il terzo livello - date, didascalie, segnaposto - stava a
+     3,9:1 e non reggeva il corpo piccolo: adesso 5,8:1 sul bianco e 5,3:1
+     sul pannello, sopra la soglia AA anche a 11 pixel. */
+  --color-ink: #0c1b26;
+  --color-ink-2: #34495a;
+  --color-ink-3: #52687a;
 
-  /* Azzurro di bandiera */
-  --color-azzurro: #0d7ab2;
-  --color-azzurro-2: #4aa8d8;
+  /* Azzurro di bandiera. Il pieno porta il testo bianco dei pulsanti:
+     5,8:1, dove il vecchio #0d7ab2 si fermava a 4,7. */
+  --color-azzurro: #0a6b9f;
+  --color-azzurro-scuro: #085780;
+  --color-azzurro-2: #3f9fd2;
   --color-azzurro-3: #bfe0f2;
 
   /* Verde alloro: i rami dello stemma e i tre monti del Titano.
      La prima variante regge il testo sul bianco (6,2:1), le altre due
      stanno ai fregi e ai riempimenti. */
-  --color-alloro: #3e6b4a;
-  --color-alloro-2: #6d9b7d;
+  --color-alloro: #3a6546;
+  --color-alloro-2: #5f8f6f;
   --color-alloro-3: #dcebe1;
 
   /* Giallo dorato: la corona e il cartiglio LIBERTAS.
      Il dorato pieno non regge il testo sul bianco (2,4:1): resta ai fregi,
      e per le scritte si usa la variante brunita (5,1:1). */
-  --color-dorato: #8a6b13;
+  --color-dorato: #7d6011;
   --color-dorato-2: #d4af37;
 
   --color-rosso: #a33a28;
@@ -89,6 +97,35 @@ body {
    un rettangolo dentro una scatola smussata. */
 @layer base {
   :focus-visible { outline: 2px solid var(--color-azzurro); outline-offset: 2px; }
+
+  /* La manina su tutto cio' che si clicca. Tailwind 4 l'ha tolta ai pulsanti
+     (la 3 la metteva di suo), e senza, un pulsante al passaggio del mouse
+     sembra testo. I disabilitati restano esclusi: li' la manina direbbe il
+     falso, e ciascuno ha gia' il suo cursore (attesa, divieto). */
+  button:not(:disabled),
+  [role="button"]:not([aria-disabled="true"]),
+  summary,
+  select:not(:disabled),
+  input[type="checkbox"]:not(:disabled),
+  input[type="radio"]:not(:disabled) {
+    cursor: pointer;
+  }
+
+  /* Edge aggiunge il suo occhio al campo password, accanto al nostro: due
+     pulsanti per la stessa cosa. Resta il nostro, che ha etichetta e stato. */
+  input::-ms-reveal,
+  input::-ms-clear { display: none; }
+
+  /* La compilazione automatica del browser tinge i campi d'azzurro e li
+     stacca dalla capsula. Il colore di fondo si rimanda all'infinito invece
+     di coprirlo con un'ombra: l'ombra servira' all'alone del fuoco. */
+  input:-webkit-autofill,
+  input:-webkit-autofill:hover,
+  input:-webkit-autofill:focus {
+    -webkit-text-fill-color: var(--color-ink);
+    caret-color: var(--color-ink);
+    transition: background-color 600000s 0s, color 600000s 0s;
+  }
 }
 
 /* Grana di carta: fissa, non ridipinge lo scroll */
@@ -141,6 +178,86 @@ body {
 
 .pulse-dot { animation: breathe 2.6s ease-in-out infinite; }
 
+/* ── Lo stato della consultazione in corso ───────────────────────
+   Tre segnali, ognuno con un compito: il battito dice che qualcosa sta
+   lavorando, la frase che entra dice che il lavoro e' cambiato, il riflesso
+   che scorre sul testo dice che quella frase e' ancora in corso.
+
+   Il battito e' un punto pieno con un'onda che si allarga e svanisce, al
+   posto della rotella: la rotella si legge come un'attesa qualunque, il
+   battito come qualcosa di vivo. Colore e misura arrivano da due variabili,
+   perche' questa regola sta fuori dai livelli di Tailwind e batterebbe
+   qualunque utilita' `bg-*` o `h-*` messa sull'elemento. */
+@keyframes onda {
+  from { transform: scale(1); opacity: 0.5; }
+  to   { transform: scale(2.8); opacity: 0; }
+}
+.battito {
+  position: relative;
+  display: inline-block;
+  flex-shrink: 0;
+  width: var(--dim, 8px);
+  height: var(--dim, 8px);
+  border-radius: 9999px;
+  background: var(--battito, var(--color-azzurro));
+}
+.battito::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: inherit;
+  animation: onda 1.6s var(--ease-out-expo) infinite;
+}
+
+@keyframes frase-in {
+  from { opacity: 0; transform: translate3d(0, 6px, 0); filter: blur(2px); }
+  to   { opacity: 1; transform: none; filter: none; }
+}
+.frase-in { animation: frase-in 0.42s var(--ease-out-expo) both; }
+
+/* ── Pagina d'accesso ──────────────────────────────────────────
+   Un errore scuote il riquadro una volta, come un "no" col capo: si capisce
+   che il tentativo e' stato respinto anche senza leggere. */
+@keyframes scuoti {
+  0%, 100% { transform: none; }
+  20% { transform: translate3d(-6px, 0, 0); }
+  40% { transform: translate3d(5px, 0, 0); }
+  60% { transform: translate3d(-3px, 0, 0); }
+  80% { transform: translate3d(2px, 0, 0); }
+}
+.scuoti { animation: scuoti 0.42s var(--ease-out-expo); }
+
+/* Un riflesso attraversa il pulsante al passaggio del puntatore. */
+.lucido { position: relative; }
+.lucido::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: linear-gradient(110deg, transparent 35%, rgba(255, 255, 255, 0.24) 50%, transparent 65%);
+  transform: translate3d(-120%, 0, 0);
+  transition: transform 0.75s var(--ease-out-expo);
+}
+.lucido:hover::after { transform: translate3d(120%, 0, 0); }
+
+/* Il riflesso passa SOPRA un testo che resta a pieno inchiostro: la frase
+   non scende mai sotto il contrasto del resto della pagina. */
+@keyframes riflesso {
+  from { background-position: 150% 0; }
+  to   { background-position: -50% 0; }
+}
+.testo-vivo {
+  color: var(--color-ink);
+  background: linear-gradient(100deg,
+      var(--color-ink) 40%, var(--color-azzurro) 50%, var(--color-ink) 60%)
+    0 0 / 250% 100%;
+  -webkit-background-clip: text;
+          background-clip: text;
+  -webkit-text-fill-color: transparent;
+  animation: riflesso 2.4s linear infinite;
+}
+
 .skeleton {
   position: relative;
   overflow: hidden;
@@ -167,15 +284,6 @@ body {
   animation: disegna 1.1s var(--ease-out-expo) forwards;
   animation-delay: calc(var(--i, 0) * 180ms);
 }
-
-/* Campo di luce lentissimo dietro il pannello: due macchie che respirano.
-   Solo transform e opacity, nessun ridisegno costoso. */
-@keyframes deriva {
-  0%, 100% { transform: translate3d(0, 0, 0) scale(1); }
-  33%      { transform: translate3d(4%, -6%, 0) scale(1.12); }
-  66%      { transform: translate3d(-5%, 4%, 0) scale(0.94); }
-}
-.deriva { animation: deriva 26s ease-in-out infinite; will-change: transform; }
 
 /* Il bordo si illumina dove passa il puntatore. Le coordinate arrivano da
    due variabili CSS aggiornate fuori dal ciclo di render di React. */
@@ -209,8 +317,8 @@ body {
     transition-duration: 0.01ms !important;
   }
   .rise, .slide-in { opacity: 1; }
+  .testo-vivo { animation: none; -webkit-text-fill-color: currentColor; background: none; }
   .traccia { stroke-dasharray: none; }
-  .deriva { animation: none; }
 }
 
 /* ── Testo della risposta ─────────────────────────────────────
@@ -218,11 +326,15 @@ body {
 
 .prose-legal {
   color: var(--color-ink);
-  font-size: 15.5px;
+  font-size: 16px;
   line-height: 1.72;
   letter-spacing: -0.004em;
 }
 .prose-legal > * + * { margin-top: 1.05em; }
+
+/* Righe di lettura sotto i 70 caratteri: a tutta colonna arrivavano a 85, e
+   l'occhio perde la riga al ritorno. Le tabelle restano larghe. */
+.prose-legal > :where(p, ul, ol, blockquote, h1, h2, h3) { max-width: 68ch; }
 
 .prose-legal h1,
 .prose-legal h2,
@@ -240,7 +352,7 @@ body {
   padding-bottom: 0.45rem;
   border-bottom: 1px solid var(--color-line);
 }
-.prose-legal h3 { font-size: 1rem; color: var(--color-alloro); }
+.prose-legal h3 { font-size: 1rem; color: var(--color-ink); }
 
 .prose-legal ul, .prose-legal ol { padding-left: 1.15rem; }
 .prose-legal ul { list-style: none; }
@@ -251,11 +363,11 @@ body {
   left: -0.8rem;
   top: 0.72em;
   width: 5px;
-  height: 1px;
-  background: var(--color-dorato-2);
+  height: 2px;
+  background: var(--color-ink-3);
 }
 .prose-legal ol { list-style: decimal; }
-.prose-legal ol::marker { color: var(--color-ink-3); }
+.prose-legal ol > li::marker { color: var(--color-ink-2); font-weight: 500; }
 .prose-legal li + li { margin-top: 0.4rem; }
 
 .prose-legal strong { color: var(--color-ink); font-weight: 580; }
@@ -271,13 +383,13 @@ body {
 
 /* Citazione di norma: filetto azzurro, corpo editoriale */
 .prose-legal blockquote {
-  border-left: 2px solid var(--color-alloro-2);
+  border-left: 2px solid var(--color-azzurro-2);
   padding: 0.15rem 0 0.15rem 1.15rem;
   margin: 1.4rem 0;
   font-family: var(--font-editorial);
   font-size: 1.04rem;
   line-height: 1.65;
-  color: #223849;
+  color: var(--color-ink);
 }
 .prose-legal blockquote p + p { margin-top: 0.7rem; }
 
@@ -285,7 +397,7 @@ body {
   width: 100%;
   border-collapse: collapse;
   margin: 1.4rem 0;
-  font-size: 13.5px;
+  font-size: 14px;
   display: block;
   overflow-x: auto;
 }
@@ -296,9 +408,9 @@ body {
   vertical-align: top;
 }
 .prose-legal th {
-  color: var(--color-alloro);
-  font-weight: 500;
-  font-size: 11px;
+  color: var(--color-ink-2);
+  font-weight: 600;
+  font-size: 11.5px;
   text-transform: uppercase;
   letter-spacing: 0.09em;
 }

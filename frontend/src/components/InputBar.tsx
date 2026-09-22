@@ -62,7 +62,7 @@ export const InputBar: React.FC<InputBarProps> = ({
              risultato era un rettangolo dentro una scatola smussata.
              L'indicatore non si toglie, si sposta: chi naviga da tastiera deve
              continuare a vedere dov'e'. */
-          className="rounded-[26px] border border-line-2 bg-canvas shadow-[0_10px_30px_-14px_rgba(16,33,45,0.20)] transition-colors duration-200 focus-within:border-azzurro-2 focus-within:ring-2 focus-within:ring-azzurro-3"
+          className="rounded-[26px] border border-campo bg-canvas shadow-[0_12px_32px_-14px_rgba(12,27,38,0.28)] transition-[border-color,box-shadow] duration-200 hover:border-ink-3 focus-within:border-azzurro focus-within:ring-4 focus-within:ring-azzurro-3/70"
         >
           <textarea
             ref={areaRef}
@@ -71,14 +71,14 @@ export const InputBar: React.FC<InputBarProps> = ({
             onKeyDown={onKeyDown}
             rows={1}
             placeholder="Poni un quesito sulla normativa sammarinese…"
-            className="max-h-52 w-full resize-none bg-transparent px-5 pb-1.5 pt-4 text-[15px] leading-relaxed text-ink placeholder-ink-3 focus:outline-none focus-visible:outline-none"
+            className="max-h-52 w-full resize-none bg-transparent px-5 pb-1.5 pt-4 text-[15.5px] leading-relaxed text-ink placeholder-ink-3 focus:outline-none focus-visible:outline-none"
             style={{ minHeight: '48px' }}
           />
 
           <div className="flex items-center justify-between gap-3 px-3 pb-2.5 pt-1">
             <div className="flex min-w-0 items-center gap-2 pl-1.5">
               <span
-                className={`h-[5px] w-[5px] shrink-0 rounded-full ${
+                className={`h-[7px] w-[7px] shrink-0 rounded-full ${
                   stats.fase === 'pronto'
                     ? 'bg-alloro'
                     : stats.fase === 'errore'
@@ -86,7 +86,7 @@ export const InputBar: React.FC<InputBarProps> = ({
                       : 'pulse-dot bg-ink-3'
                 }`}
               />
-              <span className="truncate font-mono text-[10.5px] tracking-[0.05em] text-ink-3">
+              <span className="truncate font-mono text-[11.5px] tracking-[0.03em] text-ink-2">
                 {copertura(stats)}
               </span>
             </div>
@@ -96,28 +96,31 @@ export const InputBar: React.FC<InputBarProps> = ({
                 type="button"
                 onClick={onStop}
                 title="Interrompi"
-                className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-line-2 bg-raise text-ink-2 transition-colors duration-200 hover:border-azzurro-2 hover:text-ink active:translate-y-px"
+                aria-label="Interrompi la consultazione"
+                className="flex h-9 shrink-0 items-center gap-2 rounded-full bg-ink px-3.5 text-[13px] font-medium text-white transition-colors duration-200 hover:bg-ink-2 active:translate-y-px"
               >
                 <Square className="h-2.5 w-2.5 fill-current" strokeWidth={0} />
+                Interrompi
               </button>
             ) : (
               <button
                 type="submit"
                 disabled={!pronto}
                 title="Invia il quesito"
-                className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-full transition-all duration-200 ease-[cubic-bezier(0.16,1,0.3,1)] ${
+                aria-label="Invia il quesito"
+                className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-full transition-all duration-200 ease-[cubic-bezier(0.16,1,0.3,1)] ${
                   pronto
-                    ? 'bg-azzurro text-white hover:-translate-y-px active:translate-y-0'
-                    : 'cursor-not-allowed bg-raise text-ink-3'
+                    ? 'bg-azzurro text-white shadow-[0_4px_12px_-4px_rgba(10,107,159,0.7)] hover:-translate-y-px hover:bg-azzurro-scuro active:translate-y-0'
+                    : 'cursor-not-allowed bg-raise-2 text-ink-3'
                 }`}
               >
-                <ArrowUp className="h-4 w-4" strokeWidth={2.2} />
+                <ArrowUp className="h-4 w-4" strokeWidth={1.75} />
               </button>
             )}
           </div>
         </form>
 
-        <p className="mt-2.5 text-center text-[11px] leading-relaxed text-ink-3">
+        <p className="mt-2.5 text-center text-[12px] leading-relaxed text-ink-2">
           Strumento di supporto all'analisi. Riscontrare i testi sul Bollettino Ufficiale.
         </p>
       </div>

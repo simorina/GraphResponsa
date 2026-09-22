@@ -49,6 +49,8 @@ export interface Message {
   error?: string | null;
   isStreaming?: boolean;
   timestamp?: Date;
+  /** Secondi dalla domanda alla risposta completa. */
+  durata?: number;
 }
 
 export interface GraphStats {

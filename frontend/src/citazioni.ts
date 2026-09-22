@@ -60,9 +60,9 @@ export function inserisciCitazioniInline(testo: string, fonti: Fonte[]): string 
     return (
       ` <button type="button" title="${escapeAttributo(titolo)}" ` +
       `class="cita-inline mx-0.5 inline-flex cursor-pointer items-baseline ` +
-      `rounded-md border border-line bg-alloro-3/30 px-1 align-baseline font-mono text-[10px] ` +
-      `font-medium text-alloro no-underline transition-colors duration-150 hover:border-dorato-2 ` +
-      `hover:bg-alloro-3/60" data-norma="${escapeAttributo(norma)}" ` +
+      `rounded-md border border-azzurro/25 bg-azzurro-3/35 px-1.5 align-baseline font-mono text-[11.5px] ` +
+      `font-semibold text-azzurro no-underline transition-colors duration-150 hover:border-azzurro ` +
+      `hover:bg-azzurro-3/70" data-norma="${escapeAttributo(norma)}" ` +
       `data-articolo="${escapeAttributo(articolo)}" data-comma="${escapeAttributo(comma)}">` +
       `${escapeAttributo(etichetta)}</button>`
     );

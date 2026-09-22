@@ -50,8 +50,8 @@ export const SourceDrawer: React.FC<SourceDrawerProps> = ({ source, onClose }) =
       >
         <div className="flex shrink-0 items-start justify-between gap-4 border-b border-line px-6 py-4">
           <div className="min-w-0">
-            <div className="mb-1 text-[12px] font-medium text-dorato">Testo ufficiale</div>
-            <div className="font-mono text-[13px] text-ink">
+            <div className="mb-1 font-mono text-[11px] uppercase tracking-[0.12em] text-ink-3">Testo ufficiale</div>
+            <div className="font-mono text-[14px] font-medium text-ink">
               {source.norma}
               <span className="text-ink-3"> · art. </span>
               {source.articolo}
@@ -61,10 +61,11 @@ export const SourceDrawer: React.FC<SourceDrawerProps> = ({ source, onClose }) =
           </div>
           <button
             onClick={onClose}
-            className="-mr-1.5 -mt-1 rounded-md p-1.5 text-ink-3 transition-colors duration-200 hover:bg-raise hover:text-ink active:translate-y-px"
+            className="-mr-1.5 -mt-1 rounded-md p-1.5 text-ink-2 transition-colors duration-200 hover:bg-raise hover:text-ink active:translate-y-px"
             title="Chiudi (Esc)"
+            aria-label="Chiudi la fonte"
           >
-            <X className="h-4 w-4" strokeWidth={1.5} />
+            <X className="h-5 w-5" strokeWidth={1.75} />
           </button>
         </div>
 
@@ -73,10 +74,10 @@ export const SourceDrawer: React.FC<SourceDrawerProps> = ({ source, onClose }) =
             <div className="mb-5 flex flex-col gap-2">
               {source.passoAbrogato ? (
                 <div className="rounded-md border border-rosso bg-rosso-2 px-3.5 py-2.5">
-                  <div className="mb-1 text-[11px] font-semibold text-rosso">
+                  <div className="mb-1 text-[12.5px] font-semibold text-rosso">
                     Questo passo è stato abrogato
                   </div>
-                  <div className="text-[12px] leading-relaxed text-ink-2">
+                  <div className="text-[13px] leading-relaxed text-ink">
                     {source.passoAbrogatoDa?.length
                       ? <>Soppresso da <span className="font-mono">{source.passoAbrogatoDa.join(' · ')}</span>. L'atto che lo contiene resta in vigore, questo passo no.</>
                       : <>L'atto che lo contiene resta in vigore, questo passo no.</>}
@@ -85,10 +86,10 @@ export const SourceDrawer: React.FC<SourceDrawerProps> = ({ source, onClose }) =
               ) : null}
               {source.abrogata ? (
                 <div className="rounded-md border border-rosso bg-rosso-2 px-3.5 py-2.5">
-                  <div className="mb-1 text-[11px] font-semibold text-rosso">
+                  <div className="mb-1 text-[12.5px] font-semibold text-rosso">
                     Atto abrogato — non è diritto vigente
                   </div>
-                  <div className="text-[12px] leading-relaxed text-ink-2">
+                  <div className="text-[13px] leading-relaxed text-ink">
                     {source.abrogataDa?.length
                       ? <>Abrogato da <span className="font-mono">{source.abrogataDa.join(' · ')}</span>. Il testo resta consultabile a fini storici.</>
                       : <>Il testo resta consultabile a fini storici.</>}
@@ -96,21 +97,21 @@ export const SourceDrawer: React.FC<SourceDrawerProps> = ({ source, onClose }) =
                 </div>
               ) : null}
               {source.novellataDa?.length ? (
-                <div className="rounded-md border border-rosso/30 bg-rosso-2 px-3.5 py-2.5">
-                  <div className="mb-1 text-[11px] font-medium text-rosso">
+                <div className="rounded-md border border-rosso/50 bg-rosso-2 px-3.5 py-2.5">
+                  <div className="mb-1 text-[12.5px] font-semibold text-rosso">
                     Modificato da un atto successivo
                   </div>
-                  <div className="font-mono text-[12px] text-ink-2">
+                  <div className="font-mono text-[12.5px] text-ink">
                     {source.novellataDa.join(' · ')}
                   </div>
                 </div>
               ) : null}
               {source.ancheIn?.length ? (
                 <div className="rounded-md border border-line bg-raise px-3.5 py-2.5">
-                  <div className="mb-1 text-[11px] font-medium text-ink-3">
+                  <div className="mb-1 text-[12.5px] font-semibold text-ink-2">
                     Stesso testo anche in
                   </div>
-                  <div className="font-mono text-[12px] text-ink-2">
+                  <div className="font-mono text-[12.5px] text-ink">
                     {source.ancheIn.join(' · ')}
                   </div>
                 </div>
@@ -119,18 +120,18 @@ export const SourceDrawer: React.FC<SourceDrawerProps> = ({ source, onClose }) =
           ) : null}
 
           {source.titoloNorma && (
-            <p className="mb-5 max-w-[52ch] border-l-2 border-alloro-2 py-0.5 pl-3.5 text-[12.5px] leading-relaxed text-ink-3">
+            <p className="mb-5 max-w-[52ch] border-l-2 border-line-2 py-0.5 pl-3.5 text-[13.5px] leading-relaxed text-ink-2">
               {source.titoloNorma}
             </p>
           )}
 
           {source.rubrica && (
-            <h2 className="mb-4 text-[15px] font-medium tracking-[-0.015em] text-ink">
+            <h2 className="mb-4 text-[16px] font-semibold tracking-[-0.015em] text-ink">
               {source.rubrica}
             </h2>
           )}
 
-          <div className="select-text whitespace-pre-wrap font-editorial text-[16.5px] leading-[1.72] text-[#223849]">
+          <div className="select-text whitespace-pre-wrap font-editorial text-[17px] leading-[1.72] text-ink">
             {source.testo}
           </div>
         </div>
@@ -139,13 +140,13 @@ export const SourceDrawer: React.FC<SourceDrawerProps> = ({ source, onClose }) =
           {source.haDocumento && (
             <button
               onClick={() => window.open(urlDocumento(source), '_blank', 'noopener,noreferrer')}
-              className="mb-2 flex items-center gap-1.5 rounded-lg border border-line px-2.5 py-1.5 text-[12px] font-medium text-ink-2 transition-colors duration-200 hover:border-dorato-2 hover:bg-alloro-3/40"
+              className="mb-2 flex items-center gap-1.5 rounded-lg border border-line-2 px-3 py-2 text-[13px] font-semibold text-ink transition-colors duration-200 hover:border-azzurro hover:bg-azzurro-3/40"
             >
-              <FileText className="h-3.5 w-3.5" strokeWidth={1.5} />
+              <FileText className="h-4 w-4" strokeWidth={1.75} />
               Apri PDF completo
             </button>
           )}
-          <p className="text-[11.5px] text-ink-3">
+          <p className="text-[12px] text-ink-2">
             Estratto dall'archivio · verificare sul Bollettino Ufficiale
           </p>
         </div>

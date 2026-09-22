@@ -73,6 +73,9 @@ export function useChat() {
       fine: null,
       error: null,
       isStreaming: true,
+      // Da qui si contano i secondi mostrati durante l'attesa e la durata
+      // scritta nel percorso di consultazione.
+      timestamp: new Date(),
     };
     setMessages([...newMessages, assistantMsg]);
     setLoading(true);
@@ -170,6 +173,7 @@ export function useChat() {
                     name: event.nome,
                     count: event.quante,
                     error: event.errore,
+                    time: new Date(),
                   },
                 ];
               } else if (event.tipo === 'fonti') {
@@ -177,6 +181,9 @@ export function useChat() {
               } else if (event.tipo === 'fine') {
                 current.fine = event;
                 current.isStreaming = false;
+                if (current.timestamp) {
+                  current.durata = (Date.now() - current.timestamp.getTime()) / 1000;
+                }
                 if (event.conversazione) {
                   setConversazione(event.conversazione);
                   localStorage.setItem('gr_conv_id', event.conversazione);
