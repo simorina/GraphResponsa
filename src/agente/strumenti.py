@@ -1067,8 +1067,12 @@ assert _prefissi(["l", " DD "]) == (["DD", "L"], None)
 assert _prefissi(["LEGGE"])[1] is not None
 
 
+# 4 risultati e non 8: ogni risultato resta nel contesto e si rilegge a ogni
+# giro successivo, e i risultati di questo strumento sono la voce piu' grossa
+# del costo di una domanda - il 71% su una consultazione reale del 22/09 (10
+# chiamate, 97.000 caratteri di risultati). Il modello puo' alzarlo.
 @tool
-def cerca_testo(query: str, limite: int = 8, dal_anno: int | None = None,
+def cerca_testo(query: str, limite: int = 4, dal_anno: int | None = None,
                 al_anno: int | None = None, tipi: list[str] | None = None,
                 escludi_abrogati: bool = False) -> dict:
     """Cerca nel testo della normativa in archivio.
@@ -1138,7 +1142,7 @@ def cerca_testo(query: str, limite: int = 8, dal_anno: int | None = None,
 
     Args:
         query: cosa cercare, es. "vincoli alla edificazione in zona agricola"
-        limite: quanti risultati restituire (default 8, alzalo se la materia e' ampia)
+        limite: quanti risultati restituire (default 4, alzalo se la materia e' ampia)
         dal_anno: opzionale, scarta le norme anteriori a quell'anno. Utile per
             cercare la disciplina piu' recente su una materia gia' individuata.
         al_anno: opzionale, scarta le norme posteriori a quell'anno. Serve per le
