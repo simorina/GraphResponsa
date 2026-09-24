@@ -218,6 +218,23 @@ body {
   animation: onda 1.6s var(--ease-out-expo) infinite;
 }
 
+/* L'icona accanto alla frase di avanzamento cambia ogni pochi secondi.
+   Entra piccola e appena ruotata: il cambio si nota con la coda dell'occhio
+   senza chiedere attenzione, che e' quello che serve mentre si aspetta. */
+@keyframes icona-in {
+  from { opacity: 0; transform: scale(0.7) rotate(-16deg); }
+  to   { opacity: 1; transform: none; }
+}
+.icona-in { animation: icona-in 0.44s var(--ease-out-expo) both; }
+
+/* Il respiro fa le veci del pallino che pulsava: dice che il lavoro e' in
+   corso anche nei venti secondi in cui la frase non cambia. */
+@keyframes respiro {
+  0%, 100% { opacity: 1; }
+  50%      { opacity: 0.52; }
+}
+.icona-viva { animation: respiro 2.8s ease-in-out infinite; }
+
 @keyframes frase-in {
   from { opacity: 0; transform: translate3d(0, 6px, 0); filter: blur(2px); }
   to   { opacity: 1; transform: none; filter: none; }

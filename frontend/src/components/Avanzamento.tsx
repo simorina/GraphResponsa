@@ -1,4 +1,7 @@
 import React, { useEffect, useState } from 'react';
+import {
+  BrainCircuit, ScrollText, Scale, Library, Gavel, Sparkles,
+} from 'lucide-react';
 import type { ThoughtStep } from '../types';
 import { componi, ElencoPassi, type Passo } from './ThinkingTrail';
 import { conArticolo } from '../norme';
@@ -17,6 +20,35 @@ import { conArticolo } from '../norme';
  * un altro strumento, e lo fa in pochi secondi, o scrive la risposta, che ne
  * richiede di piu': passata la soglia, e' la seconda.
  */
+
+/**
+ * Le icone che accompagnano la frase: l'intelligenza che legge, il testo di
+ * legge, la bilancia, l'archivio, il martelletto, la scintilla. Girano a
+ * turno perche' fra un risultato e l'altro passano anche venti secondi in cui
+ * la frase resta la stessa, e una riga immobile si legge come un blocco.
+ */
+const ICONE = [BrainCircuit, ScrollText, Scale, Library, Gavel, Sparkles];
+/** Ogni quanto cambia l'icona. */
+const GIRO_ICONA = 5000;
+
+const IconaViva: React.FC = () => {
+  const [quale, setQuale] = useState(0);
+  useEffect(() => {
+    const t = setInterval(() => setQuale((n) => (n + 1) % ICONE.length), GIRO_ICONA);
+    return () => clearInterval(t);
+  }, []);
+  const Icona = ICONE[quale];
+  return (
+    <span
+      className="icona-viva flex h-4 w-4 shrink-0 items-center justify-center text-azzurro"
+      aria-hidden
+    >
+      {/* La chiave e' l'indice: cambiandola React rimonta l'elemento e
+          l'animazione d'ingresso riparte da sola. */}
+      <Icona key={quale} className="icona-in h-4 w-4" strokeWidth={1.9} />
+    </span>
+  );
+};
 
 /** Oltre questi secondi di silenzio dopo un risultato, il modello sta scrivendo. */
 const SOGLIA_SCRITTURA = 6;
@@ -106,9 +138,7 @@ export const Avanzamento: React.FC<AvanzamentoProps> = ({ thoughts, inizio }) =>
   return (
     <div className="rise overflow-hidden rounded-xl border border-line-2 bg-panel">
       <div className="flex items-center gap-3 px-4 py-3">
-        <span className="flex h-4 w-4 shrink-0 items-center justify-center" aria-hidden>
-          <span className="battito" />
-        </span>
+        <IconaViva />
         {/* La chiave e' la frase: quando cambia, la riga rientra animata. */}
         <p
           key={testo}
