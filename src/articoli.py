@@ -27,7 +27,7 @@ patologica resta rifiutato anche se i prefissi lo rendono univoco.
 
 import re
 
-from commi import RE_FIRMA, _saldo
+from commi import RE_FIRMA, RE_PROMULGAZIONE, _saldo
 
 ORDINALI = ("bis|ter|quater|quinquies|sexies|septies|octies|nonies|decies"
             "|undecies|duodecies|terdecies|quaterdecies")
@@ -59,6 +59,13 @@ def _dividi(norma, articoli):
     Solo se il comma dopo riparte da 1, se l'intestazione non sta dentro una
     citazione (una novella che riporta "Art. 175 (Definizioni)" non apre un
     articolo dell'atto che la contiene) e se il numero non c'e' gia'.
+
+    E solo se il numero e' quello dell'articolo in corso o il successivo
+    ("Art. 2-bis" dentro l'art. 2, "Art. 3" dentro l'art. 2). Le intestazioni
+    che il parser lascia nel testo perche' citate da una novella senza
+    virgolette (02_parse.righe_citate) hanno quasi sempre un numero lontano:
+    L-24-2022 riporta dall'art. 1 gli articoli 58-bis ... 58-nonies del codice
+    di procedura penale, e separarli qui li rifaceva articoli della legge.
     """
     esistenti = {chiave(a["numero"]) for a in articoli}
     fuori = []
@@ -78,7 +85,7 @@ def _dividi(norma, articoli):
                     and not _saldo(testo[:m.start()], aperte)):
                 numero = m.group("n") + (f"-{m.group('ord').lower()}" if m.group("ord") else "")
                 base, mio = int(m.group("n")), _intero(corrente["numero"])
-                if chiave(numero) not in esistenti and (mio is None or base >= mio):
+                if chiave(numero) not in esistenti and (mio is None or mio <= base <= mio + 1):
                     taglio = m.start("punto") + 1 if m.group("punto") else 0
                     resto = testo[:taglio].strip()
                     if resto:
@@ -106,14 +113,66 @@ def _formula(articoli):
     return None
 
 
+# Un decreto di ratifica che riporta il trattato prima della firma: il
+# trattato ha la sua numerazione, che riparte da "Art. 1". Misurato: 6
+# documenti (X-3-1942, D-9-1972, D-28-1924, DC-16-1918, DR-12-1922,
+# DC-21-1914); X-3-1942 aveva 24 articoli, uno solo suo.
+RE_RATIFICA = re.compile(r"ratific|piena\s+ed?\s+intera\s+esecuzione|recepit", re.I)
+RE_TRATTATO = re.compile(r"\b(?:Convenzione|Trattato|Accordo|Protocollo|"
+                         r"Parti\s+contraenti|Stati\s+membri)\b")
+MIN_ART_CONVENZIONE = 5
+
+
+def _convenzione(articoli):
+    """L'indice del primo articolo di una convenzione riportata nel dispositivo.
+
+    Tre condizioni insieme: almeno MIN_ART_CONVENZIONE articoli, una
+    numerazione che riparte da 1, e prima della ripartenza una frase di
+    ratifica che nomina un trattato.
+    """
+    if len(articoli) < MIN_ART_CONVENZIONE:
+        return None
+    k = next((k for k, a in enumerate(articoli) if k and _intero(a["numero"]) == 1), None)
+    if k is None:
+        return None
+    fra = " ".join(c["testo"] for a in articoli[:k] for c in a.get("commi") or [])
+    return k if RE_RATIFICA.search(fra) and RE_TRATTATO.search(fra) else None
+
+
+def _allegato_certo(articoli, firma):
+    """Da quale articolo comincia un allegato, anche senza numeri ripetuti.
+
+    Dopo la formula intera ("Dato dalla Nostra Residenza ... I CAPITANI
+    REGGENTI") non c'e' piu' dispositivo: DC-52-2016 teneva i 20 articoli del
+    trattato ONU come articoli del decreto, perche' "Unico" e 1...20 non si
+    ripetono. Lo stesso per il trattato riportato prima della firma. Si decide
+    sul testo, cosi' riapplicare il riordino (15_ricostruisci_articoli.py) da'
+    lo stesso risultato.
+    """
+    # Nella struttura dedotta gli articoli sono raggruppati per numero, non in
+    # ordine di testo: la firma in fondo al D-122-1985 sta nell'articolo "1".
+    if any(a.get("strutturaDedotta") for a in articoli):
+        return None
+    fino = firma + 1 if firma is not None else len(articoli)
+    convenzione = _convenzione(articoli[:fino])
+    if convenzione is not None:
+        return convenzione
+    if firma is not None and any(RE_PROMULGAZIONE.search(c["testo"]) for c in articoli[firma]["commi"]):
+        return firma + 1
+    return None
+
+
 def _qualifica(norma, articoli):
     """Numeri univoci: prefisso d'allegato dopo la firma, suffisso sui refusi."""
-    if len({chiave(a["numero"]) for a in articoli}) == len(articoli):
-        return articoli
     firma = _formula(articoli)
-    if firma is not None:
-        prima = {chiave(a["numero"]) for a in articoli[:firma + 1]}
-        dopo = articoli[firma + 1:]
+    certo = _allegato_certo(articoli, firma)
+    if certo is None and len({chiave(a["numero"]) for a in articoli}) == len(articoli):
+        return articoli
+    inizio = certo if certo is not None else (firma + 1 if firma is not None else None)
+    if inizio is not None:
+        prima = {chiave(a["numero"]) for a in articoli[:inizio]}
+        # Le tabelle di allegati.py hanno gia' il loro numero ("all-A").
+        dopo = [a for a in articoli[inizio:] if not a.get("tabella")]
         # Le sezioni dopo la firma: una nuova ogni volta che la numerazione
         # riparte o un numero si ripete.
         sezioni, sezione, visti, precedente = [], 0, set(), None
@@ -129,7 +188,7 @@ def _qualifica(norma, articoli):
         chiavi_dopo = [chiave(a["numero"]) for a in dopo]
         collide = (any(k in prima for k in chiavi_dopo)
                    or len(set(zip(sezioni, chiavi_dopo))) != len(set(chiavi_dopo)))
-        if collide:
+        if collide or certo is not None:
             for a, s in zip(dopo, sezioni):
                 prefisso = "all" if sezione == 1 else f"all{s}"
                 a["numeroOriginale"] = a.get("numeroOriginale") or a["numero"]

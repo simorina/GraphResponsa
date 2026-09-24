@@ -378,11 +378,16 @@ def allegati_tabellari(norma, righe, articoli):
 
     # Il comma con la formula tiene firma e firmatari, non l'inizio della
     # tabella che il riconoscitore gli aveva attaccato.
+    # 02_parse.py apre un comma nuovo dove finiscono le firme: si riuniscono,
+    # perche' i firmatari fino all'inizio della tabella restano col comma
+    # della formula. Se l'inizio della tabella non si ritrova, il comma della
+    # formula resta com'e'.
     comma = firma["commi"][j]
-    m = RE_FIRMA.search(comma["testo"])
-    taglio = comma["testo"].find(_unisci([dopo[inizio]])[:30], m.end())
+    seguito = " ".join(c["testo"] for c in firma["commi"][j:])
+    m = RE_FIRMA.search(seguito)
+    taglio = seguito.find(_unisci([dopo[inizio]])[:30], m.end())
     if taglio > 0:
-        comma["testo"] = comma["testo"][:taglio].rstrip()
+        comma["testo"] = seguito[:taglio].rstrip()
     firma["commi"] = firma["commi"][:j + 1]
     corpo = corpo[:firmati[0] + 1]
 

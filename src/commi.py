@@ -38,6 +38,13 @@ RE_INTRO = re.compile(
     r"|\b(?:è|e['’]|sono|viene|vengono)\s+(?:aggiunt|inserit|introdott|premess)"
     r"|seguente\s+tenore)", re.I)
 RE_FIRMA = re.compile(r"\bDat[oa]\s+dalla\s+Nostra\s+Residenza", re.I)
+# La formula intera, fino a "I CAPITANI REGGENTI": piu' stretta di RE_FIRMA.
+# Dove c'e' questa, cio' che segue non e' dispositivo - un trattato, uno
+# statuto, una tabella - e articoli.py lo tratta da allegato anche quando la
+# numerazione non si ripete. Il parser la cerca riga per riga (02_parse.py,
+# _cerca_promulgazione).
+RE_PROMULGAZIONE = re.compile(
+    r"Dat[oa]\s+dalla\s+Nostra\s+Residenza.{0,250}?CAPITANI\s+REGGENTI", re.I | re.S)
 # Dove un trattato non ha la formula: le firme delle parti e poi "Allegato
 # Esproprio", o il testo inglese che comincia con "Article 1".
 RE_ALLEGATO_IN_CODA = re.compile(r"\bAllegat[oi]\b[^.;:]{0,80}$|\bArticle\s+1\b")
