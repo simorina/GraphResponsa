@@ -1,6 +1,6 @@
 import { useState, useRef } from 'react';
 import { Message, Fonte } from '../types';
-import { token } from '../auth/cognito';
+import { erroreDiRete, token } from '../auth/cognito';
 
 export function useChat() {
   const [messages, setMessages] = useState<Message[]>([]);
@@ -206,7 +206,12 @@ export function useChat() {
         setMessages((prev) => {
           const updated = [...prev];
           if (updated[assistantIndex]) {
-            updated[assistantIndex].error = err.message || 'Errore di connessione';
+            // Senza rete il browser lancia un errore in inglese e diverso per
+            // ciascuno ("Failed to fetch", "Load failed"): all'utente si dice
+            // cos'e' successo e cosa fare.
+            updated[assistantIndex].error = erroreDiRete(err)
+              ? 'Connessione assente: controlla la rete e riprova.'
+              : err.message || 'Errore di connessione';
             updated[assistantIndex].isStreaming = false;
           }
           return updated;

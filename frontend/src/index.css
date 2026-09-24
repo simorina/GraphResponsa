@@ -57,13 +57,66 @@
   --font-mono: "Geist Mono", ui-monospace, "SFMono-Regular", monospace;
   --font-editorial: "Newsreader", Georgia, "Times New Roman", serif;
 
+  /* Il velo sotto i pannelli. Sul desktop coincide con l'inchiostro; sul
+     telefono ha valori suoi, perche' nel modo scuro l'inchiostro diventa
+     chiaro e un velo d'inchiostro schiarirebbe la pagina invece di coprirla. */
+  --color-velo: #0c1b26;
+  /* La superficie che si appoggia sulla pagina: l'area di scrittura, le
+     pillole. Nel chiaro e' la pagina stessa; nello scuro e' un grado piu'
+     chiara, per staccarsi dal fondo. */
+  --color-foglio: #ffffff;
+
   --ease-out-expo: cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+/* ─────────────────────────────────────────────────────────────
+   Il tema scuro
+   Uno solo, per telefono e desktop: la notte dei grigi azzurrati di
+   "Libertas", perche' uno scuro deve somigliare al suo chiaro, e il chiaro
+   e' lo stesso ovunque. Il telefono aveva prima la carta calda sul modello
+   dell'app di Claude, chiaro e scuro: la ricordava troppo, ed e' stata
+   tolta. Dall'app di Claude restano l'impostazione e i comportamenti, non i
+   colori.
+
+   Non segue il sistema: si parte chiari e lo si accende a mano dal cassetto
+   (data-tema="scuro" su <html>, vedi src/tema.ts). Tutto passa dai token,
+   quindi i componenti non sanno nulla di questo blocco.
+
+   Contrasti sullo sfondo della pagina: ink 16:1, ink-2 10:1, ink-3 6,3:1,
+   campo 4,5:1, azzurro 7,1:1. L'azzurro pieno del chiaro sul fondo scuro
+   non reggerebbe il testo (2,6:1): si schiarisce, e i pulsanti pieni
+   portano il testo in `canvas` e non in bianco, cosi' restano leggibili in
+   entrambi i temi.
+   ───────────────────────────────────────────────────────────── */
+:root[data-tema="scuro"] {
+  --color-canvas: #0f171d;
+  --color-panel: #131e26;
+  --color-raise: #1a2731;
+  --color-raise-2: #223340;
+  --color-line: #22323d;
+  --color-line-2: #2e4250;
+  --color-campo: #6b8293;
+  --color-ink: #e8eef3;
+  --color-ink-2: #b7c4ce;
+  --color-ink-3: #8a9bab;
+  --color-velo: #05090c;
+  --color-foglio: #16222b;
+  --color-azzurro: #5fb0de;
+  --color-azzurro-scuro: #86c4e8;
+  --color-azzurro-2: #4fa3d6;
+  --color-azzurro-3: #173549;
+  --color-alloro: #7db891;
+  --color-alloro-3: #1d3327;
+  --color-dorato: #d4af37;
+  --color-rosso: #e8806c;
+  --color-rosso-2: #3a2320;
 }
 
 html {
   color-scheme: light;
   scroll-behavior: smooth;
 }
+:root[data-tema="scuro"] { color-scheme: dark; }
 
 body {
   background: var(--color-canvas);
@@ -331,6 +384,9 @@ body {
   background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.85), transparent);
   animation: shimmer 1.7s var(--ease-out-expo) infinite;
 }
+:root[data-tema="scuro"] .skeleton::after {
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.07), transparent);
+}
 
 /* ── Effetti della pagina d'accesso ───────────────────────────── */
 
@@ -391,6 +447,26 @@ body {
   letter-spacing: -0.004em;
 }
 .prose-legal > * + * { margin-top: 1.05em; }
+
+/* Sul telefono la risposta e' in serif, come nell'app di Claude: e' testo da
+   leggere per intero, e un testo giuridico si legge meglio in un carattere da
+   libro. Newsreader e' gia' caricato per le citazioni di legge; qui si
+   allarga a tutto il corpo, titoli compresi, e cresce di un punto perche' a
+   parita' di corpo un serif appare piu' piccolo di un bastoni. */
+@media (max-width: 767px) {
+  .prose-legal {
+    font-family: var(--font-editorial);
+    font-size: 17.5px;
+    line-height: 1.62;
+    letter-spacing: 0;
+  }
+  .prose-legal h1, .prose-legal h2, .prose-legal h3 {
+    font-weight: 600;
+    letter-spacing: -0.01em;
+  }
+  .prose-legal h2 { border-bottom: 0; padding-bottom: 0; }
+  .prose-legal blockquote { font-size: 1em; }
+}
 
 /* Righe di lettura sotto i 70 caratteri: a tutta colonna arrivavano a 85, e
    l'occhio perde la riga al ritorno. Le tabelle restano larghe. */

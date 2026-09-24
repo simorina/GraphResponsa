@@ -168,8 +168,8 @@ export const ThinkingTrail: React.FC<ThinkingTrailProps> = ({ thoughts, durata }
   if (passi.length === 0) return null;
 
   return (
-    <details className="group mb-4 overflow-hidden rounded-xl border border-line bg-panel">
-      <summary className="flex cursor-pointer list-none items-center gap-2 px-3.5 py-2.5 text-ink-2 transition-colors duration-200 hover:text-ink">
+    <details className="group mb-4 overflow-hidden rounded-xl border border-line bg-panel max-md:mb-1 max-md:rounded-none max-md:border-0 max-md:bg-transparent">
+      <summary className="flex min-h-11 cursor-pointer list-none items-center gap-2 px-3.5 py-2.5 text-ink-2 transition-colors duration-200 hover:text-ink max-md:px-0 md:min-h-0">
         <ChevronRight
           className="h-3.5 w-3.5 shrink-0 transition-transform duration-300 ease-[cubic-bezier(0.16,1,0.3,1)] group-open:rotate-90"
           strokeWidth={1.75}
@@ -181,7 +181,7 @@ export const ThinkingTrail: React.FC<ThinkingTrailProps> = ({ thoughts, durata }
         </span>
       </summary>
 
-      <div className="border-t border-line px-3.5 py-3">
+      <div className="border-t border-line px-3.5 py-3 max-md:border-0 max-md:px-0 max-md:pt-1">
         <ElencoPassi passi={passi} />
       </div>
     </details>

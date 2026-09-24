@@ -38,7 +38,7 @@ export const MessageItem: React.FC<MessageItemProps> = ({
   if (message.role === 'user') {
     return (
       <div className="flex justify-end py-3">
-        <div className="max-w-[85%] select-text whitespace-pre-wrap rounded-3xl rounded-br-lg border border-line bg-raise px-4 py-2.5 text-[15px] leading-relaxed text-ink">
+        <div className="max-w-[85%] select-text whitespace-pre-wrap rounded-[22px] bg-raise px-4 py-2.5 text-[16px] leading-[1.5] text-ink md:rounded-3xl md:rounded-br-lg md:border md:border-line md:text-[15px] md:leading-relaxed">
           {message.content}
         </div>
       </div>
@@ -55,8 +55,8 @@ export const MessageItem: React.FC<MessageItemProps> = ({
   };
 
   return (
-    <div className="group/msg flex items-start gap-3.5 py-3 md:gap-4">
-      <div className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-line-2 bg-canvas shadow-[0_1px_2px_rgba(12,27,38,0.06)]">
+    <div className="group/msg flex items-start gap-0 py-3 md:gap-4">
+      <div className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-line-2 bg-canvas shadow-[0_1px_2px_rgba(12,27,38,0.06)] max-md:hidden">
         <Sigillo className="h-[17px] w-[17px]" />
       </div>
 
@@ -94,21 +94,22 @@ export const MessageItem: React.FC<MessageItemProps> = ({
         )}
 
         {!message.isStreaming && message.content && (
-          <div className="mt-3 flex flex-col items-start gap-1">
+          <div className="mt-3 flex flex-col items-start gap-1 max-md:-ml-2.5 max-md:mt-1">
             <div className="flex items-center gap-1">
             <button
               onClick={copia}
-              className="flex items-center gap-1.5 rounded-lg px-2 py-1 text-[12.5px] text-ink-3 transition-all duration-200 hover:bg-panel hover:text-ink active:translate-y-px"
+              aria-label={copiato ? 'Copiato' : 'Copia la risposta'}
+              className="flex items-center gap-1.5 rounded-lg px-2 py-1 text-[12.5px] text-ink-3 transition-all duration-200 hover:bg-panel hover:text-ink active:translate-y-px max-md:h-11 max-md:w-11 max-md:justify-center max-md:p-0"
             >
               {copiato ? (
                 <>
-                  <Check className="h-3.5 w-3.5 text-azzurro" strokeWidth={1.75} />
-                  <span className="text-azzurro">Copiato</span>
+                  <Check className="h-3.5 w-3.5 text-azzurro max-md:h-[18px] max-md:w-[18px]" strokeWidth={1.75} />
+                  <span className="text-azzurro max-md:sr-only">Copiato</span>
                 </>
               ) : (
                 <>
-                  <Copy className="h-3.5 w-3.5" strokeWidth={1.75} />
-                  Copia
+                  <Copy className="h-3.5 w-3.5 max-md:h-[18px] max-md:w-[18px]" strokeWidth={1.75} />
+                  <span className="max-md:sr-only">Copia</span>
                 </>
               )}
             </button>

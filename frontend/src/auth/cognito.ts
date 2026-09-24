@@ -16,6 +16,31 @@ const ENDPOINT = `https://cognito-idp.${REGIONE}.amazonaws.com/`;
 
 const CHIAVE_TOKEN = 'gr_sessione';
 
+/**
+ * Se un errore viene dalla rete e non da un server che ha risposto.
+ *
+ * `fetch` senza connessione non restituisce una risposta: lancia un TypeError,
+ * con un testo diverso per browser - "Failed to fetch" in Chrome, "Load
+ * failed" in Safari, "NetworkError when attempting to fetch resource" in
+ * Firefox.
+ */
+export function erroreDiRete(e: unknown): boolean {
+  return e instanceof TypeError && /fetch|network|load failed/i.test(e.message);
+}
+
+/** I rifiuti che chiudono davvero la sessione: il rinnovo e' revocato o
+ *  scaduto, o l'utente non puo' piu' entrare. Tutto il resto - rete assente,
+ *  Cognito in difficolta', troppe richieste - e' passeggero. */
+const SESSIONE_FINITA = new Set([
+  'NotAuthorizedException',
+  'UserNotFoundException',
+  'UserNotConfirmedException',
+  'PasswordResetRequiredException',
+]);
+
+/** Il rinnovo non e' riuscito per ragioni passeggere: la sessione resta. */
+const PASSEGGERO = Symbol('rinnovo passeggero');
+
 export interface Sessione {
   idToken: string;
   refreshToken: string;
@@ -151,7 +176,7 @@ export async function impostaNuovaPassword(
   scrivi(daRisultato(d.AuthenticationResult));
 }
 
-async function rinnova(s: Sessione): Promise<Sessione | null> {
+async function rinnova(s: Sessione): Promise<Sessione | null | typeof PASSEGGERO> {
   if (!s.refreshToken) return null;
   try {
     const d = await chiama('InitiateAuth', {
@@ -163,8 +188,13 @@ async function rinnova(s: Sessione): Promise<Sessione | null> {
     const nuova = daRisultato(d.AuthenticationResult, s);
     scrivi(nuova);
     return nuova;
-  } catch {
-    return null;
+  } catch (e) {
+    // Solo un rifiuto esplicito di Cognito chiude la sessione. Prima ogni
+    // errore la chiudeva, compreso quello di rete: aprire l'app senza
+    // connessione cancellava il rinnovo, e al ritorno della rete bisognava
+    // rimettere la password.
+    if (e instanceof ErroreAccesso && SESSIONE_FINITA.has(e.tipo)) return null;
+    return PASSEGGERO;
   }
 }
 
@@ -180,11 +210,18 @@ export async function token(): Promise<string | null> {
   // Un minuto di margine: un token che scade a meta' di una consultazione
   // lunga chiuderebbe lo stream senza spiegazioni.
   if (Date.now() > s.scadenza - 60_000) {
-    s = await rinnova(s);
-    if (!s) {
+    const rinnovata = await rinnova(s);
+    if (rinnovata === PASSEGGERO) {
+      // La sessione resta dov'e' e si riprova alla prossima richiesta. Il
+      // token vecchio vale finche' non scade davvero: il rinnovo parte un
+      // minuto prima.
+      return Date.now() < s.scadenza ? s.idToken : null;
+    }
+    if (!rinnovata) {
       scrivi(null);
       return null;
     }
+    s = rinnovata;
   }
   return s.idToken;
 }

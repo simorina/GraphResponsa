@@ -9,7 +9,22 @@
          pagina si accorcia invece di scorrere sotto, cosi' l'area di
          scrittura resta visibile. -->
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, interactive-widget=resizes-content" />
+    <!-- Il colore della barra del browser segue la pagina: bianco nel chiaro.
+         Col tema scuro src/tema.ts ne aggiunge uno in cima, che vince perche'
+         viene prima. -->
     <meta name="theme-color" content="#ffffff" />
+
+    <!-- Il tema scelto si applica prima del primo disegno: se lo facesse
+         React, chi ha scelto lo scuro vedrebbe un lampo bianco a ogni
+         apertura. Si parte chiari: lo scuro solo se scelto a mano, e solo con
+         una sessione salvata, perche' senza si finisce sulla pagina d'accesso,
+         che e' sempre chiara. -->
+    <script>
+      try {
+        if (localStorage.getItem('gr_tema') === 'scuro' && localStorage.getItem('gr_sessione'))
+          document.documentElement.dataset.tema = 'scuro';
+      } catch (e) {}
+    </script>
     <meta name="description" content="Responsa, l’intelligenza artificiale dedicata alla consultazione della legge sammarinese: ogni risposta cita articolo e comma delle fonti." />
     <title>Responsa — La legge sammarinese, consultata con l’intelligenza artificiale</title>
 

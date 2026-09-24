@@ -95,20 +95,20 @@ export const Riscontro: React.FC<RiscontroProps> = ({
           disabled={invio || !conversazione}
           title="Risposta utile"
           aria-label="Risposta utile"
-          className="rounded-lg p-1.5 text-ink-3 transition-colors duration-200 hover:bg-azzurro-3/50 hover:text-azzurro disabled:opacity-40 active:translate-y-px"
+          className="rounded-lg p-1.5 text-ink-3 transition-colors duration-200 hover:bg-azzurro-3/50 hover:text-azzurro disabled:opacity-40 active:translate-y-px max-md:flex max-md:h-11 max-md:w-11 max-md:items-center max-md:justify-center max-md:p-0"
         >
-          <ThumbsUp className="h-4 w-4" strokeWidth={1.75} />
+          <ThumbsUp className="h-4 w-4 max-md:h-[18px] max-md:w-[18px]" strokeWidth={1.75} />
         </button>
         <button
           onClick={() => setApertoModulo((v) => !v)}
           disabled={invio || !conversazione}
           title="Risposta da correggere"
           aria-label="Risposta da correggere"
-          className={`rounded-lg p-1.5 transition-colors duration-200 disabled:opacity-40 active:translate-y-px ${
+          className={`rounded-lg p-1.5 transition-colors duration-200 disabled:opacity-40 active:translate-y-px max-md:flex max-md:h-11 max-md:w-11 max-md:items-center max-md:justify-center max-md:p-0 ${
             apertoModulo ? 'bg-rosso-2 text-rosso' : 'text-ink-3 hover:bg-rosso-2 hover:text-rosso'
           }`}
         >
-          <ThumbsDown className="h-4 w-4" strokeWidth={1.75} />
+          <ThumbsDown className="h-4 w-4 max-md:h-[18px] max-md:w-[18px]" strokeWidth={1.75} />
         </button>
       </div>
 
@@ -168,7 +168,7 @@ export const Riscontro: React.FC<RiscontroProps> = ({
             <button
               onClick={() => manda('non_utile', scelte, motivo)}
               disabled={invio}
-              className="shrink-0 rounded-lg bg-azzurro px-4 py-2 text-[13px] font-semibold text-white transition-all duration-200 hover:-translate-y-px hover:bg-azzurro-scuro disabled:cursor-wait disabled:opacity-80 active:translate-y-0"
+              className="shrink-0 rounded-lg bg-azzurro px-4 py-2 text-[13px] font-semibold text-canvas transition-all duration-200 hover:-translate-y-px hover:bg-azzurro-scuro disabled:cursor-wait disabled:opacity-80 active:translate-y-0"
             >
               {invio ? 'Invio…' : 'Invia'}
             </button>

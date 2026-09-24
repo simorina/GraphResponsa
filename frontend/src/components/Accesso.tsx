@@ -9,6 +9,7 @@ import {
   accedi,
   impostaNuovaPassword,
   ErroreAccesso,
+  erroreDiRete,
   type NuovaPasswordRichiesta,
 } from '../auth/cognito';
 
@@ -179,7 +180,8 @@ export const Accesso: React.FC<AccessoProps> = ({ onEntrato }) => {
         await impostaNuovaPassword(sfida, nuova);
         entra();
       } catch (err) {
-        setErrore(err instanceof ErroreAccesso ? err.leggibile : 'Accesso non riuscito.');
+        setErrore(err instanceof ErroreAccesso ? err.leggibile : erroreDiRete(err)
+          ? 'Nessuna connessione: controlla la rete e riprova.' : 'Accesso non riuscito.');
       } finally {
         setInCorso(false);
       }
@@ -201,7 +203,8 @@ export const Accesso: React.FC<AccessoProps> = ({ onEntrato }) => {
       if (esito === 'dentro') entra();
       else setSfida(esito);          // primo accesso: password temporanea
     } catch (err) {
-      setErrore(err instanceof ErroreAccesso ? err.leggibile : 'Accesso non riuscito.');
+      setErrore(err instanceof ErroreAccesso ? err.leggibile : erroreDiRete(err)
+          ? 'Nessuna connessione: controlla la rete e riprova.' : 'Accesso non riuscito.');
     } finally {
       setInCorso(false);
     }
@@ -453,7 +456,7 @@ export const Accesso: React.FC<AccessoProps> = ({ onEntrato }) => {
                               >
                                 <span
                                   className={`flex h-4 w-4 shrink-0 items-center justify-center rounded-full border transition-colors duration-200 ${
-                                    ok ? 'border-azzurro bg-azzurro text-white' : 'border-line-2 text-transparent'
+                                    ok ? 'border-azzurro bg-azzurro text-canvas' : 'border-line-2 text-transparent'
                                   }`}
                                 >
                                   <Check className="h-2.5 w-2.5" strokeWidth={3} />
@@ -539,7 +542,7 @@ export const Accesso: React.FC<AccessoProps> = ({ onEntrato }) => {
               <button
                 type="submit"
                 disabled={bloccato}
-                className={`lucido group mt-1 flex h-[52px] items-center justify-center gap-2 overflow-hidden rounded-xl px-4 text-[15px] font-semibold text-white transition-all duration-200 ease-[cubic-bezier(0.16,1,0.3,1)] focus-visible:ring-4 focus-visible:ring-azzurro-3 active:scale-[0.985] ${
+                className={`lucido group mt-1 flex h-[52px] items-center justify-center gap-2 overflow-hidden rounded-xl px-4 text-[15px] font-semibold text-canvas transition-all duration-200 ease-[cubic-bezier(0.16,1,0.3,1)] focus-visible:ring-4 focus-visible:ring-azzurro-3 active:scale-[0.985] ${
                   entrato
                     ? 'bg-azzurro-scuro'
                     : 'bg-azzurro shadow-[0_6px_18px_-10px_rgba(10,107,159,0.9)] hover:-translate-y-px hover:bg-azzurro-scuro hover:shadow-[0_10px_24px_-10px_rgba(10,107,159,0.85)] active:translate-y-0 active:shadow-none disabled:cursor-wait disabled:opacity-80'

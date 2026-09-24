@@ -136,15 +136,15 @@ export const Avanzamento: React.FC<AvanzamentoProps> = ({ thoughts, inizio }) =>
   const scrive = testo === 'Sto scrivendo la risposta';
 
   return (
-    <div className="rise overflow-hidden rounded-xl border border-line-2 bg-panel">
-      <div className="flex items-center gap-3 px-4 py-3">
+    <div className="rise overflow-hidden rounded-xl border border-line-2 bg-panel max-md:rounded-none max-md:border-0 max-md:bg-transparent">
+      <div className="flex items-center gap-3 px-4 py-3 max-md:px-0 max-md:py-1.5">
         <IconaViva />
         {/* La chiave e' la frase: quando cambia, la riga rientra animata. */}
         <p
           key={testo}
           role="status"
           aria-live="polite"
-          className="frase-in line-clamp-2 min-w-0 flex-1 text-[14px] font-medium leading-snug"
+          className="frase-in line-clamp-2 min-w-0 flex-1 text-[14px] font-medium leading-snug max-md:text-[15px]"
           title={testo}
         >
           <span className="testo-vivo">{testo}…</span>
@@ -155,19 +155,19 @@ export const Avanzamento: React.FC<AvanzamentoProps> = ({ thoughts, inizio }) =>
       </div>
 
       {passi.length > 0 && (
-        <div className="border-t border-line px-4 py-3">
+        <div className="border-t border-line px-4 py-3 max-md:border-0 max-md:px-0 max-md:pb-1 max-md:pt-1">
           <ElencoPassi passi={passi} vivo />
         </div>
       )}
 
       {scrive && trascorsi > SOGLIA_PAZIENZA && (
-        <p className="frase-in border-t border-line px-4 py-2.5 text-[12.5px] text-ink-2">
+        <p className="frase-in border-t border-line px-4 py-2.5 text-[12.5px] text-ink-2 max-md:border-0 max-md:px-0">
           Le risposte più articolate richiedono qualche secondo in più: il testo arriva intero, già con le citazioni.
         </p>
       )}
 
       {scrive && (
-        <div className="space-y-2.5 border-t border-line bg-canvas px-4 py-4" aria-hidden>
+        <div className="space-y-2.5 border-t border-line bg-canvas px-4 py-4 max-md:border-0 max-md:bg-transparent max-md:px-0 max-md:pt-2" aria-hidden>
           <div className="skeleton h-[10px] w-[92%]" />
           <div className="skeleton h-[10px] w-[78%]" />
           <div className="skeleton h-[10px] w-[85%]" />

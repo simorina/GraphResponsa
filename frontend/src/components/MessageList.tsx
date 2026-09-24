@@ -10,6 +10,8 @@ interface MessageListProps {
   onSelectSource: (source: Fonte) => void;
   loading: boolean;
   conversazione: string | null;
+  /** Il nome di chi consulta, per il saluto della pagina vuota. */
+  nomeUtente?: string | null;
 }
 
 /**
@@ -25,6 +27,7 @@ export const MessageList: React.FC<MessageListProps> = ({
   onSelectSource,
   loading,
   conversazione,
+  nomeUtente,
 }) => {
   const scatolaRef = useRef<HTMLDivElement>(null);
   const fondoRef = useRef<HTMLDivElement>(null);
@@ -98,9 +101,22 @@ export const MessageList: React.FC<MessageListProps> = ({
         ref={scatolaRef}
         className="h-full overflow-y-auto overscroll-contain pl-[max(1rem,env(safe-area-inset-left))] pr-[max(1rem,env(safe-area-inset-right))] md:px-6"
       >
-        <div className="mx-auto max-w-3xl pb-56 pt-4 md:pb-44">
+        {/* Il vuoto dal fondo e' l'altezza vera dell'area di scrittura, che la
+            pubblica lei (--altezza-compositore): un valore fisso andava bene
+            per un segnaposto su una riga e troppo poco per uno su due, e
+            l'ultima riga della risposta finiva sotto il riquadro. Sul
+            desktop resta il valore di prima. A pagina vuota la colonna occupa
+            tutta l'altezza, perche' sul telefono il saluto sta in mezzo e le
+            pillole appoggiate sopra l'area di scrittura. */}
+        <div
+          className={
+            vuoto
+              ? 'mx-auto flex min-h-full max-w-3xl flex-col pb-[calc(var(--altezza-compositore,8rem)+0.75rem)] pt-4 md:block md:min-h-0 md:pb-44'
+              : 'mx-auto max-w-3xl pb-[calc(var(--altezza-compositore,14rem)+1.5rem)] pt-4 md:pb-44'
+          }
+        >
           {vuoto ? (
-            <EmptyState onSelectPrompt={onSelectPrompt} />
+            <EmptyState onSelectPrompt={onSelectPrompt} nomeUtente={nomeUtente} />
           ) : (
             <div className="space-y-3">
               {messages.map((msg, index) => (
@@ -119,16 +135,20 @@ export const MessageList: React.FC<MessageListProps> = ({
         </div>
       </div>
 
-      {/* Il ritorno in fondo, solo quando si e' risaliti. Sta sopra l'area di
-          scrittura e sotto il pollice, dove la mano gia' e'. */}
+      {/* Il ritorno in fondo, solo quando si e' risaliti. Appoggiato sopra
+          l'area di scrittura, qualunque altezza abbia: prima stava a 7,5rem
+          fissi dal fondo, e quando il segnaposto andava su due righe la
+          pillola finiva sopra il riquadro, coprendo il testo. Sul telefono e'
+          un cerchio con la freccia, come nell'app di Claude; sul desktop
+          resta la pillola con la scritta. */}
       {!vuoto && !aFondo && (
         <button
           onClick={() => scendi()}
-          className="frase-in absolute bottom-[calc(7.5rem+env(safe-area-inset-bottom))] left-1/2 z-20 flex h-10 -translate-x-1/2 items-center gap-1.5 rounded-full border border-line-2 bg-canvas px-4 text-[13px] font-medium text-ink shadow-[0_10px_28px_-12px_rgba(12,27,38,0.4)] transition-transform duration-200 active:scale-[0.96] md:bottom-[7rem]"
+          className="frase-in absolute bottom-[calc(var(--altezza-compositore,8rem)+0.75rem)] left-1/2 z-20 flex h-10 w-10 -translate-x-1/2 items-center justify-center gap-1.5 rounded-full border border-line-2 bg-foglio text-[13px] font-medium text-ink shadow-[0_10px_28px_-12px_rgba(12,27,38,0.4)] transition-transform duration-200 active:scale-[0.96] md:w-auto md:px-4"
           aria-label="Torna in fondo alla conversazione"
         >
           <ArrowDown className="h-4 w-4" strokeWidth={2} />
-          {loading ? 'Sta rispondendo' : 'Torna in fondo'}
+          <span className="max-md:sr-only">{loading ? 'Sta rispondendo' : 'Torna in fondo'}</span>
         </button>
       )}
     </div>

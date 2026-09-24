@@ -76,7 +76,7 @@ export const SourceDrawer: React.FC<SourceDrawerProps> = ({ source, onClose }) =
       <button
         aria-label="Chiudi la fonte"
         onClick={onClose}
-        className="veil-in fixed inset-0 z-40 bg-ink/20 backdrop-blur-[2px]"
+        className="veil-in fixed inset-0 z-40 bg-velo/20 backdrop-blur-[2px] max-md:bg-velo/45 max-md:backdrop-blur-none"
       />
 
       <aside
@@ -110,10 +110,20 @@ export const SourceDrawer: React.FC<SourceDrawerProps> = ({ source, onClose }) =
             <div className="mb-1 font-mono text-[11px] uppercase tracking-[0.12em] text-ink-3">Testo ufficiale</div>
             <div className="font-mono text-[14px] font-medium text-ink">
               {source.norma}
-              <span className="text-ink-3"> · art. </span>
-              {source.articolo}
-              <span className="text-ink-3"> · comma </span>
-              {source.comma}
+              {/* Citato l'atto intero, articolo e comma sono "-": si mostrava
+                  "art. - · comma -", che non dice niente e sembra un guasto. */}
+              {String(source.articolo) !== '-' && (
+                <>
+                  <span className="text-ink-3"> · art. </span>
+                  {source.articolo}
+                </>
+              )}
+              {String(source.comma) !== '-' && (
+                <>
+                  <span className="text-ink-3"> · comma </span>
+                  {source.comma}
+                </>
+              )}
             </div>
           </div>
           <button

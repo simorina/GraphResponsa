@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
-import { SquarePen, PanelLeft, LogOut, ArrowUpRight } from 'lucide-react';
+import { SquarePen, PanelLeft, LogOut, ArrowUpRight, Plus, ChevronUp, Moon, Sun } from 'lucide-react';
+import { useTema } from '../tema';
 import type { StatsState } from '../types';
 import type { VoceConversazione, Consumi, Profilo } from '../hooks/useConversazioni';
 import { Sigillo } from './Sigillo';
@@ -100,6 +101,11 @@ export const Sidebar: React.FC<SidebarProps> = ({
   // quanto manca, perche' una durata calcolata la' invecchia mentre si guarda
   // la pagina. Mezzo minuto basta: si mostrano i minuti.
   const [adesso, setAdesso] = useState(() => Date.now());
+  // Sul telefono i contatori stanno dietro al profilo, come nell'app di
+  // Claude: aperti sempre, prendevano meta' del cassetto e schiacciavano lo
+  // storico, che e' la ragione per cui lo si apre.
+  const [dettagli, setDettagli] = useState(false);
+  const [tema, cambiaTema] = useTema();
   useEffect(() => {
     const t = setInterval(() => setAdesso(Date.now()), 30_000);
     return () => clearInterval(t);
@@ -107,15 +113,19 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
   return (
     <aside
+      /* Chiusa, la barra e' inerte: resta nel DOM - larga zero sul desktop,
+         fuori schermo sul telefono - e senza questo il tasto Tab ci entrava,
+         fermandosi su pulsanti che non si vedono. */
+      inert={!isOpen}
       /* pl con l'inset: in orizzontale il notch sta a sinistra, cioe'
          esattamente sopra questo pannello. */
-      className={`fixed inset-y-0 left-0 z-40 flex h-[100dvh] flex-col border-r border-line bg-panel pl-[env(safe-area-inset-left)] transition-[width,transform] duration-300 ease-[cubic-bezier(0.16,1,0.3,1)] md:static md:pl-0 ${
+      className={`fixed inset-y-0 left-0 z-40 flex h-[100dvh] flex-col border-r border-line bg-panel pl-[env(safe-area-inset-left)] transition-[width,transform] duration-300 ease-[cubic-bezier(0.16,1,0.3,1)] max-md:w-[min(86vw,340px)] max-md:border-r-0 md:static md:pl-0 ${
         isOpen
           ? 'w-[272px] translate-x-0'
           : 'w-[272px] -translate-x-full md:w-0 md:translate-x-0 md:overflow-hidden md:border-r-0'
       }`}
     >
-      <div className="flex h-full w-[272px] flex-col">
+      <div className="flex h-full w-[272px] flex-col max-md:w-full">
         <div className="flex h-14 shrink-0 items-center justify-between px-3">
           <div className="flex items-center gap-2.5 pl-1.5">
             <Sigillo className="h-[18px] w-[18px]" />
@@ -136,10 +146,13 @@ export const Sidebar: React.FC<SidebarProps> = ({
         <div className="px-3">
           <button
             onClick={onNewChat}
-            className="group flex w-full items-center gap-2.5 rounded-xl border border-line-2 bg-canvas px-3 py-2.5 text-[14px] font-semibold text-ink shadow-[0_1px_2px_rgba(12,27,38,0.06)] transition-all duration-200 ease-[cubic-bezier(0.16,1,0.3,1)] hover:border-azzurro hover:shadow-[0_3px_10px_-2px_rgba(12,27,38,0.12)] active:translate-y-px active:shadow-none"
+            className="group flex w-full items-center gap-2.5 rounded-xl border border-line-2 bg-canvas px-3 py-2.5 text-[14px] font-semibold text-ink shadow-[0_1px_2px_rgba(12,27,38,0.06)] transition-all duration-200 ease-[cubic-bezier(0.16,1,0.3,1)] hover:border-azzurro hover:shadow-[0_3px_10px_-2px_rgba(12,27,38,0.12)] active:translate-y-px active:shadow-none max-md:gap-3 max-md:border-0 max-md:bg-transparent max-md:px-2 max-md:py-2 max-md:text-[15.5px] max-md:shadow-none"
           >
+            <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-azzurro text-canvas md:hidden">
+              <Plus className="h-4 w-4" strokeWidth={2.25} />
+            </span>
             <SquarePen
-              className="h-4 w-4 text-azzurro transition-transform duration-300 ease-[cubic-bezier(0.16,1,0.3,1)] group-hover:-translate-y-px"
+              className="h-4 w-4 text-azzurro transition-transform duration-300 ease-[cubic-bezier(0.16,1,0.3,1)] group-hover:-translate-y-px max-md:hidden"
               strokeWidth={1.75}
             />
             Nuova consultazione
@@ -160,28 +173,30 @@ export const Sidebar: React.FC<SidebarProps> = ({
               browser.
             </p>
           ) : (
-            <ul className="space-y-0.5">
+            <>
+              <p className="mb-1.5 px-2 text-[13px] font-medium text-ink-3 md:hidden">Recenti</p>
+              <ul className="space-y-0.5">
               {voci.map((v, i) => {
                 const attiva = v.conversazione === conversazioneAperta;
                 return (
                   <li key={v.conversazione}>
                     <button
                       onClick={() => onApri(v.conversazione)}
-                      className={`slide-in group flex w-full flex-col gap-0.5 rounded-xl px-3 py-2 text-left transition-colors duration-200 ${
+                      className={`slide-in group flex w-full flex-col gap-0.5 rounded-xl px-3 py-2 text-left transition-colors duration-200 max-md:border-l-0 max-md:px-2 max-md:py-2.5 ${
                         attiva
-                          ? 'border-l-[3px] border-azzurro bg-canvas shadow-[0_1px_3px_rgba(12,27,38,0.08)]'
+                          ? 'border-l-[3px] border-azzurro bg-canvas shadow-[0_1px_3px_rgba(12,27,38,0.08)] max-md:bg-raise max-md:shadow-none'
                           : 'border-l-[3px] border-transparent hover:bg-raise'
                       }`}
                       style={{ ['--i' as string]: Math.min(i, 10) }}
                     >
                       <span
-                        className={`truncate text-[13.5px] leading-snug ${
+                        className={`truncate text-[13.5px] leading-snug max-md:text-[15px] ${
                           attiva ? 'font-semibold text-ink' : 'text-ink-2 group-hover:text-ink'
                         }`}
                       >
                         {v.titolo || 'Consultazione'}
                       </span>
-                      <span className="font-mono text-[11px] text-ink-3">
+                      <span className="font-mono text-[11px] text-ink-3 max-md:hidden">
                         {quando(v.aggiornata)}
                       </span>
                     </button>
@@ -189,6 +204,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                 );
               })}
             </ul>
+            </>
           )}
         </div>
 
@@ -199,6 +215,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
               quindi si puo' finire la spesa del mese con la giornata ancora
               quasi intatta - e senza entrambe le barre non si capirebbe
               perche' il servizio si e' fermato. */}
+          <div id="dettagli-consumi" className={dettagli ? 'max-md:pb-1' : 'max-md:hidden'}>
           {consumi && (
             <div className="mb-3">
               <Barra
@@ -249,12 +266,63 @@ export const Sidebar: React.FC<SidebarProps> = ({
               strokeWidth={1.75}
             />
           </a>
+          </div>
 
-          {utente && (
-            <div className="mt-3.5 flex items-center justify-between gap-2 border-t border-line pt-3">
-              <span className="truncate text-[12.5px] font-medium text-ink-2" title={utente.email}>
+          <div
+            className={`flex items-center justify-between gap-2 md:mt-3.5 md:border-t md:border-line md:pt-3 ${
+              dettagli ? 'max-md:mt-3.5 max-md:border-t max-md:border-line max-md:pt-3' : ''
+            }`}
+          >
+            {utente ? (<>
+              {/* Sul telefono: chi sei e quanto hai usato oggi; un tocco apre i
+                  contatori. Sul desktop resta la riga con l'indirizzo. */}
+              <button
+                type="button"
+                onClick={() => setDettagli((v) => !v)}
+                aria-expanded={dettagli}
+                aria-controls="dettagli-consumi"
+                className="flex min-h-11 min-w-0 flex-1 items-center gap-3 rounded-xl text-left md:hidden"
+              >
+                <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-ink text-[15px] font-semibold text-canvas">
+                  {(utente.nome || utente.email || '?').trim().charAt(0).toUpperCase()}
+                </span>
+                <span className="min-w-0 flex-1">
+                  <span className="block truncate text-[15px] font-medium text-ink">
+                    {utente.nome || utente.email}
+                  </span>
+                  {consumi && (
+                    <span className="block truncate text-[12.5px] text-ink-3">
+                      {consumi.richiesteOggi} di {consumi.limiteGiorno} oggi
+                    </span>
+                  )}
+                </span>
+                <ChevronUp
+                  className={`h-4 w-4 shrink-0 text-ink-3 transition-transform duration-200 ${dettagli ? 'rotate-180' : ''}`}
+                  strokeWidth={1.75}
+                />
+              </button>
+              <span className="truncate text-[12.5px] font-medium text-ink-2 max-md:hidden" title={utente.email}>
                 {utente.email}
               </span>
+            </>) : (
+              <span className="flex-1" />
+            )}
+
+            <div className="flex shrink-0 items-center">
+              {/* Chiaro o scuro, scelto a mano: si parte chiari. */}
+              <button
+                onClick={cambiaTema}
+                title={tema === 'scuro' ? 'Passa al tema chiaro' : 'Passa al tema scuro'}
+                aria-label={tema === 'scuro' ? 'Passa al tema chiaro' : 'Passa al tema scuro'}
+                className="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg text-ink-2 transition-colors duration-200 hover:bg-raise hover:text-ink active:translate-y-px md:h-9 md:w-9"
+              >
+                {tema === 'scuro' ? (
+                  <Sun className="h-4 w-4" strokeWidth={1.75} />
+                ) : (
+                  <Moon className="h-4 w-4" strokeWidth={1.75} />
+                )}
+              </button>
+              {utente && (
               <button
                 onClick={esci}
                 title="Esci"
@@ -263,8 +331,9 @@ export const Sidebar: React.FC<SidebarProps> = ({
               >
                 <LogOut className="h-4 w-4" strokeWidth={1.75} />
               </button>
+              )}
             </div>
-          )}
+          </div>
         </div>
       </div>
     </aside>
