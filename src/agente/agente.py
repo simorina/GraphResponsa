@@ -42,6 +42,57 @@ load_dotenv(ROOT / ".env")
 # le rispetta. Costa il doppio per token (vedi PREZZI) e scrive risposte piu'
 # lunghe: il server tiene viva la connessione durante l'attesa (BATTITO).
 MODELLO = os.environ.get("MODELLO", "claude-sonnet-5")
+# Il fornitore lo sceglie il nome del modello: "gemini-..." dall'API di Google,
+# tutto il resto da Anthropic, e in mezzo il gateway OpenAI-compatibile di
+# Alibaba Model Studio, che serve modelli di case diverse - Qwen, DeepSeek,
+# Kimi, GLM - dietro la stessa chiave e lo stesso URL. Per questo il fornitore
+# qui e' il GATEWAY e non la casa che ha fatto il modello. Istruzioni, strumenti
+# e potatura restano gli stessi, cosi' il confronto e' a parita' di tutto.
+SUL_GATEWAY = ("qwen", "deepseek", "kimi", "glm")
+
+
+def fornitore_di(nome):
+    if nome.startswith("gemini"):
+        return "google"
+    return "alibaba" if nome.startswith(SUL_GATEWAY) else "anthropic"
+
+
+FORNITORE = fornitore_di(MODELLO)
+# I tenant regionali hanno host diversi, quindi si cambia dall'ambiente senza
+# toccare il codice.
+QWEN_BASE = os.environ.get("QWEN_BASE_URL",
+                           "https://maas.qwencloudapi.com/compatible-mode/v1")
+# Quanto far ragionare i modelli del gateway prima di scrivere. Lasciati a se'
+# stessi pensano moltissimo: misurato il 24/09 su deepseek-v4.1-flash, tre giri
+# per livello sulla stessa richiesta, temperatura 0 e tetto largo -
+#
+#   nessuna leva  40,1s   4.317 token di pensiero   risposta 2.649 caratteri
+#   minimal       31,6s   2.175                              2.746
+#   low           29,1s   2.286                              2.647
+#   medium        30,4s   2.563                              2.493
+#   high          43,1s   4.645 (molto variabile)            2.780
+#   niente pensiero 13,6s     0                              2.469
+#
+# - cioe' il pensiero e' quasi tutto il tempo e quasi tutta l'uscita, che si
+# paga a prezzo pieno. "medium" lo dimezza senza accorciare la risposta.
+# Spegnerlo del tutto e' tre volte piu' veloce, ma su un assistente giuridico
+# non si toglie il ragionamento senza misurare prima cosa succede alle fonti.
+RAGIONAMENTO = os.environ.get("RAGIONAMENTO", "medium")
+# A chi passare quando il gateway rifiuta il contenuto, in ordine. Serve solo
+# partendo dal gateway, perche' e' li' che vive quel filtro; si spegne mettendo
+# MODELLO_RISERVA vuoto nell'ambiente, o si cambia con una lista separata da
+# virgole.
+#
+# L'ultimo anello sta FUORI dal gateway, e non per prudenza generica: il 24/09
+# il filtro ha respinto anche deepseek-v4-pro-0813, sulla stessa domanda a cui
+# aveva risposto poco prima. Non e' un difetto di un modello, e' intermittente
+# e vale per tutta la piattaforma, quindi una riserva interna puo' cadere allo
+# stesso modo. Sonnet costa dieci volte tanto, ma paga solo nei rari casi in
+# cui il filtro scatta, e garantisce che la domanda riceva una risposta.
+RISERVE = [n.strip() for n in os.environ.get(
+    "MODELLO_RISERVA",
+    "deepseek-v4-pro-0813,claude-sonnet-5" if FORNITORE == "alibaba" else ""
+).split(",") if n.strip() and n.strip() != MODELLO]
 # ChatAnthropic non manda la temperatura se non gliela si da', e l'API allora
 # usa la propria: 1.0, cioe' il massimo campionamento casuale. Su un assistente
 # giuridico e' la scelta peggiore possibile - la stessa domanda deve dare la
@@ -49,6 +100,9 @@ MODELLO = os.environ.get("MODELLO", "claude-sonnet-5")
 # Si puo' alzare con TEMPERATURA nell'ambiente, per confrontare gli assetti.
 TEMPERATURA = float(os.environ.get("TEMPERATURA", "0"))
 ACCETTANO_TEMPERATURA = {"claude-haiku-4-5"}
+# Su Gemini la temperatura la ascoltano i 2.5 e i flash-lite; dal 3.5 in su
+# il campionamento e' fisso.
+ASCOLTANO_TEMPERATURA = re.compile(r"gemini-(2\.5|3\.1-flash-lite)")
 
 MAX_GIRI = 12   # Ogni chiamata a uno strumento consuma DUE passi del grafo
                 # (nodo modello + nodo strumenti), quindi il tetto vero e'
@@ -58,13 +112,73 @@ MAX_GIRI = 12   # Ogni chiamata a uno strumento consuma DUE passi del grafo
                 # GraphRecursionError invece di rispondere. Un'interruzione
                 # costa all'utente tutto, un giro in piu' costa mezzo
                 # centesimo.
+                #
+                # Il tetto conta PASSI DEL GRAFO, non chiamate, e quanto
+                # lavoro ci stia dentro dipende dal modello. Sonnet lancia due
+                # o tre strumenti insieme nello stesso turno: cinque chiamate
+                # gli costano otto passi. Gemini ne chiama uno per volta -
+                # misurati quattordici turni di fila il 23/09, mai due insieme
+                # - quindi con lo stesso tetto arriva a dodici chiamate e si
+                # ferma li'. Non e' che ragioni peggio: gli serve il doppio
+                # dei passi per fare lo stesso lavoro, e glieli diamo.
+                # Qwen invece li raggruppa come Sonnet - due per turno,
+                # misurato il 24/09 - e con la stessa domanda ha chiuso in due
+                # giri: gli basta il moltiplicatore normale.
 SEPARATORE = "\n\n"
 
-# Prezzi per milione di token, per la stima mostrata nella UI.
+# Quanto costa rileggere un token dalla cache, in frazione del prezzo
+# d'ingresso. Su Anthropic e' un decimo, dichiarato. Su Qwen il listino distingue
+# due cache: quella esplicita, che si rilegge a un decimo ($0,032 su $0,32), e
+# quella IMPLICITA, che e' quella che ci tocca perche' non creiamo oggetti di
+# cache a mano, e costa $0,064, cioe' un quinto. Contarla a un decimo mostrerebbe
+# all'utente meta' del conto vero sulla parte riletta - lo stesso errore trovato
+# il 22/09 sulle scritture di Anthropic. Su Gemini il listino di 3.5-flash da'
+# $0,15 su $1,50, quindi un decimo; per i flash 3.6/3.7/3.8 Google non pubblica
+# la voce, e finche' non la pubblica tengo lo stesso rapporto.
+FATTORE_CACHE = {"anthropic": 0.10, "google": 0.10, "alibaba": 0.20}
+
+# Quanti passi del grafo costa una chiamata a uno strumento, che dipende da
+# quante ne lancia insieme il modello: chi le raggruppa spende meta' del tetto
+# di chi le fa una per volta. Vedi la misura sopra MAX_GIRI. Fuori da Anthropic
+# il tetto resta largo anche per chi le raggruppa - Qwen lo fa - perche' e' una
+# rete di sicurezza contro i cicli infiniti, non un budget da spendere: darne di
+# piu' non costa nulla a chi chiude in due giri, e toglie di mezzo il rischio di
+# tagliare la risposta a un modello nuovo che ancora non abbiamo misurato.
+PASSI_PER_CHIAMATA = {"anthropic": 2, "google": 4, "alibaba": 4}
+
+# Prezzi per milione di token, per la stima mostrata nella UI: ingresso,
+# uscita, e quanto costa rileggere un token dalla cache in frazione
+# dell'ingresso. Il terzo valore sta qui e non in FATTORE_CACHE perche' cambia
+# da modello a modello e non da fornitore: sullo stesso gateway, Qwen rilegge a
+# un quinto e DeepSeek a un dodicesimo. Si scrive come divisione per lasciare in
+# chiaro i due numeri del listino.
 PREZZI = {
-    "claude-haiku-4-5": (1.0, 5.0),
-    "claude-sonnet-5": (2.0, 10.0),
-    "claude-opus-5": (5.0, 25.0),
+    "claude-haiku-4-5": (1.0, 5.0, 0.10),
+    "claude-sonnet-5": (2.0, 10.0, 0.10),
+    "claude-opus-5": (5.0, 25.0, 0.10),
+    # Listino a pagamento di Google al 23/09/2026, per prompt sotto i 200k
+    # token: sopra, Pro raddoppia l'ingresso e alza l'uscita a 18.
+    # Sul gateway Alibaba, listini letti il 24/09/2026. Plus e' scontato del
+    # 20%; Max costa piu' di Sonnet in ingresso e meno in uscita; DeepSeek-Pro
+    # sta in mezzo ma rilegge la cache a un dodicesimo invece che a un quinto.
+    "qwen3.7-plus": (0.32, 1.28, 0.064 / 0.32),
+    "qwen3.7-max": (2.5, 7.5, 0.5 / 2.5),
+    "deepseek-v4-pro": (2.4, 4.8, 0.2 / 2.4),
+    "deepseek-v4-pro-0813": (2.4, 4.8, 0.2 / 2.4),
+    # Flash: sedici volte meno di Sonnet in uscita, e la cache a un decimo
+    # come Anthropic. Il listino e' quello di punta; fra le 22 e le 8 (UTC+8,
+    # cioe' fra le 16 e le 2 da noi) Alibaba applica uno sconto che non
+    # pubblica, quindi il conto mostrato puo' risultare piu' alto del vero.
+    "deepseek-v4.1-flash": (0.15, 0.6, 0.015 / 0.15),
+    # I flash 3.6/3.7/3.8 stanno in promozione fino al 31/12/2026: da gennaio
+    # raddoppiano, a (1.5, 7.5).
+    "gemini-3.8-flash": (0.75, 3.75, 0.10),
+    "gemini-3.7-flash": (0.75, 3.75, 0.10),
+    "gemini-3.6-flash": (0.75, 3.75, 0.10),
+    "gemini-3.5-flash": (1.5, 9.0, 0.15 / 1.5),
+    "gemini-3.1-pro-preview": (2.0, 12.0, 0.2 / 2.0),
+    "gemini-2.5-flash": (0.3, 2.5, 0.03 / 0.3),
+    "gemini-2.5-pro": (1.25, 10.0, 0.125 / 1.25),
 }
 
 ISTRUZIONI = """Sei un assistente esperto della normativa della Repubblica di San Marino.
@@ -102,6 +216,9 @@ Rispondi solo con cio' che leggi nel grafo della normativa, tramite gli strument
 - Il marcatore punta al passo da cui viene il dato: un requisito letto al
   comma 18 si cita al comma 18, e un atto nominato nel suo insieme non si cita
   all'art. 1.
+- Il numero d'articolo scritto in prosa e quello dentro il marcatore sono lo
+  stesso numero. Se scrivi "art. 33" il marcatore dice `:33:`, mai un altro
+  articolo: una fonte che non si puo' aprire e' peggio di nessuna fonte.
 - Un marcatore per dato, non per frase: se piu' frasi di seguito vengono dallo
   stesso comma, mettilo una volta, alla fine del gruppo.
 - Ogni atto che nomini ha il suo marcatore, e il marcatore vale solo per cio'
@@ -335,21 +452,70 @@ def _checkpointer():
 
 
 _memoria = None
-_agente = None
+_agenti = {}
 
 
-def agente():
-    global _agente, _memoria
-    if _agente is None:
-        _memoria = _checkpointer()
+def agente(nome=None):
+    """L'agente per un modello, costruito una volta sola e tenuto da parte.
+
+    Il nome serve alla riserva: due agenti diversi sullo stesso checkpointer,
+    cosi' il secondo vede la conversazione che il primo ha lasciato a meta'.
+    """
+    global _memoria
+    nome = nome or MODELLO
+    if nome not in _agenti:
+        _memoria = _memoria or _checkpointer()
         # La temperatura si manda solo dove il modello la accetta: su Sonnet 5
         # e Opus 5 il parametro e' deprecato e l'API rifiuta la richiesta con
         # un 400. Il campionamento la' lo governa il modello, non noi.
-        parametri = {"model": MODELLO, "max_tokens": 16000,
-                     "api_key": os.environ["ANTHROPIC_API_KEY"]}
-        if MODELLO in ACCETTANO_TEMPERATURA:
-            parametri["temperature"] = TEMPERATURA
-        modello = ChatAnthropic(**parametri)
+        if fornitore_di(nome) == "google":
+            # L'import sta qui dentro e non in cima al file: il container di
+            # produzione non si porta langchain-google-genai finche' gira su
+            # Anthropic. Il tetto sull'uscita la' si chiama max_output_tokens.
+            #
+            # Dal 3.5 in poi il campionamento e' fisso e la temperatura viene
+            # ignorata: la libreria lo dice con un warning a ogni chiamata, che
+            # su una domanda sola sono dieci righe di rumore nei log. Gliela si
+            # manda solo dove viene ascoltata - e dove non lo e', la risposta
+            # alla stessa domanda puo' cambiare, cosa che su Sonnet non accade.
+            from langchain_google_genai import ChatGoogleGenerativeAI
+            parametri = {"model": nome, "max_output_tokens": 16000,
+                         "google_api_key": os.environ["GEMINI_API_KEY"]}
+            if ASCOLTANO_TEMPERATURA.match(nome):
+                parametri["temperature"] = TEMPERATURA
+            modello = ChatGoogleGenerativeAI(**parametri)
+        elif fornitore_di(nome) == "alibaba":
+            # Gateway OpenAI-compatibile: ci si parla con ChatOpenAI cambiando
+            # base_url, non serve un pacchetto dedicato. La temperatura la'
+            # arriva e viene rispettata, quindi gliela si manda sempre.
+            #
+            # La chiave: QWEN_API_KEY, o DASHSCOPE_API_KEY come la chiama la
+            # documentazione di Model Studio.
+            # Il tetto sull'uscita passa da extra_body e non da max_tokens,
+            # perche' langchain-openai traduce max_tokens nel campo nuovo di
+            # OpenAI, `max_completion_tokens`, e sul gateway di Alibaba i due
+            # campi NON sono sinonimi. Misurato il 24/09 chiedendo venti citta'
+            # con tetto 40:
+            #   max_tokens=40            -> 977 token, di cui 933 di pensiero,
+            #                               e la risposta visibile c'e'.
+            #   max_completion_tokens=40 -> 40 token, tutti di pensiero,
+            #                               e la risposta visibile e' VUOTA.
+            # Qwen3.7 ragiona prima di scrivere: col campo nuovo il tetto conta
+            # anche il pensiero, e un tetto stretto restituisce il nulla. Con
+            # `max_tokens` il tetto vale sulla risposta, che e' cio' che
+            # vogliamo limitare.
+            from langchain_openai import ChatOpenAI
+            chiave = os.environ.get("QWEN_API_KEY") or os.environ["DASHSCOPE_API_KEY"]
+            modello = ChatOpenAI(model=nome, temperature=TEMPERATURA,
+                                 base_url=QWEN_BASE, api_key=chiave,
+                                 reasoning_effort=RAGIONAMENTO,
+                                 extra_body={"max_tokens": 16000})
+        else:
+            parametri = {"model": nome, "max_tokens": 16000,
+                         "api_key": os.environ["ANTHROPIC_API_KEY"]}
+            if nome in ACCETTANO_TEMPERATURA:
+                parametri["temperature"] = TEMPERATURA
+            modello = ChatAnthropic(**parametri)
 
         # --- Prompt caching ---
         #
@@ -375,11 +541,19 @@ def agente():
         # che lo precede nella richiesta - gli schemi degli strumenti stanno
         # prima del system - quindi un solo punto di rottura copre l'intero
         # prefisso.
-        istruzioni = SystemMessage(content=[{
-            "type": "text",
-            "text": ISTRUZIONI,
-            "cache_control": {"type": "ephemeral"},
-        }])
+        if fornitore_di(nome) == "anthropic":
+            istruzioni = SystemMessage(content=[{
+                "type": "text",
+                "text": ISTRUZIONI,
+                "cache_control": {"type": "ephemeral"},
+            }])
+        else:
+            # Fuori da Anthropic la cache non si marca: su Gemini e su Qwen e'
+            # implicita, la decide il fornitore quando riconosce un prefisso
+            # gia' visto, e `cache_control` qui sarebbe un blocco di contenuto
+            # sconosciuto. In cambio non la governiamo: misurato su Gemini, il
+            # prefisso si ripaga quasi intero a ogni giro.
+            istruzioni = SystemMessage(content=ISTRUZIONI)
 
         # Il marcatore sul system copre solo il prefisso fisso. Il resto - la
         # cronologia, che a ogni giro del ciclo si rispedisce intera con i
@@ -400,14 +574,17 @@ def agente():
         # ContextEditingMiddleware: quello riscrive la conversazione e quindi
         # obbliga a riscrivere la cache, e provato il 21/09 faceva salire la
         # prima domanda da 0,156 a 0,256 dollari.
-        _agente = create_agent(
+        _agenti[nome] = create_agent(
             model=modello,
             tools=STRUMENTI,
             system_prompt=istruzioni,
             checkpointer=_memoria,
-            middleware=[PotaturaFraDomande(), AnthropicPromptCachingMiddleware(ttl="5m")],
+            # La potatura fra le domande vale per tutti i fornitori; il
+            # middleware della cache no, e' Anthropic e basta.
+            middleware=([PotaturaFraDomande(), AnthropicPromptCachingMiddleware(ttl="5m")]
+                        if fornitore_di(nome) == "anthropic" else [PotaturaFraDomande()]),
         )
-    return _agente
+    return _agenti[nome]
 
 
 def nuova_conversazione() -> str:
@@ -430,9 +607,14 @@ RE_ID_NORMA = re.compile(r"\b([A-Z]{1,3})-(-?\d+|None)-(\d{4})\b")
 # I nomi composti vanno prima: "Decreto Delegato 50/2010" e "Legge Qualificata
 # n. 1 del 2012" non si leggevano, perche' dopo "Decreto" o "Legge" veniva una
 # parola invece del numero.
+# Le forme lunghe stanno prima delle abbreviazioni, e fra le abbreviazioni
+# "d.d." e "d.l." prima di "d." da sola, altrimenti un Decreto Delegato
+# verrebbe letto come Decreto. "d." mancava: le risposte che scrivono
+# "D. 43/1995" - forma normale per un Decreto - sfuggivano a ogni controllo
+# sulle citazioni, ed e' cosi' che il 24/09 e' passata una fonte inventata.
 TIPO = (r"(?:legge[\s\u00a0]+(?:qualificata|costituzionale)"
         r"|decreto[\s\u00a0-]+(?:delegato|legge|reggenziale|consiliare)"
-        r"|legge|l\.|lq\.?|lc\.?|d\.l\.|dl\.?|d\.d\.|dd\.?|decreto"
+        r"|legge|l\.|lq\.?|lc\.?|d\.l\.|dl\.?|d\.d\.|dd\.?|d\.|decreto"
         r"|regolamento|reg\.|r\.)")
 CITAZIONI = [
     # Un marcatore di tipo davanti al numero e' obbligatorio nella forma con la
@@ -829,6 +1011,111 @@ def _citazioni_non_verificate(testo, norme_viste):
     return fuori
 
 
+# L'articolo citato in prosa subito prima di un marcatore: "art. 33",
+# "articolo 7, comma 2", "art. all2-30, comma 4". Deve contenere una cifra:
+# "dell'articolo precedente" e' testo di legge citato, non un riferimento,
+# e senza questa condizione faceva scattare un allarme falso.
+RE_ARTICOLO_PRIMA = re.compile(
+    r"art(?:\.|icolo)?[\s\u00a0]*([\w][\w\-\.]{0,14}?)"
+    r"(?:[\s\u00a0]*,?[\s\u00a0]*comma[\s\u00a0]*[\w\-\.]+)?[\s\u00a0]*$",
+    re.I)
+
+
+# "all-36" e' l'articolo 36 dell'allegato, "all2-30" il 30 dell'allegato 2:
+# e' l'id del grafo, e la prosa lo scrive "allegato, art. 36".
+RE_ALLEGATO = re.compile(r"^all\d*-")
+
+
+def _stessa_voce(detto, marcato):
+    a = (detto or "").strip().lower().lstrip("0")
+    b = (marcato or "").strip().lower().lstrip("0")
+    # Si accetta anche il numero nudo contro l'id d'allegato. Si perde il caso
+    # in cui un atto abbia sia l'art. 36 nel corpo sia il 36 in allegato e il
+    # modello confonda i due: e' un prezzo basso, perche' l'alternativa e' un
+    # allarme falso su OGNI citazione d'allegato, e qui un falso costa piu' di
+    # una segnalazione mancata.
+    return a == b or a == RE_ALLEGATO.sub("", b)
+
+
+def _citazioni_discordi(testo):
+    """Dove la prosa e il marcatore attaccato non dicono la stessa cosa.
+
+    Il controllo sopra guarda l'ATTO - quello e' stato letto o no - e non vede
+    il caso peggiore: atto vero, articolo inventato. Successo il 24/09 con
+    Qwen, che ha scritto "D. 63/1995, art. 33" e poi il marcatore
+    `{{cita:D-63-1995:18:2}}`: l'art. 33 non esiste (il decreto finisce al 18)
+    e il 18 comma 2 parla della composizione del Consiglio. Chi legge clicca e
+    trova un'altra norma, o niente.
+
+    Vale anche per il NUMERO DELL'ATTO, sbagliato due volte nella stessa
+    risposta: "D. 43/1995 (Ingegneri e Architetti)" col marcatore a D-63-1995,
+    e "DD. 145/2014 (Periti Industriali)" col marcatore a DD-173-2014. Il
+    controllo sull'atto letto non li vede, perche' entrambi gli atti erano
+    stati consultati davvero: e' l'abbinamento a essere inventato.
+
+    Deterministico come l'altro: non giudica se la citazione sia pertinente,
+    confronta numeri che il modello ha scritto lui. Si guarda solo il testo
+    ATTACCATO al marcatore - la forma che le istruzioni prescrivono - perche'
+    un atto o un articolo nominati a meta' frase possono legittimamente essere
+    altri. Per la stessa prudenza il confronto sull'atto si ferma davanti a un
+    punto fermo: oltre, e' un'altra frase.
+    """
+    fuori = []
+    for m in RE_MARCATORE_PARTI.finditer(testo or ""):
+        articolo = (m.group(2) or "").strip()
+        if not articolo or articolo == "-":
+            continue
+        # Il tratto che appartiene a QUESTO marcatore: dalla fine del
+        # precedente, e non oltre l'a capo.
+        prima = testo[:m.start()].rsplit("}}", 1)[-1].rsplit("\n", 1)[-1]
+        detto = RE_ARTICOLO_PRIMA.search(prima)
+        if detto and not any(c.isdigit() for c in detto.group(1)):
+            detto = None
+        testa = prima[:detto.start()] if detto else prima
+        # L'articolo si confronta solo se un atto e' nominato prima di lui: e'
+        # la forma prescritta dalle istruzioni. Un "art. 57" senza atto davanti
+        # e' un rinvio dentro al testo di legge - "punito con le pene del primo
+        # comma dell'art. 57" - e confrontarlo col marcatore e' un falso.
+        if detto and _nomina_un_atto(testa) and not _stessa_voce(detto.group(1), articolo):
+            _aggiungi(fuori,
+                      f"{m.group(1)} art. {detto.group(1)} (il marcatore dice {articolo})")
+        _confronta_atto(fuori, testa, m.group(1))
+    return fuori
+
+
+def _nomina_un_atto(tratto):
+    """Se nel tratto compare un atto, in una qualunque delle forme scritte."""
+    return any(e.search(tratto or "") for e in CITAZIONI)
+
+
+def _confronta_atto(fuori, prima, marcato):
+    """L'atto nominato in prosa subito prima, contro quello del marcatore."""
+    id_marcato = RE_ID_NORMA.search(marcato or "")
+    if not id_marcato or id_marcato.group(2) == "None":
+        return
+    # Solo la forma "numero/anno", non quelle con la data estesa, e non e' una
+    # svista: "D. 23 febbraio 1996 n. 20, art. 59{{cita:D-32-1996:59:-}}" e'
+    # CORRETTO - il D-20-1996 e' il decreto sull'Ordine dei Medici e il
+    # D-32-1996 e' la ratifica che ne porta il testo, quindi il numero in prosa
+    # e quello del marcatore divergono per forza. Allargare il confronto alle
+    # forme con la data farebbe scattare un allarme su ogni atto ratificato.
+    finestra = prima[-90:]
+    ultimo = None
+    for nominato in CITAZIONI[0].finditer(finestra):
+        ultimo = nominato
+    if not ultimo or ". " in finestra[ultimo.end():]:
+        return
+    if (_stessa_voce(ultimo.group(1), id_marcato.group(2))
+            and ultimo.group(2) == id_marcato.group(3)):
+        return
+    _aggiungi(fuori, f"{ultimo.group(0).strip()} (il marcatore dice {marcato})")
+
+
+def _aggiungi(fuori, etichetta):
+    if etichetta not in fuori:
+        fuori.append(etichetta)
+
+
 def _fonti_da(nome_strumento, risultato):
     """Estrae dai risultati i riferimenti da mostrare come fonti nella UI."""
     fonti = []
@@ -971,6 +1258,39 @@ def _testo_di(messaggio):
     return ""
 
 
+def _rifiuto_di_contenuto(errore):
+    """Il gateway ha respinto la richiesta per il suo filtro sui contenuti.
+
+    Succede su deepseek-v4.1-flash con domande del tutto normali - misurata il
+    24/09 su "quali incentivi sono previsti per i giovani imprenditori", due
+    tentativi su due - e non e' un problema di rete: ritentare lo stesso
+    modello da' lo stesso rifiuto.
+    """
+    return "data_inspection_failed" in str(errore)
+
+
+def _flusso(config, ingresso, passa_a_riserva, stream_mode=None):
+    """Gli aggiornamenti del grafo, scorrendo le riserve se il filtro ci ferma.
+
+    Le riserve riprendono con `None`: LangGraph riparte dal checkpoint, quindi
+    le ricerche gia' fatte non si rifanno e non si ripagano. Si passa oltre
+    solo per il rifiuto del filtro: un errore di rete o il tetto dei giri
+    devono restare visibili, non nascondersi dietro un cambio di modello.
+    """
+    catena = [(MODELLO, ingresso)] + [(nome, None) for nome in RISERVE]
+    for posto, (nome, ingresso_suo) in enumerate(catena):
+        if posto:
+            passa_a_riserva(nome)
+        try:
+            for pezzo in agente(nome).stream(ingresso_suo, config=config,
+                                             stream_mode=stream_mode):
+                yield pezzo
+            return
+        except Exception as e:
+            if not _rifiuto_di_contenuto(e) or posto == len(catena) - 1:
+                raise
+
+
 def rispondi(domanda, conversazione=None):
     """
     Genera eventi: {"tipo": ..., ...}
@@ -984,7 +1304,7 @@ def rispondi(domanda, conversazione=None):
     """
     conversazione = conversazione or nuova_conversazione()
     config = {"configurable": {"thread_id": conversazione},
-              "recursion_limit": MAX_GIRI * 2}
+              "recursion_limit": MAX_GIRI * PASSI_PER_CHIAMATA[FORNITORE]}
 
     fonti_raccolte, viste = [], set()
     # Le fonti dei turni precedenti: una domanda di seguito puo' rispondere
@@ -997,8 +1317,20 @@ def rispondi(domanda, conversazione=None):
     # Il grezzo di tutti i risultati: serve a stabilire quali norme il
     # modello ha davvero avuto sotto gli occhi.
     grezzo_strumenti = []
-    token_in = token_out = 0
-    token_letti = token_scritti = token_scritti_ora = 0
+    # Un conto per modello: se la riserva subentra a meta', i token del primo
+    # sono stati comunque consumati e vanno pagati al suo listino, non a quello
+    # della riserva.
+    conti = {}
+
+    def conto_di(nome):
+        return conti.setdefault(nome, dict(dentro=0, fuori=0, letti=0,
+                                           scritti=0, scritti_ora=0))
+
+    corrente = {"conto": conto_di(MODELLO), "modello": MODELLO}
+
+    def passa_a_riserva(nome):
+        corrente["conto"] = conto_di(nome)
+        corrente["modello"] = nome
     # I nomi arrivano con l'AIMessage, i risultati dopo col ToolMessage:
     # questa mappa li ricongiunge per id di chiamata.
     nomi_per_id = {}
@@ -1011,9 +1343,10 @@ def rispondi(domanda, conversazione=None):
     try:
         # `_modo` non serve piu' - resta perche' stream() con una lista di
         # modi restituisce comunque coppie (modo, pezzo).
-        for _modo, pezzo in agente().stream(
+        for _modo, pezzo in _flusso(
+            config,
             {"messages": [{"role": "user", "content": domanda}]},
-            config=config,
+            passa_a_riserva,
             # Solo "updates": il modo "messages" serviva a emettere il testo
             # frammento per frammento, e la risposta non si consegna piu' cosi'.
             # Gli eventi degli strumenti restano in diretta - misurate, le
@@ -1050,11 +1383,12 @@ def rispondi(domanda, conversazione=None):
                         scritti = d.get("cache_creation", 0) or 0
                         if cinque_min or un_ora:
                             scritti = 0      # gia' contati nelle due voci sopra
-                        token_in += uso.get("input_tokens", 0)
-                        token_letti += letti
-                        token_scritti += scritti + cinque_min
-                        token_scritti_ora += un_ora
-                        token_out += uso.get("output_tokens", 0)
+                        c = corrente["conto"]
+                        c["dentro"] += uso.get("input_tokens", 0)
+                        c["letti"] += letti
+                        c["scritti"] += scritti + cinque_min
+                        c["scritti_ora"] += un_ora
+                        c["fuori"] += uso.get("output_tokens", 0)
 
                     if type(messaggio).__name__ == "AIMessage":
                         scritto = _testo_di(messaggio)
@@ -1098,18 +1432,29 @@ def rispondi(domanda, conversazione=None):
     if fonti_raccolte:
         yield {"tipo": "fonti", "fonti": fonti_raccolte}
 
-    prezzo_in, prezzo_out = PREZZI.get(MODELLO, (5.0, 25.0))
-    # Scrivere in cache costa 1,25 volte; rileggere 0,10.
-    pieni = token_in - token_letti - token_scritti - token_scritti_ora
-    # Scrivere in cache costa 1,25 volte con la scadenza a 5 minuti e 2 volte
-    # con quella a un'ora; rileggere costa un decimo.
-    costo = ((pieni + token_scritti * 1.25 + token_scritti_ora * 2 + token_letti * 0.10)
-             / 1e6 * prezzo_in + token_out / 1e6 * prezzo_out)
-    sospette = _citazioni_non_verificate(
-        SEPARATORE.join(blocchi_testo), " ".join(grezzo_strumenti))
+    costo = 0.0
+    for nome, c in conti.items():
+        prezzo_in, prezzo_out, letto = PREZZI.get(
+            nome, (5.0, 25.0, FATTORE_CACHE[fornitore_di(nome)]))
+        pieni = c["dentro"] - c["letti"] - c["scritti"] - c["scritti_ora"]
+        # Scrivere in cache costa 1,25 volte con la scadenza a 5 minuti e 2
+        # volte con quella a un'ora: sono voci che solo Anthropic riporta, e
+        # fuori da la' restano a zero. La rilettura la fanno tutti, a fattori
+        # diversi.
+        costo += ((pieni + c["scritti"] * 1.25 + c["scritti_ora"] * 2 + c["letti"] * letto)
+                  / 1e6 * prezzo_in + c["fuori"] / 1e6 * prezzo_out)
+    token_in = sum(c["dentro"] for c in conti.values())
+    token_out = sum(c["fuori"] for c in conti.values())
+    token_letti = sum(c["letti"] for c in conti.values())
+    scritto = SEPARATORE.join(blocchi_testo)
+    sospette = (_citazioni_non_verificate(scritto, " ".join(grezzo_strumenti))
+                + _citazioni_discordi(scritto))
 
     yield {"tipo": "fine", "tokenIn": token_in, "tokenOut": token_out,
            "tokenDaCache": token_letti,
            "citazioniNonVerificate": sospette,
            "costo": round(costo, 4),
+           # Chi ha risposto davvero: se il filtro del gateway ci ha fermati,
+           # in fondo c'e' una riserva e il conto porta piu' di un listino.
+           "modello": corrente["modello"],
            "conversazione": conversazione}
