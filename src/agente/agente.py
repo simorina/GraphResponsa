@@ -83,15 +83,17 @@ RAGIONAMENTO = os.environ.get("RAGIONAMENTO", "medium")
 # MODELLO_RISERVA vuoto nell'ambiente, o si cambia con una lista separata da
 # virgole.
 #
-# L'ultimo anello sta FUORI dal gateway, e non per prudenza generica: il 24/09
-# il filtro ha respinto anche deepseek-v4-pro-0813, sulla stessa domanda a cui
-# aveva risposto poco prima. Non e' un difetto di un modello, e' intermittente
-# e vale per tutta la piattaforma, quindi una riserva interna puo' cadere allo
-# stesso modo. Sonnet costa dieci volte tanto, ma paga solo nei rari casi in
-# cui il filtro scatta, e garantisce che la domanda riceva una risposta.
+# Tre modelli via via piu' grossi, tutti sul gateway. Va saputo che questo NON
+# mette al riparo del tutto: il 24/09 il filtro ha respinto anche
+# deepseek-v4-pro-0813, sulla stessa domanda a cui aveva risposto poco prima,
+# quindi non e' il difetto di un modello ma un comportamento intermittente
+# della piattaforma, e un episodio puo' prendere tutti e tre gli anelli. Il
+# riparo vero e' un fornitore diverso in coda: basta
+# MODELLO_RISERVA="deepseek-v4-pro-0813,qwen3.8-max,claude-sonnet-5", e Sonnet
+# si paga solo nei rari casi in cui i primi due sono caduti.
 RISERVE = [n.strip() for n in os.environ.get(
     "MODELLO_RISERVA",
-    "deepseek-v4-pro-0813,claude-sonnet-5" if FORNITORE == "alibaba" else ""
+    "deepseek-v4-pro-0813,qwen3.8-max" if FORNITORE == "alibaba" else ""
 ).split(",") if n.strip() and n.strip() != MODELLO]
 # ChatAnthropic non manda la temperatura se non gliela si da', e l'API allora
 # usa la propria: 1.0, cioe' il massimo campionamento casuale. Su un assistente
@@ -163,6 +165,8 @@ PREZZI = {
     # sta in mezzo ma rilegge la cache a un dodicesimo invece che a un quinto.
     "qwen3.7-plus": (0.32, 1.28, 0.064 / 0.32),
     "qwen3.7-max": (2.5, 7.5, 0.5 / 2.5),
+    "qwen3.8-max": (2.0, 6.0, 0.25 / 2.0),
+    "qwen3.8-max-0902": (2.0, 6.0, 0.25 / 2.0),
     "deepseek-v4-pro": (2.4, 4.8, 0.2 / 2.4),
     "deepseek-v4-pro-0813": (2.4, 4.8, 0.2 / 2.4),
     # Flash: sedici volte meno di Sonnet in uscita, e la cache a un decimo
