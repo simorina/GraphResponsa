@@ -12,3 +12,15 @@ docs/superpowers/*
 old.txt
 .env.prima-tabelle-dev
 .env.prima-ec2
+
+handoff.md
+# Uscite degli script di misura del parser (scripts/baseline_*.py, misura_*, diag_*)
+data/qa_report_*
+data/raw_baseline_*
+data/parsed_baseline_*
+data/baseline_*.log
+data/esiti_*
+data/diag_*
+data/riclassifica_*
+data/misura_*
+data/campione_parsed_*
