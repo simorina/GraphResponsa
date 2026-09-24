@@ -111,6 +111,41 @@ body {
     cursor: pointer;
   }
 
+  /* Il lampo grigio che Android e iOS disegnano sopra ogni cosa toccata.
+     Si toglie perche' arriva dopo il tocco, squadrato e fuori dalla nostra
+     tavolozza, e copre per un istante l'elemento. Al suo posto il ritorno
+     tattile ce lo mettiamo noi con gli stati :active, che seguono la forma
+     dell'elemento e partono subito.
+
+     touch-action: manipulation toglie l'attesa di mezzo secondo con cui il
+     browser sta a vedere se il tocco diventa un doppio tocco per ingrandire:
+     su un pulsante quel ritardo si sente tutto. */
+  button, [role="button"], a, summary, label, input, textarea, select {
+    -webkit-tap-highlight-color: transparent;
+  }
+  button, [role="button"], a, summary, label {
+    touch-action: manipulation;
+  }
+
+  /* Tolto il lampo del browser, il ritorno alla pressione lo dobbiamo noi, e
+     `active:translate-y-px` - che basta col mouse - sotto un pollice non si
+     vede: il dito copre il pulsante proprio mentre si sposta di un pixel. Qui
+     si spegne un poco, come fa iOS: si vede anche da sotto il dito, non muove
+     niente e si compone con qualunque trasformazione l'elemento abbia gia'
+     (la pillola centrata, il foglio trascinato).
+
+     Solo dove non c'e' un puntatore che passa sopra: col mouse il passaggio
+     gia' racconta lo stato, e uno sbiadimento sarebbe di troppo. */
+  @media (hover: none) {
+    button:not(:disabled):active,
+    [role="button"]:not([aria-disabled="true"]):active,
+    a:active,
+    summary:active {
+      opacity: 0.6;
+      transition: opacity 60ms linear;
+    }
+  }
+
   /* Edge aggiunge il suo occhio al campo password, accanto al nostro: due
      pulsanti per la stessa cosa. Resta il nostro, che ha etichetta e stato. */
   input::-ms-reveal,

@@ -7,6 +7,7 @@ import { MessageList } from './components/MessageList';
 import { InputBar } from './components/InputBar';
 import { SourceDrawer } from './components/SourceDrawer';
 import { useChat } from './hooks/useChat';
+import { useChiusuraIndietro, useSchermoStretto } from './hooks/useMobile';
 import { useConversazioni, caricaConversazione } from './hooks/useConversazioni';
 import { Sigillo } from './components/Sigillo';
 import type { StatsState, Fonte } from './types';
@@ -17,6 +18,7 @@ type Sessione = 'verifica' | 'dentro' | 'fuori';
 const ACCESSO_CHIESTO = 'gr_accesso_chiesto';
 
 export function App() {
+  const stretto = useSchermoStretto();
   // Su telefono la barra laterale copre la chat: si parte chiusi, e la si apre
   // quando serve. Prima si partiva aperti ovunque, e la prima cosa da fare
   // entrando da telefono era chiuderla.
@@ -90,15 +92,19 @@ export function App() {
   const apri = useCallback(async (id: string) => {
     try {
       apriConversazione(id, await caricaConversazione(id));
-      if (window.innerWidth < 768) setSidebarOpen(false);
+      if (stretto) setSidebarOpen(false);
     } catch {
       /* una consultazione non ricostruibile non deve rompere la pagina */
     }
-  }, [apriConversazione]);
+  }, [apriConversazione, stretto]);
 
   const chiudiSidebarSuMobile = useCallback(() => {
-    if (window.innerWidth < 768) setSidebarOpen(false);
-  }, []);
+    if (stretto) setSidebarOpen(false);
+  }, [stretto]);
+
+  // Il tasto indietro chiude il pannello che copre la chat, e solo quando la
+  // copre davvero: da tablet in su sta accanto e non c'e' nulla da chiudere.
+  useChiusuraIndietro(stretto && sidebarOpen, chiudiSidebarSuMobile);
 
   if (sessione === 'verifica') {
     return (
@@ -144,7 +150,10 @@ export function App() {
       )}
 
       <main className="relative flex h-full min-w-0 flex-1 flex-col">
-        <header className="sticky top-0 z-20 flex h-14 shrink-0 items-center justify-between border-b border-line bg-canvas/85 px-4 backdrop-blur-md md:px-6">
+        {/* I bordi di sicurezza valgono anche di lato: col telefono in
+              orizzontale il notch sta a sinistra e si mangia il primo
+              pulsante. In verticale gli inset sono zero e non cambia nulla. */}
+        <header className="sticky top-0 z-20 flex h-14 shrink-0 items-center justify-between border-b border-line bg-canvas/85 pl-[max(1rem,env(safe-area-inset-left))] pr-[max(1rem,env(safe-area-inset-right))] backdrop-blur-md md:px-6">
           <div className="flex min-w-0 items-center gap-3">
             <button
               onClick={() => setSidebarOpen((v) => !v)}

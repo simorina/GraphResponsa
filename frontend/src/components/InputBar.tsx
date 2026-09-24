@@ -49,7 +49,7 @@ export const InputBar: React.FC<InputBarProps> = ({
   const pronto = input.trim().length > 0 && !loading;
 
   return (
-    <div className="pointer-events-none absolute inset-x-0 bottom-0 z-10 bg-gradient-to-t from-canvas via-canvas/95 to-transparent px-4 pb-[max(1rem,env(safe-area-inset-bottom))] pt-12 md:px-6">
+    <div className="pointer-events-none absolute inset-x-0 bottom-0 z-10 bg-gradient-to-t from-canvas via-canvas/95 to-transparent pb-[max(1rem,env(safe-area-inset-bottom))] pl-[max(1rem,env(safe-area-inset-left))] pr-[max(1rem,env(safe-area-inset-right))] pt-12 md:px-6">
       <div className="pointer-events-auto mx-auto max-w-3xl">
         <form
           onSubmit={(e) => {

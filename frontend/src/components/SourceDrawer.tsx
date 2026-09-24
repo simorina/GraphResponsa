@@ -1,6 +1,7 @@
-import React, { useEffect } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { X, FileText } from 'lucide-react';
 import type { Fonte } from '../types';
+import { useChiusuraIndietro } from '../hooks/useMobile';
 
 interface SourceDrawerProps {
   source: Fonte | null;
@@ -23,7 +24,42 @@ function urlDocumento(source: Fonte): string {
   return `/documenti/${encodeURIComponent(source.norma)}${percorso}${pagina}`;
 }
 
+/** Oltre questo trascinamento il foglio si chiude invece di tornare su. */
+const SOGLIA_CHIUSURA = 104;
+/** Oltre questa velocita' (px al millisecondo) basta il gesto, non la distanza. */
+const SCATTO = 0.55;
+
 export const SourceDrawer: React.FC<SourceDrawerProps> = ({ source, onClose }) => {
+  // Quanto il foglio e' stato tirato giu'. null = nessuno lo sta toccando.
+  const [tirato, setTirato] = useState<number | null>(null);
+  const presa = useRef({ da: 0, quando: 0 });
+
+  const inizia = useCallback((e: React.PointerEvent) => {
+    // Solo dove il foglio sale dal basso: da sm in su e' un pannello laterale
+    // e il gesto non avrebbe senso.
+    if (window.matchMedia('(min-width: 640px)').matches) return;
+    presa.current = { da: e.clientY, quando: e.timeStamp };
+    setTirato(0);
+    e.currentTarget.setPointerCapture(e.pointerId);
+  }, []);
+
+  const muovi = useCallback((e: React.PointerEvent) => {
+    if (tirato === null) return;
+    const dy = e.clientY - presa.current.da;
+    // Verso l'alto il foglio non sale: resiste, come un cassetto a fine corsa.
+    setTirato(dy > 0 ? dy : dy / 6);
+  }, [tirato]);
+
+  const lascia = useCallback((e: React.PointerEvent) => {
+    if (tirato === null) return;
+    const dy = e.clientY - presa.current.da;
+    const velocita = dy / Math.max(1, e.timeStamp - presa.current.quando);
+    setTirato(null);
+    if (dy > SOGLIA_CHIUSURA || velocita > SCATTO) onClose();
+  }, [tirato, onClose]);
+
+  useChiusuraIndietro(!!source, onClose);
+
   useEffect(() => {
     if (!source) return;
     const onKey = (e: KeyboardEvent) => {
@@ -46,9 +82,28 @@ export const SourceDrawer: React.FC<SourceDrawerProps> = ({ source, onClose }) =
       <aside
         role="dialog"
         aria-modal="true"
+        style={tirato === null
+          ? undefined
+          // Solo transform: e' l'unica proprieta' che il browser sposta sulla
+          // scheda grafica senza ridisegnare il foglio a ogni pixel.
+          : { transform: `translate3d(0, ${Math.max(0, tirato)}px, 0)`, transition: 'none' }}
         className="foglio-in fixed inset-x-0 bottom-0 top-auto z-50 flex max-h-[88dvh] flex-col rounded-t-[26px] border-t border-line-2 bg-canvas shadow-[0_-18px_50px_-28px_rgba(16,33,45,0.35)] sm:drawer-in sm:inset-y-0 sm:left-auto sm:right-0 sm:max-h-none sm:w-full sm:max-w-lg sm:rounded-none sm:border-l sm:border-t-0 sm:shadow-[-20px_0_50px_-28px_rgba(16,33,45,0.28)]"
       >
-        <div aria-hidden className="mx-auto mt-2.5 h-1 w-10 shrink-0 rounded-full bg-line-2 sm:hidden" />
+        {/* La presa e' la fascia, non il cordoncino: un bersaglio da 4px non
+            si prende col pollice. touch-action: none dice al browser di non
+            scorrere mentre trasciniamo noi. */}
+        <div
+          onPointerDown={inizia}
+          onPointerMove={muovi}
+          onPointerUp={lascia}
+          onPointerCancel={lascia}
+          className="flex h-8 shrink-0 cursor-grab touch-none items-center justify-center active:cursor-grabbing sm:hidden"
+          aria-hidden
+        >
+          <div className={`h-1 w-10 rounded-full transition-colors duration-200 ${
+            tirato === null ? 'bg-line-2' : 'bg-ink-3'
+          }`} />
+        </div>
 
         <div className="flex shrink-0 items-start justify-between gap-4 border-b border-line px-5 py-4 sm:px-6">
           <div className="min-w-0">

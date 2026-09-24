@@ -107,7 +107,9 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
   return (
     <aside
-      className={`fixed inset-y-0 left-0 z-40 flex h-[100dvh] flex-col border-r border-line bg-panel transition-[width,transform] duration-300 ease-[cubic-bezier(0.16,1,0.3,1)] md:static ${
+      /* pl con l'inset: in orizzontale il notch sta a sinistra, cioe'
+         esattamente sopra questo pannello. */
+      className={`fixed inset-y-0 left-0 z-40 flex h-[100dvh] flex-col border-r border-line bg-panel pl-[env(safe-area-inset-left)] transition-[width,transform] duration-300 ease-[cubic-bezier(0.16,1,0.3,1)] md:static md:pl-0 ${
         isOpen
           ? 'w-[272px] translate-x-0'
           : 'w-[272px] -translate-x-full md:w-0 md:translate-x-0 md:overflow-hidden md:border-r-0'
