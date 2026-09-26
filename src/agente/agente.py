@@ -23,7 +23,7 @@ from langchain.agents import create_agent
 from langchain_anthropic import ChatAnthropic
 from langchain.agents.middleware import AgentMiddleware
 from langchain_anthropic.middleware import AnthropicPromptCachingMiddleware
-from langchain_core.messages import HumanMessage, ToolMessage
+from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 from langchain_core.messages import SystemMessage
 from langgraph.checkpoint.memory import InMemorySaver
 
@@ -443,6 +443,74 @@ class PotaturaFraDomande(AgentMiddleware):
         return {"messages": potati} if potati else None
 
 
+INTERROTTA = "[La consultazione si e' interrotta prima dei risultati.]"
+
+
+class RiparaChiamateOrfane(AgentMiddleware):
+    """Toglie dalla cronologia le chiamate a strumenti rimaste senza risultato.
+
+    Il checkpoint salva la risposta del modello che chiede gli strumenti prima
+    che gli strumenti rispondano. Se la consultazione si interrompe in mezzo -
+    un rilascio che ferma il container, un riavvio, un errore - la cronologia
+    resta con chiamate senza risposta, e Anthropic la rifiuta per sempre:
+    "tool_use ids were found without tool_result blocks". Il 26/09 una
+    conversazione interrotta il 22/09 dava questo 400 a ogni nuova domanda.
+
+    Si ripara in `before_agent`, una volta per domanda, e solo prima
+    dell'ultima domanda: le chiamate che la seguono sono quelle in corso. Le
+    chiamate orfane si tolgono dal messaggio che le conteneva, sul posto e con
+    lo stesso id; il suo testo resta. Aggiungere risultati finti significherebbe
+    far leggere al modello qualcosa che nessuno strumento ha detto.
+    """
+
+    def before_agent(self, state, runtime):
+        messaggi = list(state.get("messages") or [])
+        ultima = next((i for i in range(len(messaggi) - 1, -1, -1)
+                       if isinstance(messaggi[i], HumanMessage)), None)
+        if ultima is None:
+            return None
+        riparati = []
+        for i, m in enumerate(messaggi[:ultima]):
+            if not isinstance(m, AIMessage) or not m.tool_calls:
+                continue
+            risposte = set()
+            for seguente in messaggi[i + 1:]:
+                if not isinstance(seguente, ToolMessage):
+                    break
+                risposte.add(seguente.tool_call_id)
+            orfane = {c["id"] for c in m.tool_calls} - risposte
+            if orfane:
+                riparati.append(_senza_chiamate(m, orfane))
+        return {"messages": riparati} if riparati else None
+
+
+def _senza_chiamate(messaggio, orfane):
+    """Il messaggio del modello senza le chiamate indicate, ovunque stiano:
+    in `tool_calls`, nei blocchi `tool_use` del contenuto (Anthropic) e in
+    `additional_kwargs` (gateway compatibile OpenAI)."""
+    chiamate = [c for c in messaggio.tool_calls if c["id"] not in orfane]
+    contenuto = messaggio.content
+    if isinstance(contenuto, list):
+        contenuto = [b for b in contenuto
+                     if not (isinstance(b, dict) and b.get("id") in orfane)]
+    extra = dict(messaggio.additional_kwargs)
+    if extra.get("tool_calls"):
+        extra["tool_calls"] = [c for c in extra["tool_calls"] if c.get("id") not in orfane]
+        if not extra["tool_calls"]:
+            del extra["tool_calls"]
+    # Anthropic rifiuta anche un messaggio vuoto: se non resta ne' testo ne'
+    # chiamata, lo dice il messaggio stesso.
+    if not chiamate:
+        if isinstance(contenuto, list):
+            if not any(isinstance(b, dict) and b.get("type") == "text" and b.get("text", "").strip()
+                       for b in contenuto):
+                contenuto = contenuto + [{"type": "text", "text": INTERROTTA}]
+        elif not str(contenuto or "").strip():
+            contenuto = INTERROTTA
+    return messaggio.model_copy(update={"tool_calls": chiamate, "content": contenuto,
+                                        "additional_kwargs": extra})
+
+
 def _checkpointer():
     """
     Dove vivono le conversazioni.
@@ -602,8 +670,10 @@ def agente(nome=None):
             checkpointer=_memoria,
             # La potatura fra le domande vale per tutti i fornitori; il
             # middleware della cache no, e' Anthropic e basta.
-            middleware=([PotaturaFraDomande(), AnthropicPromptCachingMiddleware(ttl="5m")]
-                        if fornitore_di(nome) == "anthropic" else [PotaturaFraDomande()]),
+            middleware=([RiparaChiamateOrfane(), PotaturaFraDomande(),
+                         AnthropicPromptCachingMiddleware(ttl="5m")]
+                        if fornitore_di(nome) == "anthropic"
+                        else [RiparaChiamateOrfane(), PotaturaFraDomande()]),
         )
     return _agenti[nome]
 

@@ -74,6 +74,14 @@ Parameters:
     Default: 90
     Description: Dopo quanti giorni il TTL cancella una conversazione
 
+  Modello:
+    Type: String
+    Default: deepseek-v4.1-flash
+    Description: >-
+      Il modello dell'agente (src/agente/agente.py). I modelli qwen, deepseek,
+      kimi e glm passano dal gateway e vogliono QWEN_API_KEY nel segreto
+      ${NomeProgetto}/produzione; claude-* vuole ANTHROPIC_API_KEY.
+
 Resources:
 
   # =========================================================================
@@ -846,6 +854,8 @@ Resources:
           PortMappings:
             - ContainerPort: 8000
           Environment:
+            - Name: MODELLO
+              Value: !Ref Modello
             - Name: TABELLA_CHECKPOINT
               Value: !Ref TabellaCheckpoint
             - Name: TABELLA_SCRITTURE
@@ -888,6 +898,11 @@ Resources:
               ValueFrom: !Sub '${Segreti}:ANTHROPIC_API_KEY::'
             - Name: VOYAGE_API_KEY
               ValueFrom: !Sub '${Segreti}:VOYAGE_API_KEY::'
+            # Il gateway di DeepSeek e Qwen. La voce va aggiunta a mano al
+            # segreto: il SecretString qui sopra vale solo alla creazione, e
+            # cambiarlo sovrascriverebbe le chiavi vere.
+            - Name: QWEN_API_KEY
+              ValueFrom: !Sub '${Segreti}:QWEN_API_KEY::'
           LogConfiguration:
             LogDriver: awslogs
             Options:
