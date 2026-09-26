@@ -8,6 +8,11 @@
 langchain>=1.0
 langchain-neo4j
 langchain-anthropic
+# Il client dei modelli sul gateway compatibile OpenAI: DeepSeek, Qwen, Kimi,
+# GLM. src/agente/agente.py lo importa solo quando serve, quindi finche' la
+# produzione usava Claude la sua assenza non si vedeva: il 26/09, passati a
+# DeepSeek, ogni domanda finiva in ModuleNotFoundError.
+langchain-openai
 langchain-voyageai
 neo4j
 # I contatori di consumo datano il giorno nel fuso di Roma, e python:3.12-slim
