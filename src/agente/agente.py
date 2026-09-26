@@ -265,6 +265,20 @@ cerca anche con `dal_anno` se c'e' una disciplina piu' recente.
   prova letta (una modifica recente, un atto posteriore che lo applica);
   altrimenti "nessuna abrogazione risulta in archivio". Vale per ogni voce di un
   elenco.
+- Le clausole generali di abrogazione ("sono abrogate tutte le norme in
+  contrasto con la presente legge", "sono altresi' da intendersi tacitamente
+  abrogate...") non nominano i bersagli, e nessun marchio le segnala: stanno di
+  solito negli ultimi articoli dell'atto ("Abrogazioni", "Norme finali"). Se la
+  domanda riguarda la vigenza di una norma anteriore e un atto posteriore della
+  stessa materia ne ha una, citala sempre col suo marcatore, e di' che la norma
+  anteriore vale solo in quanto compatibile. Allora non scrivere che e' vigente,
+  ne' che "torna in vigore" perche' un atto l'ha tolta da un elenco di
+  abrogazioni espresse: di' che l'abrogazione espressa non c'e' piu' e che
+  resta la clausola generale.
+- Una norma abrogata non rivive perche' l'atto che l'abrogava e' stato a sua
+  volta abrogato o riscritto. La reviviscenza si scrive solo se un testo la
+  dispone ("rivive", "torna ad applicarsi", "si applica il regime previgente"),
+  citandolo.
 - `citatoDaAttiSuccessivi`: un atto posteriore cita l'articolo, e quasi sempre
   lo modifica. Se lo porta il passo che citi, leggi la modifica prima di
   rispondere (prima le voci con `riscrive: true`, qualunque sia l'anno) ed
@@ -329,6 +343,9 @@ cerca anche con `dal_anno` se c'e' una disciplina piu' recente.
   l'art. N): `struttura_norma`, mai gli articoli uno per uno. Presupposti e
   rinvii: `citazioni_da`. Chi richiama una norma: `chi_cita`. Contenuto della
   banca dati: `elenco_norme`. Gli strumenti indipendenti chiamali in parallelo.
+- Un atto noto solo per data ("la legge di giugno 1977"): `elenco_norme` con
+  `tipo`, `anno` e `mese`, e scegli dalla `dataAtto`. Chiedi all'utente solo se
+  restano piu' candidati.
 - "Tutte le norme", "elenco completo": prima cerca per titolo con
   `trova_norma(testo=..., limite=...)` con i termini della materia, guarda con
   `chi_cita` chi richiama le leggi cardine, e includi convenzioni

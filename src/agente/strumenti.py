@@ -604,9 +604,185 @@ def _rerank(query, righe, limite):
 # Cypher - \w e' ASCII, quindi fra uno spazio e una vocale accentata NON c'e'
 # confine di parola e l'espressione non agganciava mai nulla. Misurato: "e'
 # cosi' sostituito" dava riscrive=false. Il confine si scrive a mano.
+#
+# L'avverbio in mezzo ("sono definitivamente abrogati", "e' integralmente
+# sostituito") faceva perdere proprio le clausole piu' nette: l'art. 44 della
+# L. 157/2022, riscritto da tre decreti nel 2024, abroga cosi'.
 RISCRITTURA = (r"(?is).*(?:^|[\s,;:.(«\"])(?:è|e['’]|sono|viene|vengono)\s+"
-               r"(?:cos[ìi]['’]?\s+)?"
+               r"(?:cos[ìi]['’]?\s+)?(?:[a-z]+mente\s+)?"
                r"(?:sostituit|modificat|abrogat|aggiunt|inserit|soppress)\w*.*")
+
+# La formula da sola dice che il comma riscrive QUALCOSA, non COSA. Una novella
+# rimanda spesso ad altri atti nel testo che inserisce: "Il primo comma
+# dell'articolo 42 della Legge 22 dicembre 1972 n.41 e' cosi' modificato: «...
+# secondo le modalita' previste dagli articoli 2 e 3 della Legge 7 giugno 1977
+# n.30»" riscrive l'art. 42 della L. 41/1972 e degli artt. 2 e 3 della L.
+# 30/1977 parla soltanto. Misurato il 25/09: la L. 128/1997 risultava aver
+# riscritto l'art. 2 della L. 30/1977, e l'agente, a chi chiedeva la storia di
+# quell'articolo, contava una modifica mai avvenuta.
+#
+# Percio' la regex resta in Cypher solo come filtro, e il bersaglio si
+# controlla qui: l'articolo citato deve essere nominato nella parte del comma
+# che comanda, fuori dal testo nuovo fra virgolette. Misurato il 25/09 sulle
+# 7.178 citazioni verso atti anteriori che la sola formula marcava: 969 cadono,
+# e su novanta estratte a caso erano rimandi quasi tutte. Le forme che il
+# primo tentativo perdeva sono in scripts/prova_riscritture.py.
+FORMULA_RISCRITTURA = re.compile(
+    r"(?:^|[\s,;:.(«\"])(?:è|e['’]|sono|viene|vengono)\s+(?:cos[ìi]['’]?\s+)?"
+    r"(?:[a-z]+mente\s+)?(sostituit|modificat|abrogat|aggiunt|inserit|soppress)\w*", re.I)
+# Una frase finisce al punto seguito da maiuscola: "n.41." e "art. 5" no. Ne'
+# dopo un'abbreviazione ("Mod. IGR", "Cap. II"), che non chiude nulla.
+FINE_FRASE = re.compile(r"\.\s+(?=[A-ZÀÈÉÌÒÙ])")
+ABBREVIAZIONE = re.compile(r"(?:^|[\s(])(?:[A-Z][a-z]{0,3}|[A-Za-z])$")
+# Un riferimento puntuale: "articolo 42", "art. 5", "n.41", "41/1972", un codice.
+RIFERIMENTO = re.compile(r"\bart(?:icol[oi])?\.?\s*\d|\bn\.?\s*°?\s*\d|\d\s*/\s*\d{2,4}\b"
+                         r"|\bcodice\b", re.I)
+# Gli atti che i testi nominano per nome e non per numero.
+CODICI = ("codice di procedura penale", "codice di procedura civile", "codice penale")
+# L'intestazione di un elenco di modifiche, che puo' chiudersi col punto prima
+# delle formule: "All'articolo 5 della Legge 27 marzo 1981 n.26 sono apportate
+# le modifiche che seguono. Il primo comma e' abrogato e sostituito...".
+INTESTAZIONE = re.compile(r"\bapportat\w*\s+(?:le\s+)?(?:seguenti\s+)?(?:modific|integrazion|variazion)"
+                          r"|\ba\s+(?:parziale\s+)?modifica\s+d", re.I)
+TESTO_NUOVO = re.compile(r"sostituit|modificat|aggiunt|inserit", re.I)
+ARTICOLO_NUMERATO = re.compile(r"(\d+)(?:[\s-]*([a-z]+))?", re.I)
+# Un numero che non e' quello di un articolo: "n.15", "15/1983", "11 febbraio",
+# "5° comma", "comma 15".
+PRIMA_NON_ARTICOLO = re.compile(r"(?:\bn(?:ro|um(?:ero)?)?\.?\s*°?|/|\b(?:comm[ai]|letter[ae]|punt[oi]"
+                                r"|numer[oi]|capovers[oi])\s)\s*$", re.I)
+DOPO_NON_ARTICOLO = re.compile(r"\s*(?:/\s*\d|[°º]|(?:gennaio|febbraio|marzo|aprile|maggio|giugno|luglio"
+                               r"|agosto|settembre|ottobre|novembre|dicembre)\b)", re.I)
+
+
+def _virgolette(testo, dentro=False):
+    """Il comma diviso fra l'ordine e il testo che inserisce, quello fra
+    virgolette dritte, tonde o caporali, anche annidate: con dentro=False resta
+    l'ordine, con dentro=True il testo nuovo. Stessa lunghezza del comma, con
+    spazi al posto delle parti tolte, perche' le posizioni valgano per tutti.
+
+    La virgoletta dritta non dice se apre o chiude, e contarle non basta: un
+    comma che comincia dentro una citazione ("... multipli". e. L'ultimo comma
+    dell'articolo 7 ... e' sostituito dal seguente: "Il capitale ...") le
+    rovescerebbe tutte. Lo dice il contesto: apre dopo uno spazio e davanti a
+    una parola, chiude dopo una parola."""
+    testo = testo or ""
+    parti, aperte, dritte = [], 0, False
+    for i, ch in enumerate(testo):
+        if ch in "“«":
+            aperte += 1
+        elif ch in "”»":
+            aperte = max(0, aperte - 1)
+        elif ch == '"':
+            prima = testo[i - 1] if i else " "
+            dopo = testo[i + 1] if i + 1 < len(testo) else " "
+            if prima in " \n\t:(" and not dopo.isspace():
+                dritte = True
+            elif not prima.isspace() and (dopo.isspace() or dopo in ".,;:)"):
+                dritte = False
+            else:
+                dritte = not dritte
+        elif bool(aperte or dritte) == dentro:
+            parti.append(ch)
+            continue
+        parti.append(" ")
+    return "".join(parti)
+
+
+def _frasi(testo):
+    inizi = [0] + [m.end() for m in FINE_FRASE.finditer(testo)
+                   if not ABBREVIAZIONE.search(testo[max(0, m.start() - 5):m.start()])]
+    return list(zip(inizi, inizi[1:] + [len(testo)]))
+
+
+def _ordini(testo, ordine):
+    """(passo, abroga) per ogni ordine di modifica del comma; `ordine` e' il
+    testo in cui cercarli, della stessa lunghezza.
+
+    Una frase con la formula. Se il bersaglio e' nominato prima ("L'articolo 5
+    ... e' cosi' sostituito:"), quello che segue i due punti e' testo nuovo, e
+    si taglia. Se viene dopo ("Sono abrogati: a) l'articolo 3 della Legge
+    ..."), i due punti aprono proprio l'elenco dei bersagli.
+
+    Un'abrogazione pura si legge sul comma intero, virgolette comprese, fino
+    alla prossima frase che inserisce testo nuovo: le sue virgolette racchiudono
+    titoli, non testo nuovo, e spesso si annidano male ("Legge 4 marzo 1993 n.36
+    “Integrazioni e modifiche della Legge ... “Normativa ...”"), nascondendo il
+    resto dell'elenco. E le voci dell'elenco possono aprirsi con la maiuscola
+    e sembrare frasi nuove.
+    """
+    frasi = _frasi(ordine)
+    for i, (s, e) in enumerate(frasi):
+        frase = ordine[s:e]
+        if INTESTAZIONE.search(frase):
+            yield ordine[s:], False
+            continue
+        m = FORMULA_RISCRITTURA.search(frase)
+        if not m:
+            continue
+        if (m.group(1).lower().startswith(("abrogat", "soppress"))
+                and not TESTO_NUOVO.search(frase, m.end())):
+            fine = next((a for a, b in frasi[i + 1:] if TESTO_NUOVO.search(ordine[a:b])
+                         and FORMULA_RISCRITTURA.search(ordine[a:b])), len(testo))
+            yield testo[s:fine], True
+            continue
+        due_punti = frase.find(":", m.end())
+        if due_punti >= 0 and RIFERIMENTO.search(frase[:m.start()]):
+            frase = frase[:due_punti]
+        yield frase, False
+
+
+def _comandi(testo):
+    """I passi del comma che ordinano una modifica."""
+    testo = testo or ""
+    yield from (p for p, _ in _ordini(testo, _virgolette(testo)))
+    # Il testo nuovo che abroga a sua volta: "Il comma 1 dell'articolo 44 della
+    # Legge n.157/2022 e' cosi' sostituito: «1. ... sono definitivamente
+    # abrogati: a) ... b) l'articolo 11 della Legge 20 novembre 1987 n.138»".
+    # Chi riscrive un elenco di abrogazioni abroga, e le riscritture successive
+    # dell'elenco - tre decreti in un anno, per l'art. 44 della L. 157/2022 -
+    # sono proprio cio' che serve vedere per dire se un articolo vige.
+    dentro = _virgolette(testo, dentro=True)
+    yield from (p for p, abroga in _ordini(dentro, dentro) if abroga)
+
+
+def _nomina(parte, numero_atto, titolo_atto, articolo):
+    """Se il passo nomina quell'articolo di quell'atto."""
+    minuscolo = parte.lower()
+    if numero_atto:
+        per_numero = re.search(rf"\bn(?:ro|um(?:ero)?)?\.?\s*°?\s*{numero_atto}\b"
+                               rf"|(?<!\d){numero_atto}\s*/\s*\d{{2,4}}\b", parte, re.I)
+        per_nome = any(c in minuscolo and c in (titolo_atto or "").lower() for c in CODICI)
+        if not (per_numero or per_nome):
+            return False
+    m = ARTICOLO_NUMERATO.fullmatch(str(articolo or "").strip())
+    if m:
+        suffisso = rf"[\s-]*{m.group(2)}\b" if m.group(2) else r"(?!\d)"
+        return any(not PRIMA_NON_ARTICOLO.search(parte, 0, x.start())
+                   and not DOPO_NON_ARTICOLO.match(parte, x.end())
+                   for x in re.finditer(rf"(?<!\d){m.group(1)}{suffisso}", parte, re.I))
+    if str(articolo or "").lower() == "unico":
+        return "unico" in minuscolo
+    # Gli articoli degli allegati ("all-3") si scrivono in troppi modi: basta l'atto.
+    return True
+
+
+def _riscrive(testo, numero_atto, titolo_atto, articolo):
+    """Se il comma riscrive proprio quell'articolo, e non lo nomina soltanto."""
+    comandi = list(_comandi(testo))
+    if any(_nomina(p, numero_atto, titolo_atto, articolo) for p in comandi):
+        return True
+    # L'articolo che la novella inserisce non e' nominato nell'ordine ma
+    # intitolato nel testo nuovo: "Nel Codice Penale, dopo l'articolo 340 e'
+    # inserito il seguente Capitolo I-bis: «... Art. 340-bis (Finalita' di
+    # terrorismo) ...»". Basta allora che l'ordine nomini l'atto. La maiuscola
+    # conta: "all'art. 2" dentro il testo nuovo e' un rimando, non un titolo.
+    m = ARTICOLO_NUMERATO.fullmatch(str(articolo or "").strip())
+    if not m:
+        return False
+    suffisso = rf"[\s-]*{m.group(2)}\b" if m.group(2) else r"(?![\d\w])"
+    titolo = re.compile(rf"(?<![\w’'])Art(?:icolo)?\.?\s*{m.group(1)}{suffisso}")
+    return (titolo.search(_virgolette(testo, dentro=True)) is not None
+            and any(_nomina(p, numero_atto, titolo_atto, None) for p in comandi))
 
 
 def _novelle(righe):
@@ -636,31 +812,44 @@ def _novelle(righe):
             MATCH (c:Comma)-[:CITA_ARTICOLO]->(a)
             MATCH (dopo:Norma)-[:HA_ARTICOLO]->(artDopo:Articolo)-[:HA_COMMA]->(c)
             WHERE dopo.anno > n.anno
-            // Un comma che RISCRIVE la disposizione vale piu' di uno che la
-            // richiama di passaggio, e va detto al modello.
-            WITH k, dopo, artDopo, c,
-                 CASE WHEN c.testo =~ $riscrittura THEN true ELSE false END AS riscrive
             // Gli spareggi servono: senza, fra due commi dello stesso atto
             // decideva l'ordine fisico dei dati, e lo stesso articolo portava
             // il comma 1 su Aura e il comma 2 sulla copia su EC2 (22/09).
-            ORDER BY riscrive DESC, coalesce(artDopo.ordine, 0), coalesce(c.ordine, 0), c.id
-            // Un comma per ATTO, non i primi due commi in assoluto: un atto
-            // recente con due rimandi si prendeva tutti i posti e l'atto che
-            // l'articolo lo aveva riscritto restava fuori. Misurato sull'art.
-            // 3 della L-44/2015: comparivano due commi della L-87/2026 che vi
-            // rimandano, e non la L-64/2025 che ne ha sostituito le lettere.
-            WITH k, dopo, collect({norma: dopo.id, anno: dopo.anno,
-                                   articolo: artDopo.numero, comma: c.numero,
-                                   testo: c.testo, riscrive: riscrive})[0] AS voce
-            // A parita' d'anno, l'atto piu' recente: DL-46 e DL-57 del 2021
-            // si scambiavano il terzo posto a seconda del database.
-            ORDER BY voce.riscrive DESC, voce.anno DESC, dopo.data DESC, dopo.id DESC
-            WITH k, collect(voce)[..3] AS novelle
-            RETURN k.n AS norma, k.a AS articolo, novelle
+            WITH k, n, dopo, artDopo, c
+            ORDER BY coalesce(artDopo.ordine, 0), coalesce(c.ordine, 0), c.id
+            WITH k, n, dopo, collect({articolo: artDopo.numero, comma: c.numero,
+                                      testo: c.testo,
+                                      formula: c.testo =~ $riscrittura}) AS commi
+            // Il testo si spedisce solo per i commi con la formula, che vanno
+            // controllati uno per uno (_riscrive), e per il primo, che fa da
+            // voce se nessuno riscrive davvero.
+            RETURN k.n AS norma, k.a AS articolo, n.numero AS numeroAtto,
+                   n.titolo AS titoloAtto, dopo.id AS dopo, dopo.anno AS anno,
+                   toString(dopo.data) AS data,
+                   [x IN commi WHERE x.formula][..20] AS candidati, commi[0] AS primo
         """, {"chiavi": chiavi, "riscrittura": RISCRITTURA})
     except Exception:
         return righe
-    mappa = {(t["norma"], t["articolo"]): t["novelle"] for t in trovate}
+    # Un comma per ATTO, non i primi due commi in assoluto: un atto recente con
+    # due rimandi si prendeva tutti i posti e l'atto che l'articolo lo aveva
+    # riscritto restava fuori. Misurato sull'art. 3 della L-44/2015:
+    # comparivano due commi della L-87/2026 che vi rimandano, e non la
+    # L-64/2025 che ne ha sostituito le lettere. Un comma che RISCRIVE la
+    # disposizione vale piu' di uno che la richiama di passaggio, e va detto al
+    # modello.
+    per_articolo = {}
+    for t in trovate:
+        voce = next(({**x, "riscrive": True} for x in t["candidati"]
+                     if _riscrive(x["testo"], t["numeroAtto"], t["titoloAtto"], t["articolo"])),
+                    {**t["primo"], "riscrive": False})
+        per_articolo.setdefault((t["norma"], t["articolo"]), []).append((
+            # A parita' d'anno, l'atto piu' recente: DL-46 e DL-57 del 2021 si
+            # scambiavano il terzo posto a seconda del database.
+            (voce["riscrive"], t["anno"] or 0, t["data"] or "", t["dopo"]),
+            {"norma": t["dopo"], "anno": t["anno"], "articolo": voce["articolo"],
+             "comma": voce["comma"], "testo": voce["testo"], "riscrive": voce["riscrive"]}))
+    mappa = {chiave: [v for _, v in sorted(voci, key=lambda x: x[0], reverse=True)[:3]]
+             for chiave, voci in per_articolo.items()}
     for r in righe:
         novelle = mappa.get((r.get("normaId"), str(r.get("articolo"))))
         if novelle:
@@ -828,22 +1017,32 @@ def _atti_novellati(righe):
             UNWIND $ids AS id
             MATCH (n:Norma {id: id})-[:HA_ARTICOLO]->(a:Articolo)
             MATCH (c:Comma)-[:CITA_ARTICOLO]->(a)
+            WHERE c.testo =~ $riscrittura
             MATCH (dopo:Norma)-[:HA_ARTICOLO]->(:Articolo)-[:HA_COMMA]->(c)
             WHERE dopo.anno > n.anno AND dopo.id <> n.id
-            WITH id, dopo, a,
-                 CASE WHEN c.testo =~ $riscrittura THEN true ELSE false END AS riscrive
-            WITH id, dopo, collect(DISTINCT a.numero) AS articoli,
-                 max(riscrive) AS riscrive
-            WHERE riscrive
-            ORDER BY dopo.anno DESC
-            WITH id, collect({norma: dopo.id, anno: dopo.anno,
-                              titolo: dopo.titolo,
-                              articoli: articoli})[..3] AS novellanti
-            RETURN id, novellanti
+            WITH id, n, dopo, c, collect(a.numero) AS citati
+            RETURN id, n.numero AS numeroAtto, n.titolo AS titoloAtto,
+                   dopo.id AS dopo, dopo.anno AS anno, toString(dopo.data) AS data,
+                   dopo.titolo AS titolo, c.testo AS testo, citati
         """, {"ids": ids, "riscrittura": RISCRITTURA})
     except Exception:
         return righe
-    mappa = {t["id"]: t["novellanti"] for t in trovate if t["novellanti"]}
+    # Gli `articoli` sono quelli riscritti, non tutti quelli che il novellante
+    # nomina: un rimando dentro il testo nuovo faceva risultare toccato un
+    # articolo che nessuno aveva cambiato (vedi _riscrive).
+    per_atto = {}
+    for t in trovate:
+        riscritti = [a for a in t["citati"]
+                     if _riscrive(t["testo"], t["numeroAtto"], t["titoloAtto"], a)]
+        if not riscritti:
+            continue
+        voce = per_atto.setdefault(t["id"], {}).setdefault(t["dopo"], {
+            "chiave": (t["anno"] or 0, t["data"] or "", t["dopo"]),
+            "norma": t["dopo"], "anno": t["anno"], "titolo": t["titolo"], "articoli": []})
+        voce["articoli"] += [a for a in riscritti if a not in voce["articoli"]]
+    mappa = {id: [{k: v for k, v in n.items() if k != "chiave"}
+                  for n in sorted(novellanti.values(), key=lambda n: n["chiave"], reverse=True)[:3]]
+             for id, novellanti in per_atto.items()}
     for r in righe:
         atti = mappa.get(r.get("normaId"))
         if not atti:
@@ -1553,15 +1752,20 @@ def trova_norma(numero: int | None = None, anno: int | None = None,
 
 
 @tool
-def elenco_norme(tipo: str | None = None, anno: int | None = None, limite: int = 50) -> dict:
+def elenco_norme(tipo: str | None = None, anno: int | None = None, mese: int | None = None,
+                 limite: int = 50) -> dict:
     """Restituisce il riepilogo complessivo delle norme presenti in archivio e un estratto.
 
     Da usare quando l'utente chiede cosa contiene la banca dati o per verificare
-    la copertura normativa per anno/tipologia. Per cercare un atto specifico usare trova_norma.
+    la copertura normativa per anno/tipologia, e per individuare un atto noto
+    solo per data ("la legge di giugno 1977": tipo='Legge', anno=1977, mese=6).
+    Ogni norma porta `dataAtto`, la data di emanazione. Per cercare un atto di
+    cui conosci numero o titolo usare trova_norma.
 
     Args:
         tipo: opzionale, filtra per tipologia (es. 'Legge', 'Legge Qualificata', 'Decreto Legge')
         anno: opzionale, filtra per anno di emanazione
+        mese: opzionale, filtra per mese di emanazione (1-12), di solito insieme ad anno
         limite: numero massimo di norme da restituire in dettaglio (default 50, max 100)
     """
     limite = min(max(1, limite), 100)
@@ -1584,23 +1788,29 @@ def elenco_norme(tipo: str | None = None, anno: int | None = None, limite: int =
     """)[0]
 
     # Dettaglio norme filtrate
-    filtri = ["($anno IS NULL OR n.anno = $anno)"]
+    filtri = ["($anno IS NULL OR n.anno = $anno)",
+              "($mese IS NULL OR n.data.month = $mese)"]
     if tipo:
         filtri.append("toLower(n.tipo) CONTAINS toLower($tipo)")
 
     where_clause = " AND ".join(filtri)
 
+    # La data e il numero servono a riconoscere un atto: senza, a "la legge di
+    # giugno 1977" l'agente riceveva venti leggi del 1977 senza modo di dire
+    # quale fosse di giugno, e doveva chiederlo all'utente (25/09). Era la
+    # L. 30/1977, del 7 giugno, ed era fra le venti.
     righe = grafo().query(f"""
         MATCH (n:Norma)
         WHERE {where_clause}
         OPTIONAL MATCH (n)-[:HA_ARTICOLO]->(a:Articolo)
         WITH n, count(a) AS articoli
-        RETURN n.id AS id, n.tipo AS tipo, n.titolo AS titolo, n.anno AS anno,
+        RETURN n.id AS id, n.tipo AS tipo, n.numero AS numero, n.titolo AS titolo,
+               n.anno AS anno, toString(n.data) AS dataAtto,
                n.caricata AS testoDisponibile, articoli,
                n.urlDocumento AS urlDocumento
-        ORDER BY n.anno DESC, n.numero DESC
+        ORDER BY n.anno DESC, n.data DESC, n.numero DESC
         LIMIT $limite
-    """, {"anno": anno, "tipo": tipo, "limite": limite})
+    """, {"anno": anno, "mese": int(mese) if mese else None, "tipo": tipo, "limite": limite})
 
     return {
         "riepilogoTotale": totali,
