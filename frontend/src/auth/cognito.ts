@@ -92,10 +92,15 @@ export class ErroreAccesso extends Error {
   get leggibile(): string {
     switch (this.tipo) {
       case 'NotAuthorizedException':
+        // Cognito lo dice solo nel testo: la temporanea vale sette giorni.
+        if (/temporary password has expired/i.test(this.message)) {
+          return 'La password temporanea è scaduta: usa «Password smarrita?» per riceverne una nuova.';
+        }
+        return 'Email o password non corrette.';
       case 'UserNotFoundException':
         return 'Email o password non corrette.';
       case 'PasswordResetRequiredException':
-        return 'La password va reimpostata. Contatta l’amministratore.';
+        return 'La password va reimpostata.';
       case 'UserNotConfirmedException':
         return 'Account non ancora confermato.';
       case 'TooManyRequestsException':
@@ -103,6 +108,8 @@ export class ErroreAccesso extends Error {
         return 'Troppi tentativi. Attendi qualche minuto.';
       case 'InvalidPasswordException':
         return 'La password non rispetta i requisiti richiesti.';
+      case 'RecuperoIndisponibile':
+        return 'Il recupero della password non è disponibile in questo momento: contatta l’amministratore.';
       default:
         return this.message;
     }
@@ -174,6 +181,29 @@ export async function impostaNuovaPassword(
     throw new ErroreAccesso('ChallengeNonGestita', 'Non è stato possibile completare l’accesso.');
   }
   scrivi(daRisultato(d.AuthenticationResult));
+}
+
+// --- Password smarrita ----------------------------------------------------
+
+/**
+ * Fa mandare all'email una password temporanea: si entra con quella, e
+ * Cognito chiede subito di sceglierne una nuova, come al primo accesso.
+ *
+ * Passa dal backend e non da Cognito: dal browser Cognito sa mandare solo
+ * codici di verifica, mentre una password temporanea per un utente esistente e'
+ * un'operazione da amministratore (src/servizio/recupero.py). La risposta e'
+ * la stessa per indirizzi registrati e no.
+ */
+export async function chiediPasswordTemporanea(email: string): Promise<void> {
+  const r = await fetch('/recupero-password', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ email: email.trim() }),
+  });
+  if (!r.ok) {
+    throw new ErroreAccesso(r.status === 503 ? 'RecuperoIndisponibile' : 'RecuperoNonRiuscito',
+      'Non è stato possibile mandare la password temporanea. Riprova tra poco.');
+  }
 }
 
 async function rinnova(s: Sessione): Promise<Sessione | null | typeof PASSEGGERO> {

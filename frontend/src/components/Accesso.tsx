@@ -1,12 +1,13 @@
 import React, { useRef, useState } from 'react';
 import {
-  ArrowRight, AlertTriangle, ArrowBigUp, AtSign, Check, CircleAlert, CircleCheck, Eye, EyeOff,
-  KeyRound, LockKeyhole, ShieldCheck,
+  ArrowLeft, ArrowRight, AlertTriangle, ArrowBigUp, AtSign, Check, CircleAlert, CircleCheck, Eye,
+  EyeOff, KeyRound, LockKeyhole, ShieldCheck,
 } from 'lucide-react';
 import { Sigillo } from './Sigillo';
 import { PrismGradient } from './PrismGradient';
 import {
   accedi,
+  chiediPasswordTemporanea,
   impostaNuovaPassword,
   ErroreAccesso,
   erroreDiRete,
@@ -36,6 +37,20 @@ const REQUISITI: { testo: string; ok: (p: string) => boolean }[] = [
 // e meta' del modulo prima ancora che si sia letto cosa chiede.
 const SCHERMO_LARGO =
   typeof window !== 'undefined' && window.matchMedia('(min-width: 1024px)').matches;
+
+/**
+ * Dove si trova il modulo: l'accesso, o la richiesta della password
+ * temporanea. Con la temporanea si torna all'accesso, e la scelta della
+ * password nuova e' la stessa del primo accesso (`sfida`), perche' per Cognito
+ * e' la stessa cosa.
+ */
+type Modo = 'accesso' | 'email';
+
+const NESSUNA_RETE = 'Nessuna connessione: controlla la rete e riprova.';
+
+function messaggio(err: unknown, altrimenti: string): string {
+  return err instanceof ErroreAccesso ? err.leggibile : erroreDiRete(err) ? NESSUNA_RETE : altrimenti;
+}
 
 interface AccessoProps {
   onEntrato: () => void;
@@ -123,7 +138,14 @@ export const Accesso: React.FC<AccessoProps> = ({ onEntrato }) => {
   const [sfida, setSfida] = useState<NuovaPasswordRichiesta | null>(null);
   const [inCorso, setInCorso] = useState(false);
   const [entrato, setEntrato] = useState(false);
-  const [aiutoPassword, setAiutoPassword] = useState(false);
+
+  const [modo, setModo] = useState<Modo>('accesso');
+  // Dopo "Password smarrita?" la password che si aspetta e' la temporanea
+  // arrivata per email: lo dicono l'etichetta del campo e i testi dopo.
+  const [temporanea, setTemporanea] = useState(false);
+  // Le notizie buone (password mandata) hanno un loro riquadro: in quello
+  // rosso sembrerebbero errori.
+  const [avviso, setAvviso] = useState<string | null>(null);
 
   // Errori dei singoli campi, sotto il campo; l'errore del server (credenziali
   // rifiutate, rete) nel riquadro sopra il pulsante.
@@ -168,6 +190,43 @@ export const Accesso: React.FC<AccessoProps> = ({ onEntrato }) => {
     setTimeout(onEntrato, 450);
   };
 
+  /** Cambia passo ripartendo pulito: nessun errore o campo del passo prima.
+   *  L'email resta, e' la stessa in tutti i passi. */
+  const vaiA = (m: Modo) => {
+    setModo(m);
+    setErrore(null);
+    setErroreEmail(null);
+    setErrorePassword(null);
+    setAvviso(null);
+    setMostra(false);
+  };
+
+  /** Il controllo dell'email, uguale in accesso e recupero. */
+  const controllaEmail = () => {
+    const eEmail = !email.trim() ? 'Inserisci l’email.' : !emailValida ? 'Indirizzo email non valido.' : null;
+    setErroreEmail(eEmail);
+    if (eEmail) campoEmail.current?.focus();
+    return !eEmail;
+  };
+
+  /** Fa mandare la password temporanea e riporta all'accesso, con l'email
+   *  gia' scritta e il fuoco sul campo della password. */
+  const mandaTemporanea = async (avvisoDopo: string): Promise<void> => {
+    setInCorso(true);
+    try {
+      await chiediPasswordTemporanea(email.trim());
+      vaiA('accesso');
+      setPassword('');
+      setTemporanea(true);
+      setAvviso(avvisoDopo);
+      setTimeout(() => campoPassword.current?.focus(), 60);
+    } catch (err) {
+      setErrore(messaggio(err, 'Non è stato possibile mandare la password temporanea. Riprova tra poco.'));
+    } finally {
+      setInCorso(false);
+    }
+  };
+
   const invia = async (e: React.FormEvent) => {
     e.preventDefault();
     setErrore(null);
@@ -180,31 +239,46 @@ export const Accesso: React.FC<AccessoProps> = ({ onEntrato }) => {
         await impostaNuovaPassword(sfida, nuova);
         entra();
       } catch (err) {
-        setErrore(err instanceof ErroreAccesso ? err.leggibile : erroreDiRete(err)
-          ? 'Nessuna connessione: controlla la rete e riprova.' : 'Accesso non riuscito.');
+        setErrore(messaggio(err, 'Accesso non riuscito.'));
       } finally {
         setInCorso(false);
       }
       return;
     }
 
+    if (modo === 'email') {
+      // "Se l'indirizzo ha un account": il backend risponde allo stesso modo
+      // per tutti, e la pagina non puo' promettere di piu'.
+      if (controllaEmail()) {
+        await mandaTemporanea('Se l’indirizzo ha un account, ti abbiamo mandato una password temporanea. Controlla l’email, anche lo spam: accedi con quella e poi ne sceglierai una nuova.');
+      }
+      return;
+    }
+
     // Controlli nostri al posto dei fumetti del browser: stesso tono del resto
     // della pagina, e il fuoco va al primo campo da sistemare.
-    const eEmail = !email.trim() ? 'Inserisci l’email.' : !emailValida ? 'Indirizzo email non valido.' : null;
     const ePassword = !password ? 'Inserisci la password.' : null;
-    setErroreEmail(eEmail);
     setErrorePassword(ePassword);
-    if (eEmail) return campoEmail.current?.focus();
+    if (!controllaEmail()) return;
     if (ePassword) return campoPassword.current?.focus();
 
     setInCorso(true);
     try {
       const esito = await accedi(email.trim(), password);
       if (esito === 'dentro') entra();
-      else setSfida(esito);          // primo accesso: password temporanea
+      else {                         // password temporanea: se ne sceglie una nuova
+        setAvviso(null);             // "ti abbiamo mandato la temporanea" e' superato
+        setSfida(esito);
+      }
     } catch (err) {
-      setErrore(err instanceof ErroreAccesso ? err.leggibile : erroreDiRete(err)
-          ? 'Nessuna connessione: controlla la rete e riprova.' : 'Accesso non riuscito.');
+      // L'amministratore ha chiesto di reimpostarla: la temporanea parte da
+      // sola, invece di mandare l'utente a cercare il pulsante giusto.
+      if (err instanceof ErroreAccesso && err.tipo === 'PasswordResetRequiredException') {
+        setInCorso(false);
+        await mandaTemporanea('La password va reimpostata: ti abbiamo mandato per email una password temporanea. Accedi con quella e poi ne sceglierai una nuova.');
+        return;
+      }
+      setErrore(messaggio(err, 'Accesso non riuscito.'));
     } finally {
       setInCorso(false);
     }
@@ -285,7 +359,8 @@ export const Accesso: React.FC<AccessoProps> = ({ onEntrato }) => {
             style={{ ['--i' as string]: 1 }}
           >
             <span className="h-px w-6 bg-azzurro" />
-            {sfida ? 'Primo accesso' : 'Area riservata'}
+            {sfida ? (temporanea ? 'Nuova password' : 'Primo accesso')
+              : modo === 'email' ? 'Password smarrita' : 'Area riservata'}
           </div>
           <h1
             className="rise text-[30px] font-medium leading-[1.12] tracking-[-0.035em] text-ink"
@@ -293,7 +368,11 @@ export const Accesso: React.FC<AccessoProps> = ({ onEntrato }) => {
           >
             {sfida ? (
               <>
-                Scegli la tua <span className="text-azzurro">password</span>.
+                Scegli {temporanea ? 'una nuova' : 'la tua'} <span className="text-azzurro">password</span>.
+              </>
+            ) : modo === 'email' ? (
+              <>
+                Recupera l’<span className="text-azzurro">accesso</span>.
               </>
             ) : (
               <>
@@ -308,7 +387,9 @@ export const Accesso: React.FC<AccessoProps> = ({ onEntrato }) => {
           >
             {sfida
               ? 'La password temporanea è servita una volta sola. Da adesso userai questa.'
-              : 'Le credenziali sono personali e le rilascia l’amministratore.'}
+              : modo === 'email'
+                ? 'Ti mandiamo per email una password temporanea: entri con quella e subito dopo ne scegli una nuova.'
+                : 'Le credenziali sono personali e le rilascia l’amministratore.'}
           </p>
 
           {/* La scheda del modulo: su schermo largo un piano rialzato con il
@@ -346,7 +427,7 @@ export const Accesso: React.FC<AccessoProps> = ({ onEntrato }) => {
                         autoCapitalize="none"
                         autoCorrect="off"
                         spellCheck={false}
-                        enterKeyHint="next"
+                        enterKeyHint={modo === 'email' ? 'send' : 'next'}
                         autoFocus={SCHERMO_LARGO}
                         value={email}
                         onChange={(e) => {
@@ -359,8 +440,9 @@ export const Accesso: React.FC<AccessoProps> = ({ onEntrato }) => {
                         }}
                         onKeyDown={(e) => {
                           // Invio sull'email porta alla password, se e' ancora
-                          // vuota: inviare a meta' darebbe solo un errore.
-                          if (e.key === 'Enter' && !password) {
+                          // vuota: inviare a meta' darebbe solo un errore. Nel
+                          // recupero l'email e' l'unico campo, e Invio invia.
+                          if (modo === 'accesso' && e.key === 'Enter' && !password) {
                             e.preventDefault();
                             campoPassword.current?.focus();
                           }
@@ -374,36 +456,22 @@ export const Accesso: React.FC<AccessoProps> = ({ onEntrato }) => {
                     </Capsula>
                   </Campo>
 
+                  {modo === 'accesso' && (
                   <Campo
                     id="password"
-                    etichetta="Password"
+                    etichetta={temporanea ? 'Password temporanea' : 'Password'}
                     errore={errorePassword}
                     azione={
                       <button
                         type="button"
-                        onClick={() => setAiutoPassword((v) => !v)}
-                        aria-expanded={aiutoPassword}
-                        aria-controls="password-aiuto"
-                        className="rounded text-[12.5px] font-medium text-azzurro underline-offset-4 transition-colors duration-200 hover:text-azzurro-scuro hover:underline"
+                        onClick={() => vaiA('email')}
+                        disabled={bloccato}
+                        className="rounded text-[12.5px] font-medium text-azzurro underline-offset-4 transition-colors duration-200 hover:text-azzurro-scuro hover:underline disabled:opacity-60"
                       >
                         Password smarrita?
                       </button>
                     }
-                    sotto={
-                      <>
-                        {avvisoMaiuscole}
-                        {aiutoPassword && (
-                          <p
-                            id="password-aiuto"
-                            className="frase-in flex items-start gap-2 rounded-lg bg-panel px-3 py-2.5 text-[12.5px] leading-relaxed text-ink-2"
-                          >
-                            <KeyRound className="mt-[2px] h-3.5 w-3.5 shrink-0 text-azzurro" strokeWidth={1.75} />
-                            La rigenera l’amministratore: non esiste un recupero
-                            automatico.
-                          </p>
-                        )}
-                      </>
-                    }
+                    sotto={avvisoMaiuscole}
                   >
                     <Capsula icona={LockKeyhole} invalida={!!errorePassword || !!errore} coda={occhio}>
                       <input
@@ -428,15 +496,21 @@ export const Accesso: React.FC<AccessoProps> = ({ onEntrato }) => {
                       />
                     </Capsula>
                   </Campo>
+                  )}
                 </>
               ) : (
                 <>
                   <div className="flex items-start gap-2.5 rounded-xl border border-azzurro/25 bg-azzurro-3/30 px-3.5 py-3">
                     <KeyRound className="mt-0.5 h-4 w-4 shrink-0 text-azzurro" strokeWidth={1.75} />
-                    <p className="text-[13px] leading-relaxed text-ink">
-                      Primo accesso per <span className="font-medium text-ink">{sfida.email}</span>.
+                    <p className="min-w-0 text-[13px] leading-relaxed text-ink">
+                      {temporanea ? 'Password temporanea accettata per ' : 'Primo accesso per '}
+                      <span className="font-medium text-ink [overflow-wrap:anywhere]">{sfida.email}</span>.
                     </p>
                   </div>
+
+                  {/* Per i gestori di password: la nuova password va salvata
+                      sotto questo indirizzo. */}
+                  <input type="email" autoComplete="username" value={sfida.email} readOnly hidden />
 
                   <Campo
                     id="nuova"
@@ -474,7 +548,7 @@ export const Accesso: React.FC<AccessoProps> = ({ onEntrato }) => {
                         id="nuova"
                         type={mostra ? 'text' : 'password'}
                         autoComplete="new-password"
-                        autoFocus={SCHERMO_LARGO}
+                        autoFocus={SCHERMO_LARGO && !!sfida}
                         value={nuova}
                         onChange={(e) => {
                           setNuova(e.target.value);
@@ -539,6 +613,16 @@ export const Accesso: React.FC<AccessoProps> = ({ onEntrato }) => {
                 </div>
               )}
 
+              {avviso && !errore && (
+                <div
+                  role="status"
+                  className="frase-in flex items-start gap-2.5 rounded-xl border border-alloro/35 bg-alloro-3 px-3.5 py-3"
+                >
+                  <CircleCheck className="mt-0.5 h-4 w-4 shrink-0 text-alloro" strokeWidth={1.75} />
+                  <p className="text-[13.5px] font-medium leading-relaxed text-ink">{avviso}</p>
+                </div>
+              )}
+
               <button
                 type="submit"
                 disabled={bloccato}
@@ -556,11 +640,13 @@ export const Accesso: React.FC<AccessoProps> = ({ onEntrato }) => {
                 ) : inCorso ? (
                   <span className="flex items-center gap-2.5">
                     <span className="battito" style={{ ['--battito' as string]: '#fff' }} />
-                    Verifica in corso…
+                    {modo === 'email' && !sfida ? 'Invio in corso…' : 'Verifica in corso…'}
                   </span>
                 ) : (
                   <>
-                    {sfida ? 'Imposta ed entra' : 'Accedi'}
+                    {sfida ? 'Imposta ed entra'
+                      : modo === 'email' ? 'Manda la password temporanea'
+                        : 'Accedi'}
                     <ArrowRight
                       className="h-4 w-4 transition-transform duration-300 ease-[cubic-bezier(0.16,1,0.3,1)] group-hover:translate-x-0.5"
                       strokeWidth={1.75}
@@ -568,6 +654,18 @@ export const Accesso: React.FC<AccessoProps> = ({ onEntrato }) => {
                   </>
                 )}
               </button>
+
+              {!sfida && modo === 'email' && (
+                <button
+                  type="button"
+                  onClick={() => vaiA('accesso')}
+                  disabled={bloccato}
+                  className="-mt-1 inline-flex items-center gap-1.5 self-start rounded text-[13px] font-medium text-ink-2 transition-colors duration-200 hover:text-ink disabled:opacity-60"
+                >
+                  <ArrowLeft className="h-3.5 w-3.5" strokeWidth={1.75} />
+                  Torna all’accesso
+                </button>
+              )}
             </form>
           </div>
 

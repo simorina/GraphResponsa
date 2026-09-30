@@ -698,6 +698,12 @@ Resources:
             AllowedMethods: [GET, HEAD, OPTIONS, PUT, POST, PATCH, DELETE]
             CachePolicyId: 4135ea2d-6df8-44a3-9df3-4b5a84be39ad
             OriginRequestPolicyId: b689b0a8-53d0-40ab-baf2-68738e2966ac
+          - PathPattern: /recupero-password
+            TargetOriginId: origineAlb
+            ViewerProtocolPolicy: redirect-to-https
+            AllowedMethods: [GET, HEAD, OPTIONS, PUT, POST, PATCH, DELETE]
+            CachePolicyId: 4135ea2d-6df8-44a3-9df3-4b5a84be39ad
+            OriginRequestPolicyId: b689b0a8-53d0-40ab-baf2-68738e2966ac
           - PathPattern: /conversazioni*
             TargetOriginId: origineAlb
             ViewerProtocolPolicy: redirect-to-https
@@ -818,6 +824,19 @@ Resources:
                   - !GetAtt TabellaConsumi.Arn
                   - !Sub '${TabellaConversazioni.Arn}/index/*'
                   - !Sub '${TabellaRiscontri.Arn}/index/*'
+        # La password smarrita (src/servizio/recupero.py): una password
+        # temporanea per email a chi l'ha persa. Solo sul proprio pool, e solo
+        # le tre operazioni che servono.
+        - PolicyName: RecuperoPassword
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - cognito-idp:AdminGetUser
+                  - cognito-idp:AdminSetUserPassword
+                  - cognito-idp:AdminCreateUser
+                Resource: !GetAtt PoolUtenti.Arn
 
   # =========================================================================
   # Servizio

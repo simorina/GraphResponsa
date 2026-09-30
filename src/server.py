@@ -25,7 +25,7 @@ from io import BytesIO
 from pathlib import Path
 
 import uvicorn
-from fastapi import Depends, FastAPI, HTTPException
+from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, Response, StreamingResponse
 from pydantic import BaseModel, Field
 
@@ -43,7 +43,7 @@ load_dotenv(ROOT / ".env")
 
 from agente.agente import rispondi, nuova_conversazione   # noqa: E402
 from agente.strumenti import grafo, url_documento         # noqa: E402
-from servizio import archivio                             # noqa: E402
+from servizio import archivio, recupero                   # noqa: E402
 from servizio.identita import Utente, utente_corrente     # noqa: E402
 
 from fastapi.staticfiles import StaticFiles
@@ -77,6 +77,10 @@ class Riscontro(BaseModel):
     domanda: str = ""
     estrattoRisposta: str = ""
     fonti: list[str] = []
+
+
+class RichiestaRecupero(BaseModel):
+    email: str = Field(max_length=254)
 
 
 # --------------------------------------------------------------- diagnostica
@@ -317,6 +321,41 @@ def riscontro(r: Riscontro, utente: Utente = Depends(utente_corrente)):
         utente_id=utente.id, conversazione=r.conversazione, indice=r.indiceMessaggio,
         giudizio=r.giudizio, motivo=r.motivo, categorie=r.categorie,
         domanda=r.domanda, estratto=r.estrattoRisposta, fonti=r.fonti)
+    return {"ok": True}
+
+
+# -------------------------------------------------------------- password smarrita
+
+def _ip_del_visitatore(request: Request) -> str:
+    """L'IP di chi chiede, per i limiti del recupero.
+
+    Davanti al servizio ci sono CloudFront e il bilanciatore: CloudFront
+    aggiunge a X-Forwarded-For l'IP del visitatore, il bilanciatore quello di
+    CloudFront. Il visitatore e' quindi il penultimo; il primo lo puo' scrivere
+    chiunque, e fidarsene renderebbe i limiti per IP aggirabili.
+    """
+    voci = [v.strip() for v in request.headers.get("x-forwarded-for", "").split(",") if v.strip()]
+    if len(voci) >= 2:
+        return voci[-2]
+    if voci:
+        return voci[0]
+    return request.client.host if request.client else "?"
+
+
+@app.post("/recupero-password")
+def recupero_password(r: RichiestaRecupero, request: Request):
+    """
+    Manda una password temporanea all'email, se ha un account: si entra con
+    quella e al primo accesso se ne sceglie una nuova (vedi servizio/recupero).
+
+    Senza autenticazione per forza - chi la usa non riesce a entrare - e con la
+    stessa risposta per ogni indirizzo, registrato o no.
+    """
+    try:
+        recupero.manda_password_temporanea(r.email, _ip_del_visitatore(request))
+    except recupero.Indisponibile as e:
+        registro.error("recupero della password non riuscito: %s", e)
+        raise HTTPException(status_code=503, detail="Recupero della password non disponibile.")
     return {"ok": True}
 
 
