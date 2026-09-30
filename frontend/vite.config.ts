@@ -19,7 +19,8 @@ export default defineConfig({
     // vuota senza che niente lo dicesse. In produzione sono lo stesso
     // servizio, quindi il guasto si vedeva solo qui.
     proxy: Object.fromEntries(
-      ['/chat', '/stato', '/documenti', '/conversazioni', '/riscontro'].map((r) => [
+      ['/chat', '/stato', '/documenti', '/conversazioni', '/riscontro',
+        '/recupero-password', '/richiesta-demo'].map((r) => [
         r,
         { target: 'http://127.0.0.1:8000', changeOrigin: true },
       ])

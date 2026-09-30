@@ -43,7 +43,7 @@ load_dotenv(ROOT / ".env")
 
 from agente.agente import rispondi, nuova_conversazione   # noqa: E402
 from agente.strumenti import grafo, url_documento         # noqa: E402
-from servizio import archivio, recupero                   # noqa: E402
+from servizio import archivio, demo, recupero             # noqa: E402
 from servizio.identita import Utente, utente_corrente     # noqa: E402
 
 from fastapi.staticfiles import StaticFiles
@@ -81,6 +81,17 @@ class Riscontro(BaseModel):
 
 class RichiestaRecupero(BaseModel):
     email: str = Field(max_length=254)
+
+
+class RichiestaDemo(BaseModel):
+    nome: str = Field(min_length=2, max_length=120)
+    email: str = Field(max_length=254, pattern=r"^[^\s@]+@[^\s@]+\.[^\s@]{2,}$")
+    ente: str = Field(default="", max_length=160)
+    ruolo: str = Field(default="", max_length=80)
+    messaggio: str = Field(default="", max_length=2000)
+    consenso: bool
+    # Nascosto nella pagina: un utente lo lascia vuoto, un bot lo compila.
+    sito: str = Field(default="", max_length=300)
 
 
 # --------------------------------------------------------------- diagnostica
@@ -356,6 +367,27 @@ def recupero_password(r: RichiestaRecupero, request: Request):
     except recupero.Indisponibile as e:
         registro.error("recupero della password non riuscito: %s", e)
         raise HTTPException(status_code=503, detail="Recupero della password non disponibile.")
+    return {"ok": True}
+
+
+# -------------------------------------------------------------- richiesta di demo
+
+@app.post("/richiesta-demo")
+def richiesta_demo(r: RichiestaDemo, request: Request):
+    """
+    "Prenota una demo" dalla pagina di presentazione: la richiesta si salva e
+    parte un'email alla casella commerciale (vedi servizio/demo).
+
+    Senza autenticazione per forza: chi chiede una demo non ha un account.
+    """
+    if not r.consenso:
+        raise HTTPException(status_code=422, detail="Serve il consenso per essere ricontattati.")
+    try:
+        demo.registra(r.nome, r.email, r.ente, r.ruolo, r.messaggio,
+                      _ip_del_visitatore(request), trappola=r.sito)
+    except demo.Indisponibile as e:
+        registro.error("richiesta di demo non registrata: %s", e)
+        raise HTTPException(status_code=503, detail="Richiesta non registrata.")
     return {"ok": True}
 
 

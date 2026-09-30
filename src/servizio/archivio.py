@@ -27,6 +27,7 @@ T_UTENTI = os.environ.get("TABELLA_UTENTI")
 T_CONVERSAZIONI = os.environ.get("TABELLA_CONVERSAZIONI")
 T_RISCONTRI = os.environ.get("TABELLA_RISCONTRI")
 T_CONSUMI = os.environ.get("TABELLA_CONSUMI")
+T_DEMO = os.environ.get("TABELLA_DEMO")
 
 GIORNI_CONSERVAZIONE = int(os.environ.get("GIORNI_CONSERVAZIONE_CHAT", "90"))
 LIMITE_RICHIESTE_GIORNO = int(os.environ.get("LIMITE_RICHIESTE_GIORNO", "100"))
@@ -223,6 +224,20 @@ def salva_riscontro(utente_id: str, conversazione: str, indice: int, giudizio: s
         "fonti": (fonti or [])[:20],
         "creato": _adesso(),
     })
+
+
+# ------------------------------------------------------------ richieste di demo
+
+def salva_richiesta_demo(richiesta: dict) -> bool:
+    """Salva una richiesta di demo dalla pagina di presentazione.
+
+    Restituisce False se la tabella non e' configurata (in sviluppo): chi
+    chiama decide se basta l'email o se e' un guasto.
+    """
+    if not T_DEMO:
+        return False
+    _tabella(T_DEMO).put_item(Item={**richiesta, "creata": richiesta.get("creata") or _adesso()})
+    return True
 
 
 # ---------------------------------------------------------------- consumi

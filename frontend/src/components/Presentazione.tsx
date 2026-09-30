@@ -1,10 +1,12 @@
 import React, { memo, useEffect, useRef, useState } from 'react';
 import {
-  ArrowDown, ArrowRight, ArrowUpRight, BookOpenText, Building2, FileText, Gavel, Landmark,
-  Link2, Scale, ScrollText, Search, ShieldCheck, UserRound,
+  ArrowDown, ArrowRight, ArrowUpRight, BellRing, BookOpenText, Briefcase, Building2, CalendarDays, FileText, Gavel,
+  HeartPulse, House, Landmark, Link2, MessageSquareText, Receipt, Scale, ScrollText, Search,
+  ShieldCheck, Store, UserRound,
 } from 'lucide-react';
 import { Sigillo } from './Sigillo';
 import { PrismGradient } from './PrismGradient';
+import { PrenotaDemo } from './PrenotaDemo';
 
 /**
  * La pagina di presentazione: cosa e' Responsa, per chi non ha ancora fatto
@@ -12,34 +14,34 @@ import { PrismGradient } from './PrismGradient';
  * sigillo, le etichette in maiuscoletto, il corsivo editoriale - perche' i due
  * schermi si passano la mano con "Accedi".
  *
- * Le cifre e gli esempi sono veri, letti dal grafo il 30/09/2026: una pagina
- * che spiega uno strumento di consultazione delle fonti non puo' inventarne.
+ * La pagina parla a chi deve decidere se usarlo, non a chi l'ha costruito:
+ * niente conteggi di atti e commi, ma cosa si puo' chiedere e cosa si ottiene.
+ * Gli esempi sono veri - l'art. 204-bis del Codice penale, le leggi citate
+ * nelle domande - perche' uno strumento che cita le fonti non puo' inventarne.
  */
 
 const PRISMA = ['#061f2f', '#3f9fd2', '#e3f1fa'] as const;
 
-const NUMERI = [
-  { valore: '11.110', etichetta: 'atti con il testo integrale', nota: 'leggi, decreti, regolamenti' },
-  { valore: '77.387', etichetta: 'articoli', nota: 'ognuno con i suoi commi' },
-  { valore: '177.369', etichetta: 'commi', nota: 'l’unità che Responsa cita' },
-  { valore: '68.267', etichetta: 'rinvii fra atti', nota: 'le norme che si richiamano' },
+/** Sotto l'apertura: quello che si ottiene, in tre righe. */
+const VANTAGGI = [
+  { icona: MessageSquareText, titolo: 'Parli come a un collega', testo: 'In italiano, senza gergo né numeri di legge' },
+  { icona: ScrollText, titolo: 'Ogni risposta ha la sua fonte', testo: 'Articolo e comma, e il testo a un clic' },
+  { icona: BellRing, titolo: 'Ti avvisa se una norma è cambiata', testo: 'E ti dice cosa vale oggi' },
 ];
 
-// La composizione dell'archivio per tipo d'atto; "altri" raccoglie decreti
-// consiliari, decreti-legge, leggi qualificate e costituzionali, statuti.
-const COMPOSIZIONE = [
-  { tipo: 'Decreti', n: 4387, colore: 'bg-[#061f2f]' },
-  { tipo: 'Decreti delegati', n: 2320, colore: 'bg-azzurro-scuro' },
-  { tipo: 'Leggi', n: 1871, colore: 'bg-azzurro' },
-  { tipo: 'Decreti reggenziali', n: 444, colore: 'bg-azzurro-2' },
-  { tipo: 'Regolamenti', n: 361, colore: 'bg-[#8fc3e3]' },
-  { tipo: 'Altri atti', n: 1727, colore: 'bg-line-2' },
+/**
+ * Cosa si puo' chiedere: le domande di tutti i giorni, per materia. Le
+ * materie sono quelle su cui l'archivio ha davvero le norme (edilizia
+ * sovvenzionata, pensioni, malattia, Codice penale...).
+ */
+const DOMANDE = [
+  { icona: House, materia: 'Casa', domanda: 'Chi ha diritto ai contributi per l’edilizia sovvenzionata?', ampia: true },
+  { icona: Briefcase, materia: 'Lavoro e pensione', domanda: 'Con quanti anni di contributi si va in pensione di vecchiaia?' },
+  { icona: HeartPulse, materia: 'Salute', domanda: 'Quanto viene pagata l’indennità di malattia, e per quanto tempo?' },
+  { icona: Gavel, materia: 'Penale', domanda: 'Cosa rischia chi usa la carta di pagamento di un altro?', ampia: true },
+  { icona: Store, materia: 'Imprese', domanda: 'Cosa serve per aprire un’attività e ottenere la licenza?' },
+  { icona: Receipt, materia: 'Fisco', domanda: 'Come si tassano i redditi prodotti all’estero?' },
 ];
-const TOTALE = COMPOSIZIONE.reduce((s, c) => s + c.n, 0);
-
-// A mano e non con toLocaleString: per le quattro cifre il raggruppamento
-// italiano non e' garantito da tutti i browser ("4387" invece di "4.387").
-const migliaia = (n: number) => String(n).replace(/\B(?=(\d{3})+(?!\d))/g, '.');
 
 const PASSI = [
   {
@@ -140,6 +142,28 @@ const Accedi: React.FC<{ onAccedi: () => void; chiaro?: boolean; grande?: boolea
   >
     Accedi
     <ArrowRight className="h-4 w-4 transition-transform duration-300 ease-[cubic-bezier(0.16,1,0.3,1)] group-hover:translate-x-0.5" strokeWidth={1.75} />
+  </button>
+);
+
+/** Porta al modulo della demo e mette il cursore sul primo campo, dopo lo
+ *  scorrimento: col fuoco subito, il browser salterebbe invece di scorrere. */
+function versoDemo() {
+  document.getElementById('demo')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  setTimeout(() => document.getElementById('demo-nome')?.focus({ preventScroll: true }), 700);
+}
+
+const Demo: React.FC<{ secondario?: boolean }> = ({ secondario }) => (
+  <button
+    type="button"
+    onClick={versoDemo}
+    className={`group inline-flex h-[52px] items-center justify-center gap-2 rounded-xl px-6 text-[15px] font-semibold transition-all duration-200 ease-[cubic-bezier(0.16,1,0.3,1)] focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-azzurro-3 active:scale-[0.985] ${
+      secondario
+        ? 'border border-campo bg-canvas text-ink hover:-translate-y-px hover:border-ink-3'
+        : 'lucido overflow-hidden bg-azzurro text-canvas shadow-[0_6px_18px_-10px_rgba(10,107,159,0.9)] hover:-translate-y-px hover:bg-azzurro-scuro'
+    }`}
+  >
+    Prenota una demo
+    <CalendarDays className="h-4 w-4" strokeWidth={1.75} />
   </button>
 );
 
@@ -414,12 +438,23 @@ export const Presentazione: React.FC<{ onAccedi: () => void }> = ({ onAccedi }) 
               alle tue domande citando articolo e comma. Ogni citazione si apre sul testo
               dell’atto: quello che leggi, lo puoi controllare.
             </p>
+            {/* Chi arriva qui senza account e' un possibile cliente: la demo e'
+                il pulsante principale. Chi le credenziali le ha trova "Accedi"
+                accanto, e in alto a destra. */}
             <div className="rise mt-9 flex flex-wrap items-center gap-3" style={{ ['--i' as string]: 4 }}>
-              <Accedi onAccedi={onAccedi} grande />
+              <Demo />
+              <button
+                type="button"
+                onClick={onAccedi}
+                className="group inline-flex h-[52px] items-center gap-2 rounded-xl border border-campo bg-canvas px-5 text-[15px] font-semibold text-ink transition-all duration-200 hover:-translate-y-px hover:border-ink-3 active:scale-[0.985]"
+              >
+                Accedi
+                <ArrowRight className="h-4 w-4 transition-transform duration-300 group-hover:translate-x-0.5" strokeWidth={1.75} />
+              </button>
               <a
                 href="#come"
                 onClick={vaiA('come')}
-                className="group inline-flex h-[52px] items-center gap-2 rounded-xl px-4 text-[15px] font-medium text-ink-2 transition-colors duration-200 hover:bg-panel hover:text-ink"
+                className="group hidden h-[52px] items-center gap-2 rounded-xl px-3 text-[15px] font-medium text-ink-2 transition-colors duration-200 hover:text-ink sm:inline-flex"
               >
                 Come funziona
                 <ArrowDown className="h-4 w-4 transition-transform duration-300 group-hover:translate-y-0.5" strokeWidth={1.75} />
@@ -427,19 +462,22 @@ export const Presentazione: React.FC<{ onAccedi: () => void }> = ({ onAccedi }) 
             </div>
           </div>
 
-          <dl className="rise grid grid-cols-3 gap-4 border-t border-line pt-5 sm:max-w-[34rem]" style={{ ['--i' as string]: 5 }}>
-            {[
-              ['11.110', 'atti'],
-              ['177.369', 'commi'],
-              ['1600–2026', 'quattro secoli'],
-            ].map(([v, e]) => (
-              <div key={e}>
-                <dt className="sr-only">{e}</dt>
-                <dd className="font-mono text-[15px] font-medium tracking-[-0.01em] text-ink sm:text-[17px]">{v}</dd>
-                <dd className="mt-0.5 text-[12px] text-ink-3">{e}</dd>
-              </div>
-            ))}
-          </dl>
+          <ul className="rise grid grid-cols-1 gap-4 border-t border-line pt-6 sm:grid-cols-3 sm:gap-6" style={{ ['--i' as string]: 5 }}>
+            {VANTAGGI.map((v) => {
+              const Icona = v.icona;
+              return (
+                <li key={v.titolo} className="flex items-start gap-3 sm:block">
+                  <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-line bg-panel text-azzurro sm:mb-3">
+                    <Icona className="h-4 w-4" strokeWidth={1.75} />
+                  </span>
+                  <span>
+                    <span className="block text-[14px] font-semibold leading-snug text-ink">{v.titolo}</span>
+                    <span className="mt-0.5 block text-[13px] leading-snug text-ink-3">{v.testo}</span>
+                  </span>
+                </li>
+              );
+            })}
+          </ul>
         </div>
 
         <aside className="relative overflow-hidden">
@@ -449,7 +487,7 @@ export const Presentazione: React.FC<{ onAccedi: () => void }> = ({ onAccedi }) 
           <div aria-hidden className="absolute inset-0 bg-[linear-gradient(160deg,rgba(6,31,47,0.25)_0%,rgba(6,31,47,0.55)_55%,rgba(6,31,47,0.85)_100%)]" />
           <div className="relative flex h-full flex-col px-5 py-10 sm:px-10 lg:px-12 lg:py-10">
             <nav className="hidden items-center justify-end gap-7 lg:flex" aria-label="Sezioni">
-              {[['come', 'Come funziona'], ['archivio', 'L’archivio'], ['limiti', 'Limiti']].map(([id, t]) => (
+              {[['come', 'Come funziona'], ['domande', 'Cosa chiedere'], ['demo', 'Prenota una demo']].map(([id, t]) => (
                 <a key={id} href={`#${id}`} onClick={vaiA(id)}
                   className="text-[13.5px] font-medium text-white/80 transition-colors duration-200 hover:text-white">
                   {t}
@@ -524,7 +562,7 @@ export const Presentazione: React.FC<{ onAccedi: () => void }> = ({ onAccedi }) 
             {
               etichetta: 'Rinvii',
               titolo: <>Segue le norme che si <span className="text-azzurro">richiamano</span>.</>,
-              testo: 'Un decreto applica una legge, un articolo rimanda a un altro, una definizione vale per tutto l’atto. L’archivio tiene 68.267 rinvii fra atti, e Responsa li segue quando la risposta dipende da una norma richiamata.',
+              testo: 'Un decreto applica una legge, un articolo rimanda a un altro, una definizione vale per tutto l’atto. Responsa segue questi collegamenti quando la risposta dipende da una norma richiamata: il pezzo che manca non ti sfugge.',
               figura: <Rete />,
             },
           ].map((s, i) => (
@@ -545,54 +583,56 @@ export const Presentazione: React.FC<{ onAccedi: () => void }> = ({ onAccedi }) 
         </div>
       </section>
 
-      {/* ═══ L'archivio ═══ */}
-      <section id="archivio" className="scroll-mt-6 border-t border-line">
+      {/* ═══ Cosa puoi chiedere ═══ */}
+      <section id="domande" className="scroll-mt-6 border-t border-line">
         <div className="mx-auto max-w-[1240px] px-5 py-20 sm:px-10 md:py-28 lg:px-16">
           <div className="grid grid-cols-1 gap-8 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)] lg:items-end" data-rivela>
             <div>
-              <Etichetta>L’archivio</Etichetta>
+              <Etichetta>Cosa puoi chiedere</Etichetta>
               <h2 className="mt-5 max-w-[18ch] text-[34px] font-medium leading-[1.08] tracking-[-0.035em] sm:text-[42px]">
-                Dagli Statuti del 1600 agli atti di <span className="text-azzurro">quest’anno</span>.
+                Le domande di tutti i giorni, <span className="text-azzurro">con la risposta giusta</span>.
               </h2>
             </div>
             <p className="max-w-[46ch] text-[15.5px] leading-relaxed text-ink-2 lg:justify-self-end">
-              I testi vengono dal portale del Consiglio Grande e Generale, divisi in
-              articoli e commi e collegati fra loro dai rinvii. È su questo che Responsa
-              cerca, legge e cita.
+              Casa, lavoro, impresa, tasse: le norme della Repubblica toccano tutto, e
+              trovare quella giusta fra leggi, decreti e modifiche porta via ore.
+              Con Responsa basta chiedere.
             </p>
           </div>
 
-          <dl className="mt-14 grid grid-cols-2 gap-x-6 gap-y-10 border-t border-line pt-10 lg:grid-cols-[1.4fr_1fr_1fr_1fr]">
-            {NUMERI.map((n, i) => (
-              <div key={n.etichetta} data-rivela style={{ ['--i' as string]: i }}>
-                <dt className="sr-only">{n.etichetta}</dt>
-                <dd className={`font-medium tabular-nums tracking-[-0.025em] text-ink ${i === 0 ? 'text-[36px] sm:text-[44px] lg:text-[64px]' : 'text-[36px] sm:text-[44px]'} leading-none`}>
-                  {n.valore}
-                </dd>
-                <dd className="mt-3 text-[14px] font-medium text-ink">{n.etichetta}</dd>
-                <dd className="mt-0.5 text-[13px] text-ink-3">{n.nota}</dd>
-              </div>
-            ))}
-          </dl>
-
-          <div className="mt-14" data-rivela>
-            <div className="flex h-3 w-full overflow-hidden rounded-full" role="img"
-              aria-label={COMPOSIZIONE.map((c) => `${c.tipo}: ${migliaia(c.n)}`).join(', ')}>
-              {COMPOSIZIONE.map((c) => (
-                <span key={c.tipo} className={`${c.colore} h-full`} style={{ width: `${(c.n / TOTALE) * 100}%` }} />
-              ))}
-            </div>
-            <ul className="mt-5 grid grid-cols-2 gap-x-6 gap-y-3 sm:grid-cols-3 lg:grid-cols-6">
-              {COMPOSIZIONE.map((c) => (
-                <li key={c.tipo} className="flex items-start gap-2.5">
-                  <span className={`${c.colore} mt-1.5 h-2 w-2 shrink-0 rounded-full`} />
-                  <span>
-                    <span className="block text-[13px] text-ink">{c.tipo}</span>
-                    <span className="block font-mono text-[12px] text-ink-3">{migliaia(c.n)}</span>
-                  </span>
+          {/* Una griglia a spazi diversi, non file di schede uguali: sul largo
+              4+2, 2+4, 3+3; su tablet due colonne; su telefono una. */}
+          <ul className="mt-14 grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-6">
+            {DOMANDE.map((d, i) => {
+              const Icona = d.icona;
+              const larga = ['lg:col-span-4', 'lg:col-span-2', 'lg:col-span-2', 'lg:col-span-4', 'lg:col-span-3', 'lg:col-span-3'][i];
+              return (
+                // L'entrata sta sull'elemento della lista, il movimento al
+                // passaggio del mouse sulla scheda: sulla stessa regola le due
+                // transizioni si pesterebbero i piedi.
+                <li key={d.materia} data-rivela style={{ ['--i' as string]: i % 3 }} className={larga}>
+                  <div className="faro flex h-full flex-col justify-between gap-8 rounded-2xl border border-line bg-canvas p-6 transition-[translate,box-shadow] duration-300 ease-[cubic-bezier(0.16,1,0.3,1)] hover:-translate-y-0.5 hover:shadow-[0_24px_48px_-32px_rgba(6,31,47,0.45)] sm:p-7">
+                    <div className="flex items-center gap-3">
+                      <span className="flex h-9 w-9 items-center justify-center rounded-xl border border-line bg-panel text-azzurro">
+                        <Icona className="h-[18px] w-[18px]" strokeWidth={1.5} />
+                      </span>
+                      <span className="font-mono text-[11px] uppercase tracking-[0.14em] text-ink-3">{d.materia}</span>
+                    </div>
+                    <p className={`font-editorial leading-[1.3] tracking-[-0.01em] text-ink ${d.ampia ? 'text-[22px] sm:text-[26px]' : 'text-[20px] sm:text-[22px]'}`}>
+                      «{d.domanda}»
+                    </p>
+                  </div>
                 </li>
-              ))}
-            </ul>
+              );
+            })}
+          </ul>
+
+          <div className="mt-10 flex flex-col items-start gap-4 border-t border-line pt-8 sm:flex-row sm:items-center sm:justify-between" data-rivela>
+            <p className="max-w-[52ch] text-[15px] leading-relaxed text-ink-2">
+              Sono solo esempi: chiedi quello che ti serve, con parole tue.
+              Vuoi vederlo sulle domande del tuo lavoro? Te lo mostriamo.
+            </p>
+            <Demo />
           </div>
         </div>
       </section>
@@ -640,6 +680,8 @@ export const Presentazione: React.FC<{ onAccedi: () => void }> = ({ onAccedi }) 
         </div>
       </section>
 
+      <PrenotaDemo />
+
       {/* ═══ Chiusura: il prisma, e l'accesso ═══ */}
       <section className="relative overflow-hidden">
         <div className="absolute inset-0">
@@ -659,6 +701,10 @@ export const Presentazione: React.FC<{ onAccedi: () => void }> = ({ onAccedi }) 
               <Link2 className="mt-[3px] h-3.5 w-3.5 shrink-0" strokeWidth={1.75} />
               Le credenziali sono personali e le rilascia l’amministratore.
             </p>
+            <button type="button" onClick={versoDemo}
+              className="mt-3 text-[13px] font-medium text-white underline-offset-4 hover:underline">
+              Non le hai ancora? Prenota una demo
+            </button>
           </div>
         </div>
       </section>

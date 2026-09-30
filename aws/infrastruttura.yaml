@@ -74,6 +74,19 @@ Parameters:
     Default: 90
     Description: Dopo quanti giorni il TTL cancella una conversazione
 
+  DemoMittente:
+    Type: String
+    Default: rinaldisimone8@gmail.com
+    Description: >-
+      La casella da cui partono gli avvisi di "Prenota una demo", via SMTP
+      (Gmail finche' non ce n'e' una del progetto). La sua password per le app
+      va nel segreto, alla voce DEMO_SMTP_PASSWORD.
+
+  DemoDestinatari:
+    Type: String
+    Default: rinaldisimone8@gmail.com
+    Description: Dove arrivano le richieste di demo; piu' indirizzi separati da virgola
+
   Modello:
     Type: String
     Default: deepseek-v4.1-flash
@@ -334,6 +347,22 @@ Resources:
               KeyType: RANGE
           Projection:
             ProjectionType: ALL
+
+  # "Prenota una demo" dalla pagina di presentazione (src/servizio/demo.py).
+  # Una riga per richiesta; poche decine, si leggono per intero.
+  TabellaDemo:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub '${NomeProgetto}-richieste-demo'
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: richiesta
+          AttributeType: S
+      KeySchema:
+        - AttributeName: richiesta
+          KeyType: HASH
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
 
   TabellaConsumi:
     Type: AWS::DynamoDB::Table
@@ -698,6 +727,12 @@ Resources:
             AllowedMethods: [GET, HEAD, OPTIONS, PUT, POST, PATCH, DELETE]
             CachePolicyId: 4135ea2d-6df8-44a3-9df3-4b5a84be39ad
             OriginRequestPolicyId: b689b0a8-53d0-40ab-baf2-68738e2966ac
+          - PathPattern: /richiesta-demo
+            TargetOriginId: origineAlb
+            ViewerProtocolPolicy: redirect-to-https
+            AllowedMethods: [GET, HEAD, OPTIONS, PUT, POST, PATCH, DELETE]
+            CachePolicyId: 4135ea2d-6df8-44a3-9df3-4b5a84be39ad
+            OriginRequestPolicyId: b689b0a8-53d0-40ab-baf2-68738e2966ac
           - PathPattern: /recupero-password
             TargetOriginId: origineAlb
             ViewerProtocolPolicy: redirect-to-https
@@ -837,6 +872,14 @@ Resources:
                   - cognito-idp:AdminSetUserPassword
                   - cognito-idp:AdminCreateUser
                 Resource: !GetAtt PoolUtenti.Arn
+        # "Prenota una demo": scrivere le richieste, nient'altro.
+        - PolicyName: RichiesteDemo
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action: dynamodb:PutItem
+                Resource: !GetAtt TabellaDemo.Arn
 
   # =========================================================================
   # Servizio
@@ -875,6 +918,12 @@ Resources:
           Environment:
             - Name: MODELLO
               Value: !Ref Modello
+            - Name: TABELLA_DEMO
+              Value: !Ref TabellaDemo
+            - Name: DEMO_MITTENTE
+              Value: !Ref DemoMittente
+            - Name: DEMO_DESTINATARI
+              Value: !Ref DemoDestinatari
             - Name: TABELLA_CHECKPOINT
               Value: !Ref TabellaCheckpoint
             - Name: TABELLA_SCRITTURE
@@ -922,6 +971,10 @@ Resources:
             # cambiarlo sovrascriverebbe le chiavi vere.
             - Name: QWEN_API_KEY
               ValueFrom: !Sub '${Segreti}:QWEN_API_KEY::'
+            # La password per le app della casella DemoMittente. Come per
+            # QWEN_API_KEY, la voce si aggiunge a mano al segreto.
+            - Name: DEMO_SMTP_PASSWORD
+              ValueFrom: !Sub '${Segreti}:DEMO_SMTP_PASSWORD::'
           LogConfiguration:
             LogDriver: awslogs
             Options:
