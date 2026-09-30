@@ -315,7 +315,9 @@ export const Accesso: React.FC<AccessoProps> = ({ onEntrato }) => {
         </div>
         <div aria-hidden className="absolute inset-0 bg-gradient-to-r from-[#061f2f]/95 via-[#061f2f]/55 to-transparent" />
         <div className="relative flex h-full flex-col justify-between px-5 pb-12 pt-6 sm:px-10">
-          <div className="rise flex items-center gap-3">
+          {/* Il marchio riporta alla presentazione: #accesso si toglie, e
+              App torna a mostrarla. */}
+          <a href="#" aria-label="Responsa: torna alla presentazione" className="rise flex w-fit items-center gap-3 rounded-xl">
             <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-canvas shadow-[0_6px_16px_-8px_rgba(6,31,47,0.8)]">
               <Sigillo className="h-5 w-5" animato />
             </div>
@@ -325,7 +327,7 @@ export const Accesso: React.FC<AccessoProps> = ({ onEntrato }) => {
                 Repubblica di San Marino
               </div>
             </div>
-          </div>
+          </a>
           <p
             className="rise max-w-[24ch] font-editorial text-[22px] leading-[1.22] tracking-[-0.01em] text-white sm:text-[26px]"
             style={{ ['--i' as string]: 1 }}
@@ -340,7 +342,7 @@ export const Accesso: React.FC<AccessoProps> = ({ onEntrato }) => {
           arrotondati; da lg torna una colonna piana accanto al pannello. */}
       <div className="relative z-10 -mt-7 flex items-start justify-center rounded-t-[28px] bg-canvas px-5 pb-12 pt-9 shadow-[0_-12px_30px_-18px_rgba(6,31,47,0.45)] sm:px-10 lg:mt-0 lg:items-center lg:rounded-none lg:px-16 lg:py-12 lg:shadow-none">
         <div className="w-full max-w-[26rem]">
-          <div className="rise mb-9 hidden items-center gap-3 lg:flex">
+          <a href="#" aria-label="Responsa: torna alla presentazione" className="rise mb-9 hidden w-fit items-center gap-3 rounded-xl lg:flex">
             <div className="flex h-12 w-12 items-center justify-center rounded-xl border border-line-2 bg-canvas shadow-[0_2px_8px_-4px_rgba(12,27,38,0.18)]">
               <Sigillo className="h-6 w-6" animato />
             </div>
@@ -352,7 +354,7 @@ export const Accesso: React.FC<AccessoProps> = ({ onEntrato }) => {
                 Repubblica di San Marino
               </div>
             </div>
-          </div>
+          </a>
 
           <div
             className="rise mb-3 flex items-center gap-2.5 font-mono text-[11px] uppercase tracking-[0.16em] text-ink-3"

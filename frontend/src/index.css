@@ -426,6 +426,52 @@ body {
 }
 .faro:hover::before { opacity: 1; }
 
+/* ── La pagina di presentazione ─────────────────────────────────
+   Le sezioni entrano quando arrivano in vista (useRivela in
+   Presentazione.tsx aggiunge .visibile), una volta sola. */
+[data-rivela] {
+  opacity: 0;
+  transform: translate3d(0, 18px, 0);
+  transition: opacity 0.8s var(--ease-out-expo), transform 0.8s var(--ease-out-expo);
+  transition-delay: calc(var(--i, 0) * 90ms);
+}
+[data-rivela].visibile { opacity: 1; transform: none; }
+
+/* Il cursore della domanda che si scrive da sola. */
+@keyframes lampeggia { 50% { opacity: 0; } }
+.cursore::after {
+  content: "";
+  display: inline-block;
+  width: 2px;
+  height: 1.05em;
+  margin-left: 2px;
+  vertical-align: -0.18em;
+  background: var(--color-azzurro);
+  animation: lampeggia 1s steps(1) infinite;
+}
+
+/* La rete dei rinvii: le modifiche si disegnano, i rinvii compaiono. */
+.rete-tratto { stroke-dasharray: var(--lung, 200); stroke-dashoffset: var(--lung, 200); }
+.visibile .rete-tratto {
+  animation: disegna 1.4s var(--ease-out-expo) forwards;
+  animation-delay: calc(var(--i, 0) * 140ms);
+}
+.rete-dissolvi { opacity: 0; transition: opacity 0.9s var(--ease-out-expo); transition-delay: calc(0.4s + var(--i, 0) * 140ms); }
+.visibile .rete-dissolvi { opacity: 1; }
+@keyframes anello { 0%, 100% { opacity: 0.35; } 50% { opacity: 0.9; } }
+.respira-anello { animation: anello 3.2s ease-in-out infinite; }
+
+/* Il passo citato, evidenziato come a matita. */
+.evidenzia {
+  background-image: linear-gradient(transparent 58%, var(--color-azzurro-3) 58%);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  [data-rivela] { opacity: 1; transform: none; }
+  .rete-tratto { stroke-dasharray: none; stroke-dashoffset: 0; }
+  .rete-dissolvi { opacity: 1; }
+}
+
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after {
     animation-duration: 0.01ms !important;

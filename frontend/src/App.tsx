@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { PanelLeft, SquarePen } from 'lucide-react';
 import { Accesso } from './components/Accesso';
+import { Presentazione } from './components/Presentazione';
 import { autenticato, configurato, token } from './auth/cognito';
 import { Sidebar } from './components/Sidebar';
 import { MessageList } from './components/MessageList';
@@ -18,6 +19,32 @@ type Sessione = 'verifica' | 'dentro' | 'fuori';
 // Il segno che in questa sessione del browser l'accesso e' gia' stato chiesto.
 const ACCESSO_CHIESTO = 'gr_accesso_chiesto';
 
+/**
+ * Presentazione o accesso, per chi non e' dentro. L'accesso ha un indirizzo
+ * suo (#accesso): il tasto indietro del browser riporta alla presentazione, e
+ * un link all'accesso si puo' mandare a chi ha gia' le credenziali.
+ */
+const INDIRIZZO_ACCESSO = '#accesso';
+
+function useAccessoAperto(): [boolean, (aperto: boolean) => void] {
+  const [aperto, setAperto] = useState(() => window.location.hash === INDIRIZZO_ACCESSO);
+  useEffect(() => {
+    const segui = () => setAperto(window.location.hash === INDIRIZZO_ACCESSO);
+    window.addEventListener('hashchange', segui);
+    return () => window.removeEventListener('hashchange', segui);
+  }, []);
+  const apri = useCallback((si: boolean) => {
+    if (si) {
+      window.location.hash = INDIRIZZO_ACCESSO;
+      window.scrollTo(0, 0);
+    } else {
+      history.replaceState(null, '', window.location.pathname + window.location.search);
+      setAperto(false);
+    }
+  }, []);
+  return [aperto, apri];
+}
+
 export function App() {
   const stretto = useSchermoStretto();
   // Su telefono la barra laterale copre la chat: si parte chiusi, e la si apre
@@ -27,6 +54,7 @@ export function App() {
   const [stats, setStats] = useState<StatsState>({ fase: 'attesa' });
   const [fonteAperta, setFonteAperta] = useState<Fonte | null>(null);
   const [sessione, setSessione] = useState<Sessione>('verifica');
+  const [accessoAperto, apriAccesso] = useAccessoAperto();
 
   const { stato: storico, ricarica } = useConversazioni();
 
@@ -130,10 +158,14 @@ export function App() {
   }
 
   if (sessione === 'fuori') {
+    if (!accessoAperto) return <Presentazione onAccedi={() => apriAccesso(true)} />;
     return (
       <Accesso
         onEntrato={() => {
           sessionStorage.setItem(ACCESSO_CHIESTO, '1');
+          // Dentro l'app l'indirizzo torna pulito: #accesso non vuol dire
+          // piu' nulla, e ricaricando si resterebbe comunque dentro.
+          apriAccesso(false);
           setSessione('dentro');
         }}
       />
