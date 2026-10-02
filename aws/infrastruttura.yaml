@@ -89,16 +89,19 @@ Parameters:
 
   DemoMittente:
     Type: String
-    Default: rinaldisimone8@gmail.com
+    Default: Responsa <demo@responsarsm.com>
     Description: >-
-      La casella da cui partono gli avvisi di "Prenota una demo", via SMTP
-      (Gmail finche' non ce n'e' una del progetto). La sua password per le app
-      va nel segreto, alla voce DEMO_SMTP_PASSWORD.
+      Da dove partono gli avvisi di "Prenota una demo", via Amazon SES con i
+      permessi del ruolo del task (nessuna password). Il dominio, la ricezione
+      e l'inoltro della posta li configura aws/configura_posta.py.
 
   DemoDestinatari:
     Type: String
-    Default: rinaldisimone8@gmail.com
-    Description: Dove arrivano le richieste di demo; piu' indirizzi separati da virgola
+    Default: demo@responsarsm.com
+    Description: >-
+      Dove arrivano le richieste di demo; piu' indirizzi separati da virgola.
+      La posta di @responsarsm.com si inoltra alla casella del team
+      (aws/inoltro_posta.py).
 
   Modello:
     Type: String
@@ -959,6 +962,15 @@ Resources:
               - Effect: Allow
                 Action: dynamodb:PutItem
                 Resource: !GetAtt TabellaDemo.Arn
+        # La demo spedisce dal dominio con SES (src/servizio/demo.py). Il
+        # dominio come identita' SES lo verifica aws/configura_posta.py.
+        - PolicyName: PostaSes
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action: [ses:SendEmail, ses:SendRawEmail]
+                Resource: !Sub 'arn:aws:ses:${AWS::Region}:${AWS::AccountId}:identity/responsarsm.com'
 
   # =========================================================================
   # Servizio
@@ -1050,10 +1062,6 @@ Resources:
             # cambiarlo sovrascriverebbe le chiavi vere.
             - Name: QWEN_API_KEY
               ValueFrom: !Sub '${Segreti}:QWEN_API_KEY::'
-            # La password per le app della casella DemoMittente. Come per
-            # QWEN_API_KEY, la voce si aggiunge a mano al segreto.
-            - Name: DEMO_SMTP_PASSWORD
-              ValueFrom: !Sub '${Segreti}:DEMO_SMTP_PASSWORD::'
           LogConfiguration:
             LogDriver: awslogs
             Options:

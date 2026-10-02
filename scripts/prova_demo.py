@@ -41,6 +41,19 @@ class SmtpRotto:
         raise OSError("SMTP giu'")
 
 
+class SesFinto:
+    def __init__(self):
+        self.inviate = []
+
+    def send_email(self, **k):
+        self.inviate.append(k)
+
+
+class SesRotto:
+    def send_email(self, **k):
+        raise OSError("SES giu'")
+
+
 archivio.salva_richiesta_demo = salva_finto
 archivio.T_DEMO = "tabella-prova"
 demo.MITTENTE = "mittente@esempio.sm"
@@ -123,6 +136,43 @@ def prova():
     except demo.Indisponibile:
         ok = True
     controlla("entrambi giu': Indisponibile (-> 503)", ok)
+
+    print("\nSES, la strada di produzione (nessuna password SMTP)")
+    demo.SMTP_PASSWORD = ""
+    try:
+        azzera()
+        ses = SesFinto()
+        demo.registra("Giulia Terenzi", "giulia@studio.sm", "Studio Terenzi", "Avvocata",
+                      "Vorrei vedere come cita le norme sul lavoro.", "81.2.3.5", ses=ses)
+        k = ses.inviate[0] if ses.inviate else {}
+        semplice = k.get("Content", {}).get("Simple", {})
+        controlla("spedita con SES, una volta", len(ses.inviate) == 1)
+        controlla("dal mittente configurato alla casella commerciale",
+                  k.get("FromEmailAddress") == "mittente@esempio.sm"
+                  and k.get("Destination") == {"ToAddresses": ["commerciale@esempio.sm"]})
+        controlla("Reply-To: chi ha chiesto la demo", k.get("ReplyToAddresses") == ["giulia@studio.sm"])
+        controlla("oggetto con nome ed ente",
+                  semplice.get("Subject", {}).get("Data") == "Richiesta demo: Giulia Terenzi (Studio Terenzi)")
+        controlla("il messaggio e' nel corpo", "norme sul lavoro" in semplice.get("Body", {}).get("Text", {}).get("Data", ""))
+
+        azzera()
+        try:
+            demo.registra("Anna", "anna@x.sm", "", "", "", "7.7.7.10", ses=SesRotto())
+            ok = len(salvate) == 1
+        except demo.Indisponibile:
+            ok = False
+        controlla("SES giu', richiesta salvata: nessun errore all'utente", ok)
+
+        azzera()
+        guasto["salva"] = True
+        try:
+            demo.registra("Anna", "anna@x.sm", "", "", "", "7.7.7.11", ses=SesRotto())
+            ok = False
+        except demo.Indisponibile:
+            ok = True
+        controlla("SES e DynamoDB giu': Indisponibile (-> 503)", ok)
+    finally:
+        demo.SMTP_PASSWORD = "finta"
 
     print("\nendpoint")
     from fastapi.testclient import TestClient  # noqa: E402

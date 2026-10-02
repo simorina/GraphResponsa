@@ -6,11 +6,14 @@ DynamoDB (TABELLA_DEMO), dove resta anche se la posta si perde, e parte
 un'email alla casella commerciale (DEMO_DESTINATARI), perche' una richiesta
 che nessuno legge in giornata e' un contatto perso.
 
-L'email parte via SMTP dalla casella del mittente (DEMO_MITTENTE), non da
-Amazon SES: per ora e' una casella Gmail, e con Gmail serve una "password per
-le app" (DEMO_SMTP_PASSWORD, nei segreti), non quella dell'account. Server e
-porta si cambiano con DEMO_SMTP_HOST e DEMO_SMTP_PORT quando la casella
-diventera' un'altra.
+L'email parte da Amazon SES, dall'indirizzo del dominio (DEMO_MITTENTE, per
+esempio "Responsa <demo@responsarsm.com>"), con i permessi del ruolo del
+container: nessuna password da custodire. La posta che arriva al dominio
+viene poi inoltrata alla casella del team (aws/inoltro_posta.py).
+
+In locale, senza AWS, si puo' ancora passare da un server SMTP: se c'e'
+DEMO_SMTP_PASSWORD si usa quello (DEMO_SMTP_HOST e DEMO_SMTP_PORT, Gmail se
+non indicati, con la sua "password per le app").
 
 L'email ha come Reply-To l'indirizzo di chi chiede: rispondere dalla casella
 commerciale scrive direttamente a lui.
@@ -40,6 +43,8 @@ DESTINATARI = [d.strip() for d in os.environ.get("DEMO_DESTINATARI", MITTENTE).s
 SMTP_HOST = os.environ.get("DEMO_SMTP_HOST", "smtp.gmail.com")
 SMTP_PORT = int(os.environ.get("DEMO_SMTP_PORT", "587"))
 SMTP_PASSWORD = os.environ.get("DEMO_SMTP_PASSWORD", "")
+REGIONE = os.environ.get("REGIONE", "eu-central-1")
+_client_ses = None
 
 PER_IP = (5, 60 * 60)            # richieste, finestra in secondi
 TOTALE = (60, 24 * 60 * 60)      # tetto complessivo al giorno
@@ -87,9 +92,13 @@ def _testo_email(r: dict) -> str:
     return "\n".join(righe)
 
 
+def _oggetto(r: dict) -> str:
+    return (f"Richiesta demo: {r['nome']}" + (f" ({r['ente']})" if r.get("ente") else ""))[:200]
+
+
 def _messaggio(r: dict) -> EmailMessage:
     m = EmailMessage()
-    m["Subject"] = (f"Richiesta demo: {r['nome']}" + (f" ({r['ente']})" if r.get("ente") else ""))[:200]
+    m["Subject"] = _oggetto(r)
     m["From"] = MITTENTE
     m["To"] = ", ".join(DESTINATARI)
     m["Reply-To"] = r["email"]
@@ -97,22 +106,38 @@ def _messaggio(r: dict) -> EmailMessage:
     return m
 
 
-def _manda_email(r: dict, smtp=None) -> bool:
-    """Spedisce l'avviso. `smtp` si passa solo dalle prove, al posto del server."""
-    if not (MITTENTE and DESTINATARI and SMTP_PASSWORD):
+def _ses():
+    global _client_ses
+    if _client_ses is None:
+        import boto3
+        _client_ses = boto3.client("sesv2", region_name=REGIONE)
+    return _client_ses
+
+
+def _manda_email(r: dict, smtp=None, ses=None) -> bool:
+    """Spedisce l'avviso. `smtp` e `ses` si passano solo dalle prove, al posto dei servizi."""
+    if not (MITTENTE and DESTINATARI):
         return False
-    if smtp is not None:
-        smtp.send_message(_messaggio(r))
+    if smtp is not None or SMTP_PASSWORD:
+        if smtp is not None:
+            smtp.send_message(_messaggio(r))
+            return True
+        with smtplib.SMTP(SMTP_HOST, SMTP_PORT, timeout=15) as s:
+            s.starttls(context=ssl.create_default_context())
+            s.login(MITTENTE, SMTP_PASSWORD)
+            s.send_message(_messaggio(r))
         return True
-    with smtplib.SMTP(SMTP_HOST, SMTP_PORT, timeout=15) as s:
-        s.starttls(context=ssl.create_default_context())
-        s.login(MITTENTE, SMTP_PASSWORD)
-        s.send_message(_messaggio(r))
+    (ses or _ses()).send_email(
+        FromEmailAddress=MITTENTE,
+        Destination={"ToAddresses": DESTINATARI},
+        ReplyToAddresses=[r["email"]],
+        Content={"Simple": {"Subject": {"Data": _oggetto(r), "Charset": "UTF-8"},
+                            "Body": {"Text": {"Data": _testo_email(r), "Charset": "UTF-8"}}}})
     return True
 
 
 def registra(nome: str, email: str, ente: str, ruolo: str, messaggio: str, ip: str,
-             trappola: str = "", smtp=None) -> None:
+             trappola: str = "", smtp=None, ses=None) -> None:
     """Salva la richiesta e avvisa la casella commerciale.
 
     Solleva Indisponibile solo se non e' riuscita nessuna delle due cose: se
@@ -148,14 +173,14 @@ def registra(nome: str, email: str, ente: str, ruolo: str, messaggio: str, ip: s
     except Exception as e:  # noqa: BLE001
         log.error("richiesta demo: salvataggio non riuscito: %s", e)
     try:
-        spedita = _manda_email(richiesta, smtp=smtp)
+        spedita = _manda_email(richiesta, smtp=smtp, ses=ses)
     except Exception as e:  # noqa: BLE001
         log.error("richiesta demo: email non spedita: %s", e)
 
     if not (salvata or spedita):
         # In sviluppo, senza tabella e senza mittente, non e' un guasto: non
         # c'e' dove mandarla. Altrove si'.
-        if not (archivio.T_DEMO or (MITTENTE and SMTP_PASSWORD)):
+        if not (archivio.T_DEMO or (MITTENTE and DESTINATARI)):
             log.warning("richiesta demo non conservata: ne' TABELLA_DEMO ne' la posta sono configurate")
             return
         raise Indisponibile("richiesta non salvata e non spedita")
