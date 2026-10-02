@@ -44,12 +44,22 @@ export const MessageList: React.FC<MessageListProps> = ({
   // Si guarda dove sta l'occhio, non dove sta il testo. Il listener e'
   // passivo: dichiarare che non si chiama preventDefault lascia al browser lo
   // scorrimento sul filo del dito, senza aspettare noi.
+  //
+  // Lontano dal fondo si esce solo risalendo. Mentre la risposta si scrive il
+  // testo cresce ogni pochi centesimi di secondo: fra la discesa automatica e
+  // l'evento di scorrimento ne arriva un altro pezzo, la distanza dal fondo
+  // torna grande, e chi non aveva toccato nulla risultava "risalito" - la
+  // pagina smetteva di seguire il testo a meta' risposta.
   useEffect(() => {
     const el = scatolaRef.current;
     if (!el) return;
+    let primaDi = el.scrollTop;
     const guarda = () => {
       const distanza = el.scrollHeight - el.scrollTop - el.clientHeight;
-      setAFondo(distanza < A_FONDO);
+      const risalito = el.scrollTop < primaDi - 1;
+      primaDi = el.scrollTop;
+      if (distanza < A_FONDO) setAFondo(true);
+      else if (risalito) setAFondo(false);
     };
     guarda();
     el.addEventListener('scroll', guarda, { passive: true });
@@ -67,8 +77,13 @@ export const MessageList: React.FC<MessageListProps> = ({
    */
   useEffect(() => {
     if (vuoto) return;
-    const miaDomanda = messages[messages.length - 1]?.role === 'user';
-    if (miaDomanda || aFondo) scendi(!miaDomanda);
+    const ultimo = messages[messages.length - 1];
+    const miaDomanda = ultimo?.role === 'user';
+    // Mentre la risposta si scrive arriva un pezzo ogni pochi centesimi di
+    // secondo: uno scorrimento morbido a ogni pezzo ripartirebbe di continuo e
+    // resterebbe indietro. Si segue il testo con il salto secco.
+    const scrive = ultimo?.role === 'assistant' && ultimo.isStreaming && !!ultimo.content;
+    if (miaDomanda || aFondo) scendi(!miaDomanda && !scrive);
     // `aFondo` di proposito NON e' fra le dipendenze: deve decidere al momento
     // dell'evento, non far scattare una discesa quando cambia da solo.
     // eslint-disable-next-line react-hooks/exhaustive-deps

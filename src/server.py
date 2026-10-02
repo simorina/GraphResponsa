@@ -52,6 +52,15 @@ WEB = ROOT / "web"
 FRONTEND_DIST = ROOT / "frontend" / "dist"
 
 registro = logging.getLogger("graphresponsa")
+# I log del progetto vanno su stderr, e da li' su CloudWatch, anche sotto
+# WARNING: uvicorn gira a "warning", e senza un handler Python scarterebbe le
+# righe informative - come quelle del doppione (agente/doppione.py), che dicono
+# quanto spesso parte e se ripaga. Quelli di uvicorn restano come sono.
+if not registro.handlers:
+    _uscita = logging.StreamHandler()
+    _uscita.setFormatter(logging.Formatter("%(levelname)s %(name)s: %(message)s"))
+    registro.addHandler(_uscita)
+    registro.setLevel(logging.INFO)
 
 # Secondi di silenzio dopo cui /chat manda un commento SSE: CloudFront chiude
 # le connessioni mute dopo 120.
@@ -259,11 +268,12 @@ def chat(d: Domanda, utente: Utente = Depends(utente_corrente)):
 
     # La consultazione gira in un thread e gli eventi passano da una coda.
     #
-    # La risposta arriva intera alla fine, e mentre il modello la scrive dal
-    # server non esce nulla: CloudFront chiude una connessione muta dopo 120
-    # secondi, e con Sonnet una risposta lunga ne chiede piu' di uno. Ogni
-    # BATTITO secondi di silenzio parte un commento SSE (": attesa"), che il
-    # sito ignora e che tiene viva la connessione.
+    # La risposta arriva a pezzi mentre il modello la scrive (eventi "bozza"),
+    # ma fra un passo e l'altro - la coda del gateway, uno strumento lento -
+    # dal server puo' non uscire nulla per decine di secondi, e CloudFront
+    # chiude una connessione muta dopo 120. Ogni BATTITO secondi di silenzio
+    # parte un commento SSE (": attesa"), che il sito ignora e che tiene viva
+    # la connessione.
     #
     # Il thread registra i consumi da se': se chi chiede chiude la pagina a
     # meta', la consultazione arriva in fondo comunque, e la spesa - che prima

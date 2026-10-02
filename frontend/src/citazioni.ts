@@ -82,6 +82,16 @@ export function trovaFonteDaDataset(dataset: DOMStringMap, fonti: Fonte[]): Font
   );
 }
 
+/**
+ * Il testo di una bozza senza l'ultimo marcatore, se e' ancora aperto: la
+ * risposta arriva a pezzi, e un pezzo puo' finire a meta' di "{{cita:...}}".
+ * Si toglie da "{{" (o da una "{" finale) fino in fondo, purche' manchi la "}}"
+ * di chiusura.
+ */
+export function senzaMarcatoreAperto(testo: string): string {
+  return testo.replace(/\{\{(?:[^}]|\}(?!\}))*$|\{$/, '');
+}
+
 /** Testo semplice, per i riscontri e altri usi non interattivi: via i marcatori macchina. */
 export function rimuoviMarcatori(testo: string): string {
   return testo.replace(MARCATORE, '');

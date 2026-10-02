@@ -2,7 +2,12 @@ import React, { useState } from 'react';
 import { Copy, Check, AlertTriangle } from 'lucide-react';
 import { marked } from 'marked';
 import type { Message, Fonte } from '../types';
-import { inserisciCitazioniInline, rimuoviMarcatori, trovaFonteDaDataset } from '../citazioni';
+import {
+  inserisciCitazioniInline,
+  rimuoviMarcatori,
+  senzaMarcatoreAperto,
+  trovaFonteDaDataset,
+} from '../citazioni';
 import { ThinkingTrail } from './ThinkingTrail';
 import { Avanzamento } from './Avanzamento';
 import { Sigillo } from './Sigillo';
@@ -46,6 +51,9 @@ export const MessageItem: React.FC<MessageItemProps> = ({
   }
 
   const fonti = message.fonti ?? [];
+  // Mentre si scrive, un marcatore puo' essere a meta' ("{{cita:L-30-19"): si
+  // tiene fuori finche' non e' chiuso, invece di mostrarlo come testo.
+  const testo = message.isStreaming ? senzaMarcatoreAperto(message.content) : message.content;
 
   const gestisciClickCitazione = (e: React.MouseEvent<HTMLDivElement>) => {
     const bottone = (e.target as HTMLElement).closest('.cita-inline') as HTMLElement | null;
@@ -74,9 +82,14 @@ export const MessageItem: React.FC<MessageItemProps> = ({
             className="prose-legal select-text"
             onClick={gestisciClickCitazione}
             dangerouslySetInnerHTML={{
-              __html: marked.parse(inserisciCitazioniInline(message.content, fonti)) as string,
+              __html: marked.parse(inserisciCitazioniInline(testo, fonti)) as string,
             }}
           />
+        ) : null}
+
+        {/* Il testo cresce: un battito in coda dice che non e' ancora finito. */}
+        {message.isStreaming && message.content ? (
+          <span className="battito ml-0.5 mt-1 block" aria-label="La risposta si sta scrivendo" />
         ) : null}
 
         {message.error && (

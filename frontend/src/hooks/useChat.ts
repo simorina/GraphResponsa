@@ -153,8 +153,30 @@ export function useChat() {
               const updated = [...prev];
               const current = { ...updated[assistantIndex] };
 
-              if (event.tipo === 'testo') {
-                current.content = (current.content || '') + event.testo;
+              if (event.tipo === 'bozza') {
+                // La risposta mentre il modello la scrive. `azzera` arriva
+                // quando subentra un modello di riserva: cio' che il primo
+                // aveva cominciato a scrivere non vale piu'.
+                current.content = event.azzera
+                  ? event.testo || ''
+                  : (current.content || '') + (event.delta || '');
+                current.inBozza = true;
+              } else if (event.tipo === 'testo') {
+                // La versione rifinita (marcatori riparati, fonti degli atti
+                // nominati) sostituisce la bozza: non si accoda.
+                current.content = event.testo;
+                current.inBozza = false;
+              } else if (event.tipo === 'fonti_lette') {
+                // Le fonti arrivano mentre si consulta, cosi' le citazioni
+                // della bozza trovano subito il loro riferimento.
+                const viste = new Set(
+                  (current.fonti || []).map((f) => `${f.norma}|${f.articolo}|${f.comma}`)
+                );
+                const nuove = (event.fonti || []).filter(
+                  (f: { norma: string; articolo: string; comma: string }) =>
+                    !viste.has(`${f.norma}|${f.articolo}|${f.comma}`)
+                );
+                current.fonti = [...(current.fonti || []), ...nuove];
               } else if (event.tipo === 'strumento') {
                 current.thoughts = [
                   ...(current.thoughts || []),
@@ -191,6 +213,12 @@ export function useChat() {
               } else if (event.tipo === 'errore') {
                 current.error = event.messaggio;
                 current.isStreaming = false;
+                // Una bozza interrotta e' mezza risposta, mai rifinita ne'
+                // controllata: resta solo l'avviso dell'interruzione.
+                if (current.inBozza) {
+                  current.content = '';
+                  current.inBozza = false;
+                }
               }
 
               updated[assistantIndex] = current;
@@ -213,6 +241,11 @@ export function useChat() {
               ? 'Connessione assente: controlla la rete e riprova.'
               : err.message || 'Errore di connessione';
             updated[assistantIndex].isStreaming = false;
+            // Come per l'errore dal server: niente mezza risposta.
+            if (updated[assistantIndex].inBozza) {
+              updated[assistantIndex].content = '';
+              updated[assistantIndex].inBozza = false;
+            }
           }
           return updated;
         });

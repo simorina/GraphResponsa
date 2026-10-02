@@ -48,6 +48,8 @@ export interface Message {
   fine?: FineInfo | null;
   error?: string | null;
   isStreaming?: boolean;
+  /** Il contenuto e' ancora la bozza: il testo rifinito non e' arrivato. */
+  inBozza?: boolean;
   timestamp?: Date;
   /** Secondi dalla domanda alla risposta completa. */
   durata?: number;

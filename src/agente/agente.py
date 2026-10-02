@@ -15,6 +15,7 @@ checkpointer, e il client manda solo un identificativo di conversazione.
 import json
 import os
 import re
+import time
 import uuid
 from pathlib import Path
 
@@ -23,7 +24,7 @@ from langchain.agents import create_agent
 from langchain_anthropic import ChatAnthropic
 from langchain.agents.middleware import AgentMiddleware
 from langchain_anthropic.middleware import AnthropicPromptCachingMiddleware
-from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
+from langchain_core.messages import AIMessage, AIMessageChunk, HumanMessage, ToolMessage
 from langchain_core.messages import SystemMessage
 from langgraph.checkpoint.memory import InMemorySaver
 
@@ -77,7 +78,29 @@ QWEN_BASE = os.environ.get("QWEN_BASE_URL",
 # paga a prezzo pieno. "medium" lo dimezza senza accorciare la risposta.
 # Spegnerlo del tutto e' tre volte piu' veloce, ma su un assistente giuridico
 # non si toglie il ragionamento senza misurare prima cosa succede alle fonti.
-RAGIONAMENTO = os.environ.get("RAGIONAMENTO", "medium")
+#
+# Misurato il 02/10, ed e' spento. Nei checkpoint di produzione una domanda
+# DeepSeek durava 41 secondi di mediana, e il ragionamento ne era il 34%. Sulle
+# stesse tre domande all'agente intero, con il gateway lento di quel giorno:
+#
+#   medium          144s / 274s (10 chiamate, 11.424 token di pensiero) / errore
+#   low              74s /  88s / 150s
+#   spento           59s /  69s /  82s   (3-6 chiamate)
+#
+# e le fonti tengono: tutte e tre le varianti trovano la catena L. 219/2014 ->
+# L. 189/2015 -> regime della L. 30/1977 sull'indennita' di malattia, e
+# citano. Senza pensiero il modello fa anche meno giri di verifica. Si riaccende
+# con RAGIONAMENTO=low|medium|high nell'ambiente.
+RAGIONAMENTO = os.environ.get("RAGIONAMENTO", "spento")
+PENSIERO_SPENTO = {"spento", "off", "none", ""}
+# Dopo quanti secondi senza risposta il gateway riceve una richiesta gemella
+# (agente/doppione.py); 0 la spegne.
+RITARDO_DOPPIONE = float(os.environ.get("RITARDO_DOPPIONE", "3"))
+# Alla chiamata numero GIRI_PRIMA_DI_CHIUDERE della stessa domanda il modello
+# risponde senza strumenti (ChiudiDopoTroppiGiri). In produzione le domande
+# DeepSeek ne usavano 4 di mediana e 6 al 75esimo percentile; le code arrivavano
+# a 11, e ognuna pagava l'attesa del gateway.
+GIRI_PRIMA_DI_CHIUDERE = int(os.environ.get("GIRI_PRIMA_DI_CHIUDERE", "8"))
 # A chi passare quando il gateway rifiuta il contenuto, in ordine. Serve solo
 # partendo dal gateway, perche' e' li' che vive quel filtro; si spegne mettendo
 # MODELLO_RISERVA vuoto nell'ambiente, o si cambia con una lista separata da
@@ -127,6 +150,10 @@ MAX_GIRI = 12   # Ogni chiamata a uno strumento consuma DUE passi del grafo
                 # misurato il 24/09 - e con la stessa domanda ha chiuso in due
                 # giri: gli basta il moltiplicatore normale.
 SEPARATORE = "\n\n"
+# Ogni quanto parte un pezzo di bozza mentre il modello scrive: abbastanza
+# spesso da sembrare continuo, abbastanza di rado da non mandare un evento per
+# ogni token.
+INTERVALLO_BOZZA = 0.05
 
 # Quanto costa rileggere un token dalla cache, in frazione del prezzo
 # d'ingresso. Su Anthropic e' un decimo, dichiarato. Su Qwen il listino distingue
@@ -343,6 +370,10 @@ cerca anche con `dal_anno` se c'e' una disciplina piu' recente.
   l'art. N): `struttura_norma`, mai gli articoli uno per uno. Presupposti e
   rinvii: `citazioni_da`. Chi richiama una norma: `chi_cita`. Contenuto della
   banca dati: `elenco_norme`. Gli strumenti indipendenti chiamali in parallelo.
+- Ogni giro di strumenti costa all'utente diversi secondi d'attesa. Chiedi in
+  un solo giro tutto cio' che puoi gia' prevedere di dover leggere - gli
+  articoli trovati, i rinvii che contengono, le modifiche segnalate - e non
+  rileggere cio' che hai gia' davanti.
 - Un atto noto solo per data ("la legge di giugno 1977"): `elenco_norme` con
   `tipo`, `anno` e `mese`, e scegli dalla `dataAtto`. Chiedi all'utente solo se
   restano piu' candidati.
@@ -367,13 +398,19 @@ cerca anche con `dal_anno` se c'e' una disciplina piu' recente.
 
 ## 6. La risposta
 
-- Scrivi sempre e solo in italiano, anche le frasi prima di una chiamata agli
-  strumenti: l'utente le vede.
+- Scrivi sempre e solo in italiano.
+- Prima di una chiamata agli strumenti non scrivere nulla: i passaggi della
+  consultazione li mostra gia' l'interfaccia, e ogni frase di servizio
+  ("Verifico...", "Leggo i testi") finisce in testa alla risposta.
 - Apri con la risposta, non con il metodo, e parti dal fatto: "hai trenta
   giorni, e sono perentori (L. 28/1991, art. 30)", non "l'articolo 30 della L.
   28/1991 dispone che...". Il professionista trova gli estremi e la lettera
   dove conta; il cittadino capisce comunque. Riporta tra virgolette il testo
   quando la formulazione esatta conta.
+- Sii asciutto: la risposta in apertura, poi solo cio' che serve a capirla e a
+  verificarla. Niente premesse, niente riepiloghi in chiusura, niente
+  ripetizioni. Di norma bastano 150-300 parole; allunga solo per un elenco o un
+  confronto che la domanda chiede, o per una catena di modifiche da spiegare.
 - Con una fonte esplicita trovata subito, esponila senza esitazioni. Se sei
   arrivato alla risposta dopo molti tentativi, o il passo che citi risponde
   solo di sbieco, dillo: "e' quanto di piu' pertinente l'archivio
@@ -511,6 +548,61 @@ def _senza_chiamate(messaggio, orfane):
                                         "additional_kwargs": extra})
 
 
+CHIUSURA = ("\n\n## Ultimo giro\n\nPer questa domanda le consultazioni sono finite: "
+            "rispondi ora con cio' che hai letto, senza chiamare strumenti. Se qualcosa "
+            "resta da verificare, dillo nella risposta.")
+SPINTA_FINALE = ("Rispondi ora alla domanda con cio' che hai letto, senza chiamare "
+                 "strumenti. Se qualcosa resta da verificare, dillo.")
+
+
+class ChiudiDopoTroppiGiri(AgentMiddleware):
+    """All'ultima chiamata concessa, il modello risponde senza strumenti.
+
+    Ogni giro paga l'attesa del gateway e la cronologia che si allunga: nei
+    checkpoint di produzione le domande DeepSeek usavano 4 chiamate di mediana,
+    e le code arrivavano a 11 e a due minuti e mezzo. Il tetto del grafo
+    (MAX_GIRI) non serve a questo: quando scatta interrompe la consultazione
+    con un errore, e chi ha aspettato non riceve niente.
+
+    Qui invece alla chiamata numero `giri` della stessa domanda il modello non
+    puo' piu' chiamare strumenti, e le istruzioni chiedono di rispondere con
+    quello che c'e'. Il conto riparte a ogni domanda.
+
+    Come lo si impedisce dipende dal fornitore. Su DeepSeek, misurato il 02/10
+    sul gateway, non bastano ne' `tool_choice` "none" ne' togliere gli
+    strumenti dalla richiesta: li ricava dalla cronologia e li chiama lo stesso
+    (quattro chiamate e nessun testo, due prove su due). Smette solo con un
+    messaggio esplicito in coda (SPINTA_FINALE): risposta completa, due prove
+    su due. Il messaggio vale per quella chiamata e non entra nella
+    conversazione salvata. Anthropic rispetta `tool_choice`, e anzi senza gli
+    strumenti rifiuta una cronologia che ne contiene: li' si tengono.
+    """
+
+    def __init__(self, giri: int = GIRI_PRIMA_DI_CHIUDERE):
+        super().__init__()
+        self.giri = giri
+
+    def wrap_model_call(self, request, handler):
+        messaggi = request.messages or []
+        ultima = next((i for i in range(len(messaggi) - 1, -1, -1)
+                       if isinstance(messaggi[i], HumanMessage)), -1)
+        fatte = sum(isinstance(m, AIMessage) for m in messaggi[ultima + 1:])
+        if fatte + 1 < self.giri or not request.tools:
+            return handler(request)
+        sistema = request.system_message
+        contenuto = getattr(sistema, "content", "") or ""
+        if isinstance(contenuto, list):
+            nuovo = SystemMessage(content=[*contenuto, {"type": "text", "text": CHIUSURA.strip()}])
+        else:
+            nuovo = SystemMessage(content=str(contenuto) + CHIUSURA)
+        if "anthropic" in type(request.model).__name__.lower():
+            # La forma a dizionario: una stringa diversa da "auto" e "any"
+            # langchain-anthropic la prenderebbe per il nome di uno strumento.
+            return handler(request.override(tool_choice={"type": "none"}, system_message=nuovo))
+        return handler(request.override(tools=[], tool_choice=None, system_message=nuovo,
+                                        messages=[*messaggi, HumanMessage(SPINTA_FINALE)]))
+
+
 def _checkpointer():
     """
     Dove vivono le conversazioni.
@@ -593,12 +685,22 @@ def agente(nome=None):
             # anche il pensiero, e un tetto stretto restituisce il nulla. Con
             # `max_tokens` il tetto vale sulla risposta, che e' cio' che
             # vogliamo limitare.
-            from langchain_openai import ChatOpenAI
+            #
+            # Si parla in streaming anche quando nessuno lo legge: e' il primo
+            # frammento a dire che la coda del gateway e' finita, e il doppione
+            # (agente/doppione.py) decide su quello. `stream_usage` riporta i
+            # token nell'ultimo frammento, senza il quale il conto andrebbe a
+            # zero.
+            from .doppione import ChatConDoppione
             chiave = os.environ.get("QWEN_API_KEY") or os.environ["DASHSCOPE_API_KEY"]
-            modello = ChatOpenAI(model=nome, temperature=TEMPERATURA,
-                                 base_url=QWEN_BASE, api_key=chiave,
-                                 reasoning_effort=RAGIONAMENTO,
-                                 extra_body={"max_tokens": 16000})
+            spento = RAGIONAMENTO in PENSIERO_SPENTO
+            corpo = {"max_tokens": 16000, **({"enable_thinking": False} if spento else {})}
+            modello = ChatConDoppione(model=nome, temperature=TEMPERATURA,
+                                      base_url=QWEN_BASE, api_key=chiave,
+                                      streaming=True, stream_usage=True,
+                                      ritardo_doppione=RITARDO_DOPPIONE,
+                                      extra_body=corpo,
+                                      **({} if spento else {"reasoning_effort": RAGIONAMENTO}))
         else:
             parametri = {"model": nome, "max_tokens": 16000,
                          "api_key": os.environ["ANTHROPIC_API_KEY"]}
@@ -670,10 +772,11 @@ def agente(nome=None):
             checkpointer=_memoria,
             # La potatura fra le domande vale per tutti i fornitori; il
             # middleware della cache no, e' Anthropic e basta.
-            middleware=([RiparaChiamateOrfane(), PotaturaFraDomande(),
+            middleware=([RiparaChiamateOrfane(), PotaturaFraDomande(), ChiudiDopoTroppiGiri(),
                          AnthropicPromptCachingMiddleware(ttl="5m")]
                         if fornitore_di(nome) == "anthropic"
-                        else [RiparaChiamateOrfane(), PotaturaFraDomande()]),
+                        else [RiparaChiamateOrfane(), PotaturaFraDomande(),
+                              ChiudiDopoTroppiGiri()]),
         )
     return _agenti[nome]
 
@@ -1349,6 +1452,19 @@ def _testo_di(messaggio):
     return ""
 
 
+def _delta_di(frammento):
+    """Il testo di un frammento in streaming, cosi' com'e': a differenza di
+    _testo_di non si toglie lo spazio ai bordi, che fra un frammento e l'altro
+    e' parte del testo."""
+    contenuto = getattr(frammento, "content", None)
+    if isinstance(contenuto, str):
+        return contenuto
+    if isinstance(contenuto, list):
+        return "".join(b.get("text", "") for b in contenuto
+                       if isinstance(b, dict) and b.get("type") == "text")
+    return ""
+
+
 def _rifiuto_di_contenuto(errore):
     """Il gateway ha respinto la richiesta per il suo filtro sui contenuti.
 
@@ -1386,10 +1502,14 @@ def rispondi(domanda, conversazione=None):
     """
     Genera eventi: {"tipo": ..., ...}
 
-      testo       la risposta, in un unico evento a fine ciclo
+      bozza       il testo mentre il modello lo scrive: `delta` da accodare,
+                  o `azzera` con il `testo` da cui ripartire
+      testo       la risposta rifinita, a fine ciclo: sostituisce la bozza
       strumento   lo strumento sta per essere eseguito
       risultato   lo strumento ha risposto
-      fonti       i commi consultati, per il pannello delle fonti
+      fonti_lette i commi appena consultati, perche' le citazioni della bozza
+                  trovino subito la loro fonte
+      fonti       tutti i commi consultati, per il pannello delle fonti
       fine        uso dei token, costo stimato, id conversazione
       errore      qualcosa e' andato storto
     """
@@ -1422,6 +1542,9 @@ def rispondi(domanda, conversazione=None):
     def passa_a_riserva(nome):
         corrente["conto"] = conto_di(nome)
         corrente["modello"] = nome
+        # La riserva riparte dal checkpoint: cio' che il modello caduto aveva
+        # cominciato a scrivere non vale piu', e la bozza torna indietro.
+        corrente["azzera_bozza"] = True
     # I nomi arrivano con l'AIMessage, i risultati dopo col ToolMessage:
     # questa mappa li ricongiunge per id di chiamata.
     nomi_per_id = {}
@@ -1430,24 +1553,65 @@ def rispondi(domanda, conversazione=None):
     # e partono insieme. Il modello riprende a scrivere dopo gli strumenti:
     # senza uno stacco la frase nuova si salderebbe alla precedente.
     blocchi_testo = []
+    # La bozza: lo stesso testo, mentre il modello lo scrive. I frammenti si
+    # raccolgono e partono a gruppi, ogni INTERVALLO_BOZZA secondi, invece che
+    # uno per evento: una risposta lunga ne fa migliaia.
+    bozza = {"coda": "", "inviata": 0.0, "chiamata": None, "iniziata": False}
+
+    def svuota_bozza(subito=False):
+        if not bozza["coda"]:
+            return None
+        if not subito and time.monotonic() - bozza["inviata"] < INTERVALLO_BOZZA \
+                and len(bozza["coda"]) < 400:
+            return None
+        delta, bozza["coda"], bozza["inviata"] = bozza["coda"], "", time.monotonic()
+        return {"tipo": "bozza", "delta": delta}
 
     try:
-        # `_modo` non serve piu' - resta perche' stream() con una lista di
-        # modi restituisce comunque coppie (modo, pezzo).
-        for _modo, pezzo in _flusso(
+        for modo, pezzo in _flusso(
             config,
             {"messages": [{"role": "user", "content": domanda}]},
             passa_a_riserva,
-            # Solo "updates": il modo "messages" serviva a emettere il testo
-            # frammento per frammento, e la risposta non si consegna piu' cosi'.
-            # Gli eventi degli strumenti restano in diretta - misurate, le
-            # consultazioni durano 8 secondi mediani e 22 al massimo, e tanto
-            # silenzio si legge come un blocco - ma il testo arriva intero,
-            # cosi' il Markdown viene reso una volta sola, gia' completo: una
-            # tabella o un blocco di codice non passano piu' per gli stati
-            # intermedi in cui la sintassi e' ancora a meta'.
-            stream_mode=["updates"],
+            # "updates" porta i messaggi completi - le chiamate agli strumenti,
+            # i risultati, l'uso dei token - e "messages" il testo frammento per
+            # frammento.
+            #
+            # Il testo si era tolto dal flusso per rendere il Markdown una volta
+            # sola, gia' completo. Misurato il 02/10 nei checkpoint di
+            # produzione: l'ultima chiamata, quella che scrive la risposta, vale
+            # il 40% del tempo di una domanda - 22 secondi di mediana - e
+            # l'utente restava a guardare la barra d'avanzamento. Ora la bozza
+            # arriva mentre si scrive, e a fine ciclo il testo rifinito (marcatori
+            # riparati, fonti degli atti nominati) la sostituisce.
+            stream_mode=["updates", "messages"],
         ):
+            if corrente.pop("azzera_bozza", False):
+                bozza.update(coda="", chiamata=None, iniziata=bool(blocchi_testo))
+                yield {"tipo": "bozza", "azzera": True, "testo": SEPARATORE.join(blocchi_testo)}
+
+            if modo == "messages":
+                frammento, meta = pezzo
+                if (meta or {}).get("langgraph_node") != "model" \
+                        or not isinstance(frammento, AIMessageChunk):
+                    continue
+                delta = _delta_di(frammento)
+                if delta and frammento.id != bozza["chiamata"]:
+                    # Una chiamata nuova riprende a scrivere dopo gli strumenti:
+                    # come nel testo finale, si stacca dalla precedente.
+                    delta = delta.lstrip()
+                    if delta:
+                        if bozza["iniziata"]:
+                            delta = SEPARATORE + delta
+                        bozza["chiamata"], bozza["iniziata"] = frammento.id, True
+                bozza["coda"] += delta
+                evento = svuota_bozza()
+                if evento:
+                    yield evento
+                continue
+
+            evento = svuota_bozza(subito=True)
+            if evento:
+                yield evento
             for _nodo, stato in pezzo.items():
                 if not isinstance(stato, dict):
                     continue
@@ -1502,11 +1666,15 @@ def rispondi(domanda, conversazione=None):
                                 pass
                         grezzo_strumenti.append(
                             json.dumps(esito, ensure_ascii=False, default=str))
+                        nuove = []
                         for f in _fonti_da(nome, esito):
                             chiave = (f["norma"], f["articolo"], f["comma"])
                             if chiave not in viste:
                                 viste.add(chiave)
                                 fonti_raccolte.append(f)
+                                nuove.append(f)
+                        if nuove:
+                            yield {"tipo": "fonti_lette", "fonti": nuove}
                         yield {"tipo": "risultato", "nome": nome,
                                "quante": _quante(esito),
                                "errore": esito.get("errore") if isinstance(esito, dict) else None}
