@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import {
-  BrainCircuit, ScrollText, Scale, Library, Gavel, Sparkles,
+  BrainCircuit, ChevronRight, ScrollText, Scale, Library, Gavel, Sparkles,
 } from 'lucide-react';
 import type { ThoughtStep } from '../types';
 import { componi, ElencoPassi, type Passo } from './ThinkingTrail';
@@ -136,8 +136,8 @@ export const Avanzamento: React.FC<AvanzamentoProps> = ({ thoughts, inizio }) =>
   const scrive = testo === 'Sto scrivendo la risposta';
 
   return (
-    <div className="rise overflow-hidden rounded-xl border border-line-2 bg-panel max-md:rounded-none max-md:border-0 max-md:bg-transparent">
-      <div className="flex items-center gap-3 px-4 py-3 max-md:px-0 max-md:py-1.5">
+    <div className="rise overflow-hidden rounded-xl border border-line-2 bg-panel">
+      <div className="flex items-center gap-3 px-4 py-3">
         <IconaViva />
         {/* La chiave e' la frase: quando cambia, la riga rientra animata. */}
         <p
@@ -154,20 +154,41 @@ export const Avanzamento: React.FC<AvanzamentoProps> = ({ thoughts, inizio }) =>
         </span>
       </div>
 
+      {/* Su desktop i passaggi stanno aperti sotto la frase. Su telefono una
+          consultazione lunga ne mette in fila anche quindici e spinge giu'
+          tutto il resto: li' stanno in un menu chiuso, come a risposta finita,
+          e la frase in alto dice gia' cosa sta succedendo. */}
       {passi.length > 0 && (
-        <div className="border-t border-line px-4 py-3 max-md:border-0 max-md:px-0 max-md:pb-1 max-md:pt-1">
-          <ElencoPassi passi={passi} vivo />
-        </div>
+        <>
+          <div className="border-t border-line px-4 py-3 max-md:hidden">
+            <ElencoPassi passi={passi} vivo />
+          </div>
+          <details className="group/passi border-t border-line md:hidden">
+            <summary className="flex min-h-11 cursor-pointer list-none items-center gap-2 px-4 py-2.5 text-ink-2">
+              <ChevronRight
+                className="h-3.5 w-3.5 shrink-0 transition-transform duration-300 ease-[cubic-bezier(0.16,1,0.3,1)] group-open/passi:rotate-90"
+                strokeWidth={1.75}
+              />
+              <span className="text-[13px] font-medium">Percorso di consultazione</span>
+              <span className="font-mono text-[11.5px] tabular-nums text-ink-3">
+                {passi.length} {passi.length === 1 ? 'passaggio' : 'passaggi'}
+              </span>
+            </summary>
+            <div className="border-t border-line px-4 py-3">
+              <ElencoPassi passi={passi} vivo />
+            </div>
+          </details>
+        </>
       )}
 
       {scrive && trascorsi > SOGLIA_PAZIENZA && (
-        <p className="frase-in border-t border-line px-4 py-2.5 text-[12.5px] text-ink-2 max-md:border-0 max-md:px-0">
-          Le risposte più articolate richiedono qualche secondo in più: il testo arriva intero, già con le citazioni.
+        <p className="frase-in border-t border-line px-4 py-2.5 text-[12.5px] text-ink-2">
+          Le risposte più articolate richiedono qualche secondo in più: il testo comparirà man mano che viene scritto.
         </p>
       )}
 
       {scrive && (
-        <div className="space-y-2.5 border-t border-line bg-canvas px-4 py-4 max-md:border-0 max-md:bg-transparent max-md:px-0 max-md:pt-2" aria-hidden>
+        <div className="space-y-2.5 border-t border-line bg-canvas px-4 py-4" aria-hidden>
           <div className="skeleton h-[10px] w-[92%]" />
           <div className="skeleton h-[10px] w-[78%]" />
           <div className="skeleton h-[10px] w-[85%]" />
