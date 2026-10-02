@@ -34,15 +34,28 @@ Parameters:
 
   CpuTask:
     Type: String
-    Default: '512'
+    # 256 dal 02/10: in 14 giorni di produzione, su 20.159 minuti, solo 21 sono
+    # andati oltre il 25% di 0,5 vCPU, e quasi tutti all'avvio dopo un rilascio.
+    # Fuori dagli avvii il task non supera ~0,17 vCPU. Dimezzare la CPU fa
+    # risparmiare ~8,4 dollari al mese, il 14% della spesa AWS.
+    # Lo stack memorizza ancora 512: chi lo riaggiorna passi CpuTask=256.
+    Default: '256'
     AllowedValues: ['256', '512', '1024']
-    Description: Unita' di CPU (512 = 0,5 vCPU). Il container aspetta le API, non calcola
+    Description: Unita' di CPU (256 = 0,25 vCPU). Il container aspetta le API, non calcola
 
   MemoriaTask:
     Type: String
     Default: '1024'
     AllowedValues: ['512', '1024', '2048', '4096']
     Description: MiB di memoria
+
+  PrefissiCloudFront:
+    Type: String
+    Default: pl-a3a144ca
+    Description: >-
+      Lista gestita degli IP con cui CloudFront contatta le origini
+      (com.amazonaws.global.cloudfront.origin-facing). L'identificativo cambia
+      da regione a regione: pl-a3a144ca e' quello di eu-central-1.
 
   LimiteRichiesteGiorno:
     Type: Number
@@ -100,10 +113,13 @@ Resources:
   # =========================================================================
   # Rete
   #
-  # Due subnet pubbliche in due zone: l'ALB ne pretende almeno due.
-  # Niente NAT Gateway: costerebbe ~33 $/mese, quanto tutto il resto dello
-  # stack, e l'unica cosa che aggiungerebbe e' togliere l'IP pubblico a un
-  # task gia' irraggiungibile dall'esterno grazie al security group.
+  # Due subnet pubbliche in due zone, per i task: escono su internet con il
+  # loro IP pubblico. Niente NAT Gateway: costerebbe ~33 $/mese, quanto tutto
+  # il resto dello stack, e l'unica cosa che aggiungerebbe e' togliere l'IP
+  # pubblico a un task gia' irraggiungibile dall'esterno grazie al security
+  # group.
+  # Due subnet private, senza rotta verso internet, per il solo ALB interno,
+  # che pretende almeno due zone.
   # =========================================================================
 
   Vpc:
@@ -166,26 +182,74 @@ Resources:
       SubnetId: !Ref SubnetB
       RouteTableId: !Ref TabellaRotte
 
+  # Qui vive l'ALB interno. CloudFront lo raggiunge con la VPC origin,
+  # tramite interfacce di rete che crea lui stesso in queste subnet: niente
+  # IP pubblici, e il tratto CloudFront -> ALB resta dentro la rete di AWS.
+  SubnetPrivataA:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref Vpc
+      CidrBlock: 10.42.11.0/24
+      AvailabilityZone: !Select [0, !GetAZs '']
+      Tags:
+        - Key: Name
+          Value: !Sub '${NomeProgetto}-privata-a'
+
+  SubnetPrivataB:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref Vpc
+      CidrBlock: 10.42.12.0/24
+      AvailabilityZone: !Select [1, !GetAZs '']
+      Tags:
+        - Key: Name
+          Value: !Sub '${NomeProgetto}-privata-b'
+
+  # Solo la rotta locale, che AWS aggiunge da se'.
+  TabellaPrivata:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref Vpc
+      Tags:
+        - Key: Name
+          Value: !Sub '${NomeProgetto}-privata'
+
+  AssociazionePrivataA:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref SubnetPrivataA
+      RouteTableId: !Ref TabellaPrivata
+
+  AssociazionePrivataB:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref SubnetPrivataB
+      RouteTableId: !Ref TabellaPrivata
+
   # =========================================================================
   # Security group
   #
-  # L'ALB accetta da chiunque sulla 80, ma il listener rifiuta con 403 tutto
-  # cio' che non porta l'intestazione segreta che aggiunge CloudFront: in
-  # pratica solo la CDN arriva all'applicazione.
+  # L'ALB e' interno, senza IP pubblici: sulla 80 accetta solo gli IP di
+  # CloudFront, che lo raggiunge con la VPC origin. Il listener rifiuta
+  # comunque con 403 cio' che non porta l'intestazione segreta di CloudFront.
   # Il task accetta solo dall'ALB.
   # =========================================================================
 
   SgBilanciatore:
     Type: AWS::EC2::SecurityGroup
     Properties:
-      GroupDescription: Ingresso HTTP verso il bilanciatore
+      GroupDescription: 'Bilanciatore interno: entra solo CloudFront, tramite la VPC origin'
       VpcId: !Ref Vpc
       SecurityGroupIngress:
+        # Gli IP di CloudFront, e non il gruppo che CloudFront crea per la VPC
+        # origin: cosi' l'ALB vede arrivare CloudFront come quando era
+        # pubblico, la catena X-Forwarded-For non cambia e il backend continua
+        # a trovare l'IP del visitatore al penultimo posto.
         - IpProtocol: tcp
           FromPort: 80
           ToPort: 80
-          CidrIp: 0.0.0.0/0
-          Description: Da CloudFront - filtrato per intestazione sul listener
+          SourcePrefixListId: !Ref PrefissiCloudFront
+          Description: CloudFront (VPC origin)
 
   SgTask:
     Type: AWS::EC2::SecurityGroup
@@ -605,14 +669,16 @@ Resources:
   # Bilanciatore
   # =========================================================================
 
+  # Interno dal 02/10. Pubblico, com'era prima, costava 2 IP (7,3 $/mese) e
+  # lasciava il tratto CloudFront -> ALB in HTTP verso un indirizzo pubblico.
   Bilanciatore:
     Type: AWS::ElasticLoadBalancingV2::LoadBalancer
     Properties:
       Type: application
-      Scheme: internet-facing
+      Scheme: internal
       Subnets:
-        - !Ref SubnetA
-        - !Ref SubnetB
+        - !Ref SubnetPrivataA
+        - !Ref SubnetPrivataB
       SecurityGroups:
         - !Ref SgBilanciatore
       LoadBalancerAttributes:
@@ -647,8 +713,9 @@ Resources:
       LoadBalancerArn: !Ref Bilanciatore
       Port: 80
       Protocol: HTTP
-      # Chi arriva senza l'intestazione segreta di CloudFront viene respinto:
-      # l'ALB e' raggiungibile in rete, ma non utilizzabile scavalcando la CDN.
+      # Chi arriva senza l'intestazione segreta di CloudFront viene respinto.
+      # Ora che l'ALB e' interno e accetta solo CloudFront e' una seconda
+      # difesa, non la sola.
       DefaultActions:
         - Type: fixed-response
           FixedResponseConfig:
@@ -675,6 +742,18 @@ Resources:
   # CloudFront
   # =========================================================================
 
+  # La strada privata da CloudFront all'ALB interno. Il dispiegamento richiede
+  # fino a 15 minuti.
+  OrigineVpc:
+    Type: AWS::CloudFront::VpcOrigin
+    Properties:
+      VpcOriginEndpointConfig:
+        Name: !Sub '${NomeProgetto}-alb-interno'
+        Arn: !Ref Bilanciatore
+        HTTPPort: 80
+        HTTPSPort: 443
+        OriginProtocolPolicy: http-only
+
   Distribuzione:
     Type: AWS::CloudFront::Distribution
     Properties:
@@ -690,13 +769,13 @@ Resources:
             OriginAccessControlId: !GetAtt ControlloAccessoOrigine.Id
             S3OriginConfig:
               OriginAccessIdentity: ''
-          - Id: origineAlb
+          - Id: origineAlbInterno
             DomainName: !GetAtt Bilanciatore.DNSName
-            CustomOriginConfig:
-              OriginProtocolPolicy: http-only
-              HTTPPort: 80
-              # Predefinito 30 s. L'agente puo' impiegare di piu' prima del
-              # primo byte su una consultazione con molti giri di strumenti.
+            VpcOriginConfig:
+              VpcOriginId: !GetAtt OrigineVpc.Id
+              # Predefinito 30 s, massimo 120. L'agente puo' impiegare di piu'
+              # prima del primo byte su una consultazione con molti giri di
+              # strumenti.
               OriginReadTimeout: 120
               OriginKeepaliveTimeout: 60
             OriginCustomHeaders:
@@ -715,32 +794,32 @@ Resources:
           # bufferizza la risposta e lo streaming SSE arriva tutto insieme alla
           # fine. Nessun errore, solo un'esperienza che sembra lentissima.
           - PathPattern: /chat
-            TargetOriginId: origineAlb
+            TargetOriginId: origineAlbInterno
             ViewerProtocolPolicy: redirect-to-https
             Compress: false
             AllowedMethods: [GET, HEAD, OPTIONS, PUT, POST, PATCH, DELETE]
             CachePolicyId: 4135ea2d-6df8-44a3-9df3-4b5a84be39ad         # CachingDisabled
             OriginRequestPolicyId: b689b0a8-53d0-40ab-baf2-68738e2966ac # AllViewerExceptHostHeader
           - PathPattern: /riscontro
-            TargetOriginId: origineAlb
+            TargetOriginId: origineAlbInterno
             ViewerProtocolPolicy: redirect-to-https
             AllowedMethods: [GET, HEAD, OPTIONS, PUT, POST, PATCH, DELETE]
             CachePolicyId: 4135ea2d-6df8-44a3-9df3-4b5a84be39ad
             OriginRequestPolicyId: b689b0a8-53d0-40ab-baf2-68738e2966ac
           - PathPattern: /richiesta-demo
-            TargetOriginId: origineAlb
+            TargetOriginId: origineAlbInterno
             ViewerProtocolPolicy: redirect-to-https
             AllowedMethods: [GET, HEAD, OPTIONS, PUT, POST, PATCH, DELETE]
             CachePolicyId: 4135ea2d-6df8-44a3-9df3-4b5a84be39ad
             OriginRequestPolicyId: b689b0a8-53d0-40ab-baf2-68738e2966ac
           - PathPattern: /recupero-password
-            TargetOriginId: origineAlb
+            TargetOriginId: origineAlbInterno
             ViewerProtocolPolicy: redirect-to-https
             AllowedMethods: [GET, HEAD, OPTIONS, PUT, POST, PATCH, DELETE]
             CachePolicyId: 4135ea2d-6df8-44a3-9df3-4b5a84be39ad
             OriginRequestPolicyId: b689b0a8-53d0-40ab-baf2-68738e2966ac
           - PathPattern: /conversazioni*
-            TargetOriginId: origineAlb
+            TargetOriginId: origineAlbInterno
             ViewerProtocolPolicy: redirect-to-https
             AllowedMethods: [GET, HEAD, OPTIONS, PUT, POST, PATCH, DELETE]
             CachePolicyId: 4135ea2d-6df8-44a3-9df3-4b5a84be39ad
@@ -752,13 +831,13 @@ Resources:
           # interrogare il backend - un controllo di salute che non poteva
           # fallire, che e' il tipo di controllo peggiore.
           - PathPattern: /salute
-            TargetOriginId: origineAlb
+            TargetOriginId: origineAlbInterno
             ViewerProtocolPolicy: redirect-to-https
             AllowedMethods: [GET, HEAD, OPTIONS]
             CachePolicyId: 4135ea2d-6df8-44a3-9df3-4b5a84be39ad
             OriginRequestPolicyId: b689b0a8-53d0-40ab-baf2-68738e2966ac
           - PathPattern: /stato
-            TargetOriginId: origineAlb
+            TargetOriginId: origineAlbInterno
             ViewerProtocolPolicy: redirect-to-https
             AllowedMethods: [GET, HEAD, OPTIONS]
             CachePolicyId: 4135ea2d-6df8-44a3-9df3-4b5a84be39ad
@@ -775,7 +854,7 @@ Resources:
           # portale - che per gli atti con allegati significa rileggere
           # diciassette megabyte a ogni clic.
           - PathPattern: /documenti/*
-            TargetOriginId: origineAlb
+            TargetOriginId: origineAlbInterno
             ViewerProtocolPolicy: redirect-to-https
             AllowedMethods: [GET, HEAD, OPTIONS]
             CachePolicyId: 658327ea-f89d-4fab-a63d-7e88639e58f6         # CachingOptimized
@@ -991,7 +1070,9 @@ Resources:
       TaskDefinition: !Ref DefinizioneTask
       DesiredCount: !Ref NumeroTask
       LaunchType: FARGATE
-      HealthCheckGracePeriodSeconds: 60
+      # 120 e non 60: con 0,25 vCPU l'avvio (gli import di langchain) richiede
+      # il doppio, e il task non va dato per malato prima di essere partito.
+      HealthCheckGracePeriodSeconds: 120
       DeploymentConfiguration:
         MinimumHealthyPercent: 100
         MaximumPercent: 200
