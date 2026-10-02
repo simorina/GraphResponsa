@@ -423,7 +423,7 @@ def conversazione(conversazione: str, utente: Utente = Depends(utente_corrente))
     if not archivio.appartiene(utente.id, conversazione):
         raise HTTPException(status_code=403, detail="Conversazione non tua.")
 
-    from agente.agente import _fonti_da, agente, rifinisci
+    from agente.agente import _fonti_da, _frase_di_servizio, agente, rifinisci
     stato = agente().get_state({"configurable": {"thread_id": conversazione}})
     messaggi = []
     # Le fonti si ricostruiscono dai ToolMessage del checkpoint, esattamente
@@ -452,6 +452,11 @@ def conversazione(conversazione: str, utente: Utente = Depends(utente_corrente))
             continue
         ruolo = {"human": "user", "ai": "assistant"}.get(tipo, None)
         if not ruolo:
+            continue
+        if ruolo == "assistant" and _frase_di_servizio(m):
+            # Come dal vivo: la frase prima di uno strumento non e' la risposta.
+            # Mostrata, diventava una risposta a se'; e le fonti lette fin li'
+            # restavano attaccate a lei invece che alla risposta vera.
             continue
         contenuto = m.content
         if isinstance(contenuto, list):

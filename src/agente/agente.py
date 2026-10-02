@@ -154,6 +154,14 @@ SEPARATORE = "\n\n"
 # spesso da sembrare continuo, abbastanza di rado da non mandare un evento per
 # ogni token.
 INTERVALLO_BOZZA = 0.05
+# Quanti caratteri di una chiamata si trattengono prima di mostrarli. Se intanto
+# la chiamata passa a uno strumento, cio' che ha scritto era una frase di
+# servizio (_frase_di_servizio) e non si vede mai. Misurato il 02/10 sui
+# checkpoint di produzione: con DeepSeek le frasi di servizio arrivano al
+# massimo a 169 caratteri, le risposte hanno una mediana di 2.480. Le frasi piu'
+# lunghe della soglia (Haiku e Sonnet ne scrivono fino a 600) compaiono per un
+# attimo e si ritirano appena arriva la chiamata allo strumento.
+SOGLIA_BOZZA = 250
 
 # Quanto costa rileggere un token dalla cache, in frazione del prezzo
 # d'ingresso. Su Anthropic e' un decimo, dichiarato. Su Qwen il listino distingue
@@ -1452,6 +1460,20 @@ def _testo_di(messaggio):
     return ""
 
 
+def _frase_di_servizio(messaggio):
+    """Un AIMessage che chiama strumenti: il suo testo non e' la risposta.
+
+    E' la frase che il modello scrive prima di cercare: «Cerco la legge e le sue
+    modifiche», con DeepSeek a volte in inglese («I'll search the archive...»).
+    Il prompt la vieta, ma misurato il 02/10 sui checkpoint di produzione la
+    scrivono il 28% delle chiamate di DeepSeek, il 23% di quelle di Sonnet e
+    tutte quelle di Haiku, e finiva incollata in testa alla risposta. Non la
+    mostrano ne' la bozza, ne' il testo finale, ne' una conversazione riaperta
+    (server.py).
+    """
+    return bool(getattr(messaggio, "tool_calls", None))
+
+
 def _delta_di(frammento):
     """Il testo di un frammento in streaming, cosi' com'e': a differenza di
     _testo_di non si toglie lo spazio ai bordi, che fra un frammento e l'altro
@@ -1548,15 +1570,19 @@ def rispondi(domanda, conversazione=None):
     # I nomi arrivano con l'AIMessage, i risultati dopo col ToolMessage:
     # questa mappa li ricongiunge per id di chiamata.
     nomi_per_id = {}
-    # I blocchi di testo che il modello scrive lungo il ciclo - le frasi di
-    # servizio prima di uno strumento e la risposta finale - si accumulano qui
-    # e partono insieme. Il modello riprende a scrivere dopo gli strumenti:
-    # senza uno stacco la frase nuova si salderebbe alla precedente.
+    # Il testo della risposta: le chiamate al modello che non finiscono in uno
+    # strumento. Quelle che ci finiscono portano al massimo una frase di
+    # servizio, che resta fuori (_frase_di_servizio).
     blocchi_testo = []
     # La bozza: lo stesso testo, mentre il modello lo scrive. I frammenti si
     # raccolgono e partono a gruppi, ogni INTERVALLO_BOZZA secondi, invece che
     # uno per evento: una risposta lunga ne fa migliaia.
-    bozza = {"coda": "", "inviata": 0.0, "chiamata": None, "iniziata": False}
+    # Il testo di ogni chiamata resta `trattenuto` finche' non supera
+    # SOGLIA_BOZZA: se intanto la chiamata passa a uno strumento era una frase
+    # di servizio e non si e' mai vista. Se la supera e poi chiama lo stesso
+    # uno strumento, la bozza si ritira.
+    bozza = {"coda": "", "inviata": 0.0, "chiamata": None, "trattenuto": "",
+             "mostrata": False, "strumenti": False}
 
     def svuota_bozza(subito=False):
         if not bozza["coda"]:
@@ -1566,6 +1592,15 @@ def rispondi(domanda, conversazione=None):
             return None
         delta, bozza["coda"], bozza["inviata"] = bozza["coda"], "", time.monotonic()
         return {"tipo": "bozza", "delta": delta}
+
+    def ritira_bozza():
+        """La chiamata in corso finisce in uno strumento: cio' che ha scritto
+        era una frase di servizio. Se era gia' in vista, la bozza torna indietro."""
+        mostrata = bozza["mostrata"]
+        bozza.update(coda="", trattenuto="", mostrata=False, strumenti=True)
+        if mostrata:
+            return {"tipo": "bozza", "azzera": True, "testo": SEPARATORE.join(blocchi_testo)}
+        return None
 
     try:
         for modo, pezzo in _flusso(
@@ -1586,7 +1621,8 @@ def rispondi(domanda, conversazione=None):
             stream_mode=["updates", "messages"],
         ):
             if corrente.pop("azzera_bozza", False):
-                bozza.update(coda="", chiamata=None, iniziata=bool(blocchi_testo))
+                bozza.update(coda="", chiamata=None, trattenuto="", mostrata=False,
+                             strumenti=False)
                 yield {"tipo": "bozza", "azzera": True, "testo": SEPARATORE.join(blocchi_testo)}
 
             if modo == "messages":
@@ -1595,15 +1631,37 @@ def rispondi(domanda, conversazione=None):
                         or not isinstance(frammento, AIMessageChunk):
                     continue
                 delta = _delta_di(frammento)
-                if delta and frammento.id != bozza["chiamata"]:
-                    # Una chiamata nuova riprende a scrivere dopo gli strumenti:
-                    # come nel testo finale, si stacca dalla precedente.
-                    delta = delta.lstrip()
-                    if delta:
-                        if bozza["iniziata"]:
-                            delta = SEPARATORE + delta
-                        bozza["chiamata"], bozza["iniziata"] = frammento.id, True
-                bozza["coda"] += delta
+                pezzi_strumento = getattr(frammento, "tool_call_chunks", None)
+                # I frammenti vuoti non dicono niente, e quello finale con l'uso
+                # dei token puo' portare un id diverso: scambiarlo per una
+                # chiamata nuova ritirerebbe la risposta appena scritta.
+                if not delta and not pezzi_strumento:
+                    continue
+                if frammento.id != bozza["chiamata"]:
+                    # Una chiamata nuova. Quella prima, se era in vista, era una
+                    # frase di servizio: una risposta chiude il ciclo.
+                    evento = ritira_bozza() if bozza["mostrata"] else None
+                    bozza.update(chiamata=frammento.id, coda="", trattenuto="",
+                                 mostrata=False, strumenti=False)
+                    if evento:
+                        yield evento
+                if pezzi_strumento:
+                    # Il gateway manda la chiamata allo strumento dopo il testo:
+                    # e' il primo momento in cui si sa che il testo era di servizio.
+                    evento = ritira_bozza()
+                    if evento:
+                        yield evento
+                    continue
+                if bozza["strumenti"]:
+                    continue
+                if bozza["mostrata"]:
+                    bozza["coda"] += delta
+                else:
+                    bozza["trattenuto"] += delta
+                    if len(bozza["trattenuto"].strip()) < SOGLIA_BOZZA:
+                        continue
+                    bozza["coda"] += bozza["trattenuto"].lstrip()
+                    bozza.update(trattenuto="", mostrata=True)
                 evento = svuota_bozza()
                 if evento:
                     yield evento
@@ -1612,8 +1670,14 @@ def rispondi(domanda, conversazione=None):
             evento = svuota_bozza(subito=True)
             if evento:
                 yield evento
-            for _nodo, stato in pezzo.items():
-                if not isinstance(stato, dict):
+            for nodo, stato in pezzo.items():
+                # Solo il modello e gli strumenti parlano della domanda in
+                # corso. I middleware che agiscono prima (PotaturaFraDomande,
+                # RiparaChiamateOrfane) restituiscono messaggi VECCHI, riscritti
+                # con lo stesso id: letti qui diventavano risultati fantasma
+                # nell'avanzamento, token contati due volte e testo di una
+                # risposta passata in quella nuova.
+                if nodo not in ("model", "tools") or not isinstance(stato, dict):
                     continue
                 for messaggio in stato.get("messages", []) or []:
                     uso = getattr(messaggio, "usage_metadata", None)
@@ -1646,9 +1710,19 @@ def rispondi(domanda, conversazione=None):
                         c["fuori"] += uso.get("output_tokens", 0)
 
                     if type(messaggio).__name__ == "AIMessage":
-                        scritto = _testo_di(messaggio)
-                        if scritto:
-                            blocchi_testo.append(scritto)
+                        if _frase_di_servizio(messaggio):
+                            # Se il gateway non ha mandato la chiamata a pezzi,
+                            # e' qui che si scopre: la bozza si ritira ora.
+                            evento = ritira_bozza()
+                            if evento:
+                                yield evento
+                        else:
+                            scritto = _testo_di(messaggio)
+                            if scritto:
+                                blocchi_testo.append(scritto)
+                        # La chiamata e' finita: la prossima riparte da capo,
+                        # anche con un fornitore che non numera i frammenti.
+                        bozza.update(chiamata=None, trattenuto="", strumenti=False)
 
                     for chiamata in getattr(messaggio, "tool_calls", None) or []:
                         nomi_per_id[chiamata["id"]] = chiamata["name"]
