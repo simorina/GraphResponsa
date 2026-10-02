@@ -38,7 +38,7 @@ param(
     [switch]$Forza,
     [string]$Bucket        = 'graphresponsa-frontend-392900064778',
     [string]$Distribuzione = 'E32NXP50437VPI',
-    [string]$Sito          = 'https://ds1t1vk405e45.cloudfront.net'
+    [string]$Sito          = 'https://responsarsm.com'
 )
 
 # 'Continue' e non 'Stop': in Windows PowerShell 5.1, con 'Stop', la prima

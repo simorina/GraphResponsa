@@ -33,7 +33,7 @@ param(
     [string]$Immagine = 'graphresponsa',
     [string]$Cluster  = 'graphresponsa-cluster',
     [string]$Servizio = 'graphresponsa-api',
-    [string]$Sito     = 'https://ds1t1vk405e45.cloudfront.net'
+    [string]$Sito     = 'https://responsarsm.com'
 )
 
 # 'Continue' e non 'Stop': in Windows PowerShell 5.1, con 'Stop', la prima

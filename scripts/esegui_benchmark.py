@@ -41,7 +41,7 @@ load_dotenv(ROOT / ".env")
 if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8", line_buffering=True)
 
-BASE = "https://ds1t1vk405e45.cloudfront.net"
+BASE = "https://responsarsm.com"
 POOL = "eu-central-1_MBFp8Z9Oq"
 CLIENT = "10d7o76gk7r5ch0pacuramn5gj"
 UTENTE = "benchmark@graphresponsa.test"
