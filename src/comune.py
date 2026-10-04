@@ -69,6 +69,9 @@ PREFISSI = {
     "ordinanza": "O",
     "verbale": "V",
     "errata corrige": "EC",
+    # Non vengono dall'archivio del Consiglio ma dal sito del Tribunale:
+    # 21_linee_guida.py, numero e anno dal protocollo del Dirigente.
+    "linee guida": "LG",
 }
 
 LABELS = {
@@ -99,6 +102,7 @@ LABELS = {
     "ordinanza": "Ordinanza",
     "verbale": "Verbale",
     "errata corrige": "ErrataCorrige",
+    "linee guida": "LineeGuida",
 }
 
 tipi_ignoti = set()
