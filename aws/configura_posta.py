@@ -291,22 +291,43 @@ def produzione():
     d = identita(DOMINIO)
     if not (d and d["VerifiedForSendingStatus"]):
         raise SystemExit("  prima il dominio verificato (`conferma`): chi esamina la richiesta lo controlla")
-    ses2.put_account_details(
+    richiesta = dict(
         MailType="TRANSACTIONAL", WebsiteURL=SITO, ContactLanguage="EN", ProductionAccessEnabled=True,
         AdditionalContactEmailAddresses=[DESTINAZIONE],
         UseCaseDescription=(
-            "Responsa (https://responsarsm.com) is a legal research assistant for the law of the Republic of "
-            "San Marino, used by lawyers and public offices. We use Amazon SES only for low-volume transactional "
-            "email from our verified domain responsarsm.com (DKIM, SPF via the custom MAIL FROM domain "
-            "mail.responsarsm.com, and DMARC are configured):\n"
-            "1) a notification to our own team when a visitor submits the 'Book a demo' form on our website, "
-            "sent to demo@responsarsm.com with the requester as Reply-To;\n"
-            "2) forwarding of inbound email that SES receives for our domain (receipt rule, S3, Lambda) to our "
-            "team's mailbox;\n"
-            "3) later, account emails for registered users, such as password recovery through Amazon Cognito.\n"
-            "We send no marketing or bulk email and never use purchased lists: every recipient is our own team, "
-            "a registered user, or someone who wrote to us. Expected volume is under 50 emails per day. Bounces "
-            "and complaints go to the SES account-level suppression list, and we review them in the SES console."))
+            "Responsa (https://responsarsm.com) is a legal research service for the law of the Republic of San "
+            "Marino. Our customers are law firms and public offices. Users cannot sign up by themselves: our team "
+            "creates each account in Amazon Cognito after the customer has agreed to use the service.\n\n"
+            "We send only transactional email, from our verified domain responsarsm.com (Easy DKIM, SPF through "
+            "the custom MAIL FROM domain mail.responsarsm.com, DMARC):\n"
+            "1. Amazon Cognito account email: the temporary password when we create a user's account, and when a "
+            "registered user asks for a new password on our sign-in page. Example: subject 'Responsa: la tua "
+            "password temporanea', a short Italian text with the temporary password and a link to "
+            "https://responsarsm.com. This is why we need production access: these messages go to our users' "
+            "own addresses, which we cannot verify one by one.\n"
+            "2. A notification to our own team: when someone fills in the 'Book a demo' form on our website we "
+            "send one email to our own address demo@responsarsm.com, with the requester as Reply-To. We never "
+            "email the requester automatically.\n"
+            "3. Inbound email for our domain is received by SES and forwarded only to our own team mailbox, a "
+            "verified identity. Messages that SES marks as spam or virus are not forwarded.\n\n"
+            "We do not send marketing, newsletters or any bulk email, and we never use purchased, rented or "
+            "scraped lists. Expected volume: about 10 emails per day, under 300 per month, never above 50 per "
+            "day.\n\n"
+            "Bounces and complaints: the account-level suppression list is enabled for both, and email feedback "
+            "forwarding is enabled, so every bounce or complaint reaches our team mailbox. We then correct the "
+            "address or disable the account in Cognito. Once production access is granted we will configure "
+            "Amazon Cognito to send through this SES identity."))
+    try:
+        ses2.put_account_details(**richiesta)
+    except ses2.exceptions.ConflictException:
+        # Dopo un rifiuto l'API non accetta un nuovo invio (visto il 04/10): si risponde al caso,
+        # dalla console, e il Support Center via API vuole un piano di supporto a pagamento.
+        caso = ((ses2.get_account().get("Details") or {}).get("ReviewDetails") or {}).get("CaseId")
+        print(f"  AWS non accetta un nuovo invio dopo il rifiuto. Rispondi al caso {caso} nel Support "
+              f"Center, da root: https://support.console.aws.amazon.com/support/home#/case/?displayId={caso}\n"
+              "  Testo da incollare:\n")
+        print(richiesta["UseCaseDescription"])
+        return
     stato = (ses2.get_account().get("Details") or {}).get("ReviewDetails", {})
     print(f"  richiesta inviata: {stato.get('Status')} (caso {stato.get('CaseId')}). AWS risponde di solito entro un giorno.")
 

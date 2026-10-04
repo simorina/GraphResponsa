@@ -74,9 +74,7 @@ controlla("il Reply-To di chi scrive si rispetta", m["Reply-To"] == "segreteria@
 pdf = [p for p in m.iter_attachments() if p.get_filename() == "delibera.pdf"]
 controlla("l'allegato arriva identico, byte per byte", bool(pdf) and pdf[0].get_content() == PDF)
 
-print("\nspam e giri in tondo")
-m = da(I.riscrivi(SEMPLICE, INOLTRO, spam=True))
-controlla("lo spam si segna nell'oggetto", m["Subject"] == "[SPAM] Vorrei una demo", str(m["Subject"]))
+print("\ngiri in tondo")
 controlla("un messaggio gia' inoltrato non riparte", I.riscrivi(I.riscrivi(SEMPLICE, INOLTRO), INOLTRO) is None)
 proprio = SEMPLICE.replace(b"From: Giulia Terenzi <giulia@studio.sm>", b"From: Responsa <inoltro@responsarsm.com>")
 controlla("un messaggio dal nostro indirizzo di inoltro non riparte", I.riscrivi(proprio, INOLTRO) is None)
@@ -115,10 +113,12 @@ controlla("lo spedisce solo alla destinazione",
           len(spediti) == 1 and spediti[0]["Destination"] == {"ToAddresses": ["squadra@gmail.com"]})
 controlla("...con il From riscritto", b"via Responsa <inoltro@responsarsm.com>" in spediti[0]["Content"]["Raw"]["Data"])
 spediti.clear()
+letti.clear()
 I.gestore(evento("def", virus="FAIL"), None)
 controlla("con un virus non spedisce niente", not spediti)
 I.gestore(evento("ghi", spam="FAIL"), None)
-controlla("lo spam si inoltra segnato", len(spediti) == 1 and b"[SPAM]" in spediti[0]["Content"]["Raw"]["Data"])
+controlla("lo spam non si inoltra: un reclamo in Gmail peserebbe su SES", not spediti)
+controlla("...e non si legge nemmeno: resta nel bucket", not letti)
 
 print("\nfallite:", errori)
 sys.exit(1 if errori else 0)
