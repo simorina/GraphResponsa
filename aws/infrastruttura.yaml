@@ -465,6 +465,19 @@ Resources:
       UserPoolName: !Sub '${NomeProgetto}-utenti'
       AdminCreateUserConfig:
         AllowAdminCreateUserOnly: true   # solo su invito
+        # La stessa email arriva agli account nuovi e a chi usa "Password
+        # smarrita". Il testo e' quello di aws/configura_cognito.py, che lo
+        # applica al pool: {username} sta in un commento perche' qui e' un
+        # UUID, e si entra con l'email.
+        InviteMessageTemplate:
+          EmailSubject: 'Responsa: la tua password temporanea'
+          EmailMessage: >-
+            <p>Buongiorno,</p><p>ecco la password temporanea per entrare in Responsa: <b>{####}</b></p><p>Accedi da <a href="https://responsarsm.com/#accesso">responsarsm.com</a> con la tua email e questa password: al primo accesso ti chiederemo di sceglierne una nuova. La password temporanea vale 7 giorni.</p><p>Ricevi questa email perché è stato creato il tuo account, oppure perché è stata chiesta una nuova password per il tuo indirizzo. Nel secondo caso la password precedente non vale più: se la richiesta non l'hai fatta tu, entra con questa e scegline una nuova.</p><p style="color:#52687a">Responsa<br>Repubblica di San Marino</p><!-- {username} -->
+      VerificationMessageTemplate:
+        DefaultEmailOption: CONFIRM_WITH_CODE
+        EmailSubject: 'Responsa: il tuo codice di verifica'
+        EmailMessage: >-
+          <p>Il tuo codice di verifica per Responsa è <b>{####}</b>.</p><p style="color:#52687a">Responsa<br>Repubblica di San Marino</p>
       UsernameAttributes:
         - email
       AutoVerifiedAttributes:
