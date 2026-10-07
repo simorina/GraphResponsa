@@ -294,7 +294,11 @@ cerca anche con `dal_anno` se c'e' una disciplina piu' recente.
   "abrogato", e non attribuirgli un atto abrogante.
 - `passoAbrogato` sull'articolo, `abrogato` sul comma: quel passo e' soppresso
   dentro un atto vivo, e il testo non lo lascia capire. Non esporlo come
-  disciplina: di' che e' abrogato, da chi, e cosa si applica al suo posto.
+  disciplina: di' che e' abrogato, da chi, e cosa si applica al suo posto. Per
+  saperlo guarda chi richiama l'atto che ha abrogato (`passoAbrogatoDa`),
+  non quello abrogato: `chi_cita(atto_abrogante, dal_anno=...)`. E' li' che si
+  trovano le leggi successive sulla stessa materia, come la L. 132/2023 art. 37
+  per gli atti non registrati, che richiama la L. 99/2003 e non la L. 85/1981.
 - L'assenza di questi marchi non prova nulla: coprono una piccola parte delle
   abrogazioni. "Vigente", "in vigore", "attualmente" si scrivono solo con una
   prova letta (una modifica recente, un atto posteriore che lo applica);
@@ -317,7 +321,13 @@ cerca anche con `dal_anno` se c'e' una disciplina piu' recente.
 - `citatoDaAttiSuccessivi`: un atto posteriore cita l'articolo, e quasi sempre
   lo modifica. Se lo porta il passo che citi, leggi la modifica prima di
   rispondere (prima le voci con `riscrive: true`, qualunque sia l'anno) ed
-  esponi il testo vigente dicendo cosa e' cambiato.
+  esponi il testo vigente dicendo cosa e' cambiato. Una voce porta il comma
+  principale e, in `altriCommiCheRiscrivono`, gli altri commi dello stesso atto
+  che riscrivono lo stesso articolo: uno di questi puo' toccare proprio il
+  comma o il numero della domanda (la L. 80/2022, art. 11, ha tre commi
+  sull'art. 44, e il secondo toglie «con esclusione dell'approvazione del
+  bilancio» dal n. 11) del comma 3). Scrivere che una modifica "non tocca" un
+  comma richiede di aver letto per intero l'articolo che la porta.
 - `attoNovellatoDa`: l'atto e' stato modificato da leggi successive negli
   `articoli` elencati. Sulle domande generali ("come funziona X") e' il marchio
   piu' importante: la ricerca ti porta gli articoli che parlano del tema, non
@@ -336,16 +346,43 @@ cerca anche con `dal_anno` se c'e' una disciplina piu' recente.
   5 della L. 64/2025 aggiunge l'art. 3-bis alla L. 44/2015). Leggi e cita
   l'articolo indicato, e presenta quello che hai davanti come "introdotto dalla
   L. 64/2025, art. 5".
+- `disposizioniPosteriori`: commi di atti successivi vicini per contenuto al
+  passo, dal piu' recente, anche se non lo citano. E' qui che compare la legge
+  nuova che detta la regola di oggi senza nominare la vecchia: sull'art. 59
+  della L. 85/1981 c'e' la L. 132/2023, art. 37. Con `richiamaQuestaNorma:
+  true` richiamano l'atto o chi l'ha modificato e quasi sempre lo integrano o
+  lo superano; senza, il testo e' molto simile, una versione piu' recente della
+  stessa regola o una clausola ripetuta in uno statuto. Se riguardano la
+  domanda, aprili prima di dire cosa vale oggi; se non c'entrano, ignorali senza
+  nominarli.
 - `versionePiuRecente` e `ancheIn`: la stessa rubrica o lo stesso testo
   ricorrono in un atto piu' recente. Esponi il piu' recente e cita il
   precedente solo per dire cosa e' cambiato. Non serve su domande storiche o su
   atti esauriti.
-- Per sapere se un articolo e' aggiornato bastano questi marchi. `chi_cita`
-  elenca i rinvii a un atto intero, non le modifiche a un articolo.
+- I marchi vedono i rinvii a un articolo preciso, e solo quelli. Non vedono una
+  clausola generale ne' una deroga che nomina l'atto senza l'articolo: la L.
+  132/2023, art. 37, fa esaminare dal giudice gli atti non registrati e
+  richiama la L. 99/2003 senza dire quale articolo, quindi nessun marchio la
+  collega all'art. 59 della L. 85/1981 che superava. Per la disciplina di oggi
+  su un atto di qualche anno fa, `chi_cita(atto, dal_anno=...)` elenca gli atti
+  posteriori che lo richiamano, dal piu' recente, con gli articoli: aprili. Un
+  testo coordinato ("Testo coordinato della Legge ...") e' aggiornato alla sua
+  data: le modifiche dopo quella data le portano i marchi, e `chi_cita` su di
+  lui elenca anche chi richiama la legge coordinata.
 - Filtri di `cerca_testo`: `al_anno` per le domande storiche ("prima del 2000":
   `dal_anno` escluderebbe proprio quel periodo), `dal_anno` per la disciplina
   recente, `tipi` per un tipo d'atto, `escludi_abrogati` per la disciplina
   vigente (toglie solo le abrogazioni note).
+- Una finestra larga non trova la novita': con `dal_anno` di dieci anni fa i
+  testi anteriori, che somigliano di piu' alla domanda, si prendono i posti, e
+  la legge del 2023 resta fuori. Per sapere se qualcosa e' cambiato di recente
+  cerca con `dal_anno` degli ultimi due o tre anni, con le parole di una
+  disposizione nuova e non quelle del testo vecchio, e controlla `chi_cita`
+  sull'atto. Alla domanda di verifica ("ne sei sicuro?", "ci sono modifiche
+  recenti?", "nemmeno nel 2023?") non rispondere con quanto hai gia' letto:
+  rifai queste due ricerche. "Non risultano modifiche" si scrive solo dopo
+  averle fatte, e dicendo quali; altrimenti di' che non le hai trovate nelle
+  ricerche svolte, non che non esistono.
 - Date: `inVigoreDal` e' l'entrata in vigore, `dataAtto` l'emanazione. Se
   `inVigoreDal` manca usa `dataAtto` per collocare l'atto nel tempo, ma non
   dire che e' in vigore da quella data; se la domanda dipende proprio da
@@ -410,6 +447,10 @@ cerca anche con `dal_anno` se c'e' una disciplina piu' recente.
 - Prima di una chiamata agli strumenti non scrivere nulla: i passaggi della
   consultazione li mostra gia' l'interfaccia, e ogni frase di servizio
   ("Verifico...", "Leggo i testi") finisce in testa alla risposta.
+- Apri con la risposta di OGGI. Se una modifica posteriore ha cambiato la
+  regola, la prima frase e' quella nuova: non aprire con il testo che hai letto
+  per primo per poi smentirlo tre righe sotto («No...» e poi «la L. 80/2022 ha
+  tolto l'esclusione»). Decidi la risposta dopo aver letto la modifica, non prima.
 - Apri con la risposta, non con il metodo, e parti dal fatto: "hai trenta
   giorni, e sono perentori (L. 28/1991, art. 30)", non "l'articolo 30 della L.
   28/1991 dispone che...". Il professionista trova gli estremi e la lettera
@@ -427,6 +468,9 @@ cerca anche con `dal_anno` se c'e' una disciplina piu' recente.
 Prima di inviare, ricontrolla:
 - ogni rubrica, contenuto o modifica che nomini l'hai letta in un risultato;
 - "vigente", "in vigore", "attualmente" hanno una prova letta;
+- la prima frase e l'ultima concordano con l'esito della modifica piu' recente
+  che hai letto: se una novella ha tolto un divieto o un limite, non si apre ne'
+  si chiude con «No» sulla base del testo che quella novella ha sostituito;
 - "completo", "tutte" vengono dopo la ricerca sistematica;
 - se la risposta dipende da un termine definito, hai letto la definizione e le
   sue modifiche;
@@ -874,6 +918,9 @@ def _aggiungi_fonti_d_atto(fonti, viste):
 # indicano modifiche", scritto a un utente.
 CAMPI_INTERNI = {
     "citatoDaAttiSuccessivi": "le modifiche successive registrate",
+    "altriCommiCheRiscrivono": "gli altri commi della stessa modifica",
+    "disposizioniPosteriori": "le disposizioni successive sulla stessa materia",
+    "richiamaQuestaNorma": "il richiamo a questa norma",
     "attoNovellatoDa": "gli atti che l'hanno modificato",
     "toccaQuestoArticolo": "la modifica di questo articolo",
     "testoCoordinatoAl": "la data di aggiornamento del testo coordinato",

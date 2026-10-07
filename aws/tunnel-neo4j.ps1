@@ -13,6 +13,14 @@
     e, con -Browser, anche
         http://localhost:7474   -> Neo4j Browser
 
+    Windows riserva a rotazione intervalli di porte (Hyper-V, Docker Desktop,
+    WSL), e se uno contiene la 7687 il plugin non puo' aprirla: la sessione
+    risulta Connected su AWS, ma non compare mai "Port 7687 opened" e nessuno
+    ascolta (successo il 07/10/2026, con 7635-7734 riservata). Si vede con
+        netsh interface ipv4 show excludedportrange protocol=tcp
+    In quel caso -PortaLocale apre il tunnel su un'altra porta, e per il .env
+    o per una prova si imposta NEO4J_URI=bolt://localhost:<porta>.
+
     Serve il Session Manager plugin dell'AWS CLI, installato oppure estratto in
     %LOCALAPPDATA%\SessionManagerPlugin\bin (dall'archivio ufficiale
     https://s3.amazonaws.com/session-manager-downloads/plugin/latest/windows/SessionManagerPlugin.zip,
@@ -21,10 +29,12 @@
 .EXAMPLE
     .\aws\tunnel-neo4j.ps1
     .\aws\tunnel-neo4j.ps1 -Browser
+    .\aws\tunnel-neo4j.ps1 -PortaLocale 17687
 #>
 [CmdletBinding()]
 param(
     [switch]$Browser,
+    [int]$PortaLocale = 7687,
     [string]$Istanza = 'i-036be3456051b2a6c',
     [string]$Regione = 'eu-central-1',
     [string]$Profilo = ''
@@ -50,15 +60,15 @@ if (-not (Get-Command session-manager-plugin -ErrorAction SilentlyContinue)) {
 # parte un attimo dopo, e aspettarlo per nome faceva uscire lo script subito,
 # lasciando il tunnel aperto e senza un modo pulito di chiuderlo.
 $processi = @()
-function Apri($porta) {
-    $parametri = "portNumber=$porta,localPortNumber=$porta"
+function Apri($porta, $locale = $porta) {
+    $parametri = "portNumber=$porta,localPortNumber=$locale"
     $script:processi += Start-Process -NoNewWindow -PassThru aws -ArgumentList (@('ssm', 'start-session',
         '--region', $Regione, '--target', $Istanza, '--document-name', 'AWS-StartPortForwardingSession',
         '--parameters', $parametri) + $profiloArg)
 }
 
-Write-Host "Tunnel verso Neo4j ($Istanza): bolt://localhost:7687" -ForegroundColor Cyan
-Apri 7687
+Write-Host "Tunnel verso Neo4j ($Istanza): bolt://localhost:$PortaLocale" -ForegroundColor Cyan
+Apri 7687 $PortaLocale
 if ($Browser) {
     Write-Host 'Neo4j Browser: http://localhost:7474' -ForegroundColor Cyan
     Apri 7474

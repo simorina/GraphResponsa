@@ -604,6 +604,57 @@ e completo. Per un articolo il server estrae il più grande, su cui sono contate
 le pagine, e lo apre nel visualizzatore. Lo ZIP di una norma resta un
 download. `17` va rieseguito dopo `10` e `12`.
 
+### Atti gemelli: il testo coordinato e la ratifica
+
+La stessa disciplina sta in due nodi in due casi. Il Codice, l'Edilizia e il
+Lavoro scrivono il testo coordinato sugli articoli delle leggi che coordinano,
+ma due atti *sono* un testo coordinato pubblicato come norma propria: il
+`DD-46-2011` («Testo coordinato della Legge 23 febbraio 2006 n. 47», la Legge
+sulle società) e il `D-79-2002` (la Dichiarazione dei diritti, coordinato della
+`L-59-1974`). E un decreto e la sua ratifica, che ne ripubblica il testo a
+volte con modifiche: `08` ne riconosce 534 coppie, e finora le usava solo per
+le abrogazioni dell'atto intero.
+
+Chi modifica dopo ne nomina uno solo, e l'arco `CITA_ARTICOLO` va lì. Al
+07/10: **345 citazioni posteriori verso la `L-47-2006`, 2 verso il
+coordinato**; nelle coppie di ratifica **3.154 citazioni posteriori a entrambi
+che ne raggiungono uno solo**, quasi tutte la ratifica. Chi leggeva l'altro
+gemello non vedeva nessuna modifica: in una consultazione vera del 06/10
+l'agente ha dato la soglia del collegio sindacale del 2011 (7,3 milioni)
+invece di quella della `L-30/2025` (9). E i commi 5, 7, 8 e 9 dell'art. 6
+della Legge sulle società, abrogati nel 2019, nel coordinato risultavano vivi.
+
+Le coppie di ratifica sono quelle di `08`, che le cerca fra gli atti con
+«ratifica» nel titolo, più quelle dichiarate solo nel preambolo: il `DD-81-2008`
+si intitola «CODICE DELLA STRADA» e si apre con «(Ratifica Decreto Delegato 28
+aprile 2008 n.67)», e 196 modifiche posteriori raggiungevano uno solo dei due.
+Di queste se ne tengono 12 su 18, quelle con articoli davvero in comune: le
+altre erano abbinamenti sbagliati o ratifiche che non ripubblicano il testo.
+
+`src/22_atti_gemelli.py` scrive:
+- `(coordinato)-[:COORDINA]->(legge)` e `(ratifica)-[:RATIFICA]->(decreto)`;
+- per ogni comma di un atto posteriore a entrambi che cita un articolo di un
+  gemello, lo stesso arco verso l'articolo omologo dell'altro
+  (`CITA_ARTICOLO` con `origine` `'coordinato'` o `'ratifica'`, più
+  `attoCitato` e `articoloCitato`: ciò che il comma nomina davvero; quelli del
+  parser restano suoi);
+- le abrogazioni posteriori a entrambi, sull'omologo, solo se il testo è lo
+  stesso. Quelle anteriori sono già nel testo del gemello più recente.
+
+L'omologo nel coordinato è l'articolo con lo stesso numero. Nella ratifica no:
+può aggiungere articoli e spostare i numeri (il `DD-26-2015` ne ha 53, il
+`DD-226-2014` 35) o essere un altro testo (`DD-12-2017` contro `DD-149-2016`).
+Lì l'omologo è lo stesso numero se il testo somiglia (≥ 0,6) o la rubrica è la
+stessa, altrimenti l'articolo quasi uguale (≥ 0,8) sotto un altro numero;
+altrimenti nessun arco. Sui 949 articoli citati al 07/10: 908 allo stesso
+numero, 6 sotto un altro, 35 senza omologo.
+
+Gli strumenti dell'agente leggono `COORDINA` e `RATIFICA` (e il titolo, per un
+coordinato senza arco), e per riconoscere una riscrittura usano l'atto
+nominato dall'arco: la novella dice «n. 51/2017», non «n. 126/2016».
+`_testo_aggiornato_in` ignora questi archi. `22` va rieseguito **dopo `08`**,
+che azzera le marcature di abrogazione, e dopo `09`.
+
 ### Un atto con più numerazioni: la legge di registro
 
 La `L-85/1981` era **uno stub citato da 104 commi**. Il suo PDF tiene la legge

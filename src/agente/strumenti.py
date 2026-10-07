@@ -100,6 +100,8 @@ ALTRI_PASSI = 3
 # sanatoria straordinaria") si ripete a ogni risultato e vale 140 caratteri.
 TITOLO_IN_ELENCO = 70
 NOVELLE_MOSTRATE = 2
+# Per ogni novella, quanti altri commi dello stesso atto che riscrivono l'articolo.
+ALTRI_COMMI = 3
 # Il tetto ai risultati: l'agente ne ha chiesti fino a 15, e una chiamata sola
 # e' arrivata a 42.223 caratteri.
 LIMITE_MASSIMO = 10
@@ -785,6 +787,106 @@ def _riscrive(testo, numero_atto, titolo_atto, articolo):
             and any(_nomina(p, numero_atto, titolo_atto, None) for p in comandi))
 
 
+# Un testo coordinato e' un atto a se' nel grafo, ma chi lo modifica non lo
+# cita: il DD-46-2011 e' il "Testo coordinato della Legge 23 febbraio 2006
+# n. 47", e la L-30-2025 art. 48 dice "il comma 2 dell'articolo 58 della Legge
+# n.47/2006 e' cosi' sostituito". L'arco CITA_ARTICOLO va all'art. 58 della
+# L-47-2006, non a quello del coordinato: chi leggeva il coordinato non vedeva
+# nessun marchio. Il 06/10 sulla soglia del collegio sindacale l'agente ha
+# risposto 7.300.000 euro, il valore del 2011, invece di 9.000.000; e sull'art.
+# 44 ha scritto che l'archivio non segnalava modifiche, che erano quattro.
+RE_COORDINATO = re.compile(
+    r"testo\s+coordinato\s+(?:della|del|dei|delle)\s+"
+    r"(legge(?:\s+qualificata|\s+costituzionale)?|decreto(?:\s+delegato|\s+reggenziale|\s+consiliare)?)"
+    r"\s+(?:\d{1,2}\s+\w+\s+)?(\d{4}),?\s+n\.?\s*(\d+)", re.I)
+
+assert RE_COORDINATO.search("Decreto Delegato 24 febbraio 2011 n.46 - Testo coordinato "
+                            "della Legge 23 febbraio 2006 n. 47 (Legge sulle societa') "
+                            "e successive modifiche").groups() == ("Legge", "2006", "47")
+assert RE_COORDINATO.search("DICHIARAZIONE DEI DIRITTI. TESTO COORDINATO DELLA LEGGE 8 "
+                            "LUGLIO 1974, N.59, CON LE MODIFICHE").groups() == ("LEGGE", "1974", "59")
+assert RE_COORDINATO.search("Aggiornamento di cui al testo unico e di riforma") is None
+
+# Cosa coordina ogni atto gia' incontrato: id -> id della legge base, o None.
+# I titoli non cambiano mentre il servizio e' acceso, quindi si chiede una volta.
+_BASI = {}
+
+
+def _basi(ids):
+    """{id del testo coordinato: id dell'atto che coordina}, solo per i coordinati.
+
+    Lo dice l'arco COORDINA, scritto da 22_atti_gemelli.py. Dove manca,
+    l'atto base si riconosce dal titolo e si cerca per tipo, numero e anno: se
+    non e' in archivio il coordinato resta com'e'. Un errore del grafo non si
+    memorizza, cosi' alla chiamata dopo si riprova.
+    """
+    nuovi = [i for i in ids if i not in _BASI]
+    if nuovi:
+        try:
+            archi = {r["id"]: r["base"] for r in grafo().query("""
+                UNWIND $ids AS id
+                MATCH (:Norma {id: id})-[:COORDINA]->(b:Norma)
+                RETURN id, b.id AS base
+            """, {"ids": nuovi})}
+            titoli = grafo().query("""
+                UNWIND $ids AS id
+                MATCH (n:Norma {id: id})
+                WHERE toLower(n.titolo) CONTAINS 'testo coordinato'
+                RETURN n.id AS id, n.titolo AS titolo
+            """, {"ids": [i for i in nuovi if i not in archi]})
+            cerca = []
+            for t in titoli:
+                m = RE_COORDINATO.search(t["titolo"] or "")
+                if m:
+                    cerca.append({"id": t["id"], "tipo": re.sub(r"\s+", " ", m.group(1).lower()),
+                                  "anno": int(m.group(2)), "numero": m.group(3)})
+            trovate = {}
+            if cerca:
+                # L'id piu' corto: le schede doppie portano un suffisso
+                # ("L-17-1917~17148777") e l'originale e' quella senza.
+                trovate = {r["id"]: r["base"] for r in grafo().query("""
+                    UNWIND $cerca AS k
+                    MATCH (b:Norma)
+                    WHERE toLower(trim(b.tipo)) = k.tipo AND toString(b.numero) = k.numero
+                      AND b.anno = k.anno AND b.id <> k.id
+                    WITH k, b ORDER BY size(b.id), b.id
+                    RETURN k.id AS id, collect(b.id)[0] AS base
+                """, {"cerca": cerca})}
+        except Exception:
+            return {}
+        trovate.update(archi)
+        for i in nuovi:
+            _BASI[i] = trovate.get(i)
+    return {i: _BASI[i] for i in ids if _BASI.get(i)}
+
+
+# Le origini degli archi che 22_atti_gemelli.py copia da un gemello all'altro.
+# Portano `attoCitato` e `articoloCitato`, cio' che il comma nomina davvero.
+ORIGINI_GEMELLI = ("coordinato", "ratifica")
+_GEMELLI = {}
+
+
+def _gemelli(ids):
+    """{id: [gemelli]}: il testo coordinato e la legge che coordina, il decreto e
+    la sua ratifica, nei due sensi. Li dicono gli archi COORDINA e RATIFICA; per
+    un coordinato senza arco, il titolo (vedi _basi)."""
+    nuovi = [i for i in ids if i not in _GEMELLI]
+    if nuovi:
+        try:
+            trovati = {r["id"]: set(r["gemelli"]) for r in grafo().query("""
+                UNWIND $ids AS id
+                MATCH (:Norma {id: id})-[:COORDINA|RATIFICA]-(g:Norma)
+                RETURN id, collect(DISTINCT g.id) AS gemelli
+            """, {"ids": nuovi})}
+        except Exception:
+            return {}
+        for i, base in _basi(nuovi).items():
+            trovati.setdefault(i, set()).add(base)
+        for i in nuovi:
+            _GEMELLI[i] = sorted(trovati.get(i, ()))
+    return {i: _GEMELLI[i] for i in ids if _GEMELLI.get(i)}
+
+
 def _novelle(righe):
     """Annota quali risultati sono citati da atti SUCCESSIVI.
 
@@ -799,32 +901,47 @@ def _novelle(righe):
     2022 - 35 anni invece di 40, scadenza 2025 invece di 2026 - pur avendo la
     novella al terzo posto fra i risultati che aveva sotto gli occhi.
 
+    Per un testo coordinato si guarda anche lo stesso articolo della legge che
+    coordina (vedi RE_COORDINATO): le modifiche posteriori al coordinato citano
+    quella.
+
     Si calcola sui soli risultati finali, non sui candidati: una query sola.
     """
-    chiavi = [{"n": r["normaId"], "a": str(r.get("articolo"))}
+    chiavi = [{"n": r["normaId"], "b": r["normaId"], "a": str(r.get("articolo"))}
               for r in righe if r.get("normaId") and r.get("articolo")]
     if not chiavi:
         return righe
+    basi = _basi({k["n"] for k in chiavi})
+    chiavi += [{**k, "b": basi[k["n"]]} for k in chiavi if k["n"] in basi]
     try:
         trovate = grafo().query("""
             UNWIND $chiavi AS k
-            MATCH (n:Norma {id: k.n})-[:HA_ARTICOLO]->(a:Articolo {numero: k.a})
-            MATCH (c:Comma)-[:CITA_ARTICOLO]->(a)
+            // n da' la data da superare, b l'atto di cui si cercano le novelle:
+            // lo stesso, salvo che n sia un testo coordinato.
+            MATCH (n:Norma {id: k.n})
+            MATCH (b:Norma {id: k.b})-[:HA_ARTICOLO]->(a:Articolo {numero: k.a})
+            MATCH (c:Comma)-[r:CITA_ARTICOLO]->(a)
             MATCH (dopo:Norma)-[:HA_ARTICOLO]->(artDopo:Articolo)-[:HA_COMMA]->(c)
-            WHERE dopo.anno > n.anno
+            WHERE dopo.anno > n.anno AND dopo.id <> k.b
+            // L'atto e l'articolo che il comma nomina: quelli dell'arco, se
+            // l'ha copiato 22_atti_gemelli.py da un gemello, altrimenti b.
+            OPTIONAL MATCH (nominato:Norma {id: r.attoCitato})
             // Gli spareggi servono: senza, fra due commi dello stesso atto
             // decideva l'ordine fisico dei dati, e lo stesso articolo portava
             // il comma 1 su Aura e il comma 2 sulla copia su EC2 (22/09).
-            WITH k, n, dopo, artDopo, c
+            WITH k, b, dopo, artDopo, c,
+                 coalesce(nominato.numero, b.numero) AS numeroAtto,
+                 coalesce(nominato.titolo, b.titolo) AS titoloAtto,
+                 coalesce(r.articoloCitato, k.a) AS articoloNominato
             ORDER BY coalesce(artDopo.ordine, 0), coalesce(c.ordine, 0), c.id
-            WITH k, n, dopo, collect({articolo: artDopo.numero, comma: c.numero,
-                                      testo: c.testo,
-                                      formula: c.testo =~ $riscrittura}) AS commi
+            WITH k, dopo, collect({articolo: artDopo.numero, comma: c.numero,
+                                   testo: c.testo, numeroAtto: numeroAtto,
+                                   titoloAtto: titoloAtto, articoloNominato: articoloNominato,
+                                   formula: c.testo =~ $riscrittura}) AS commi
             // Il testo si spedisce solo per i commi con la formula, che vanno
             // controllati uno per uno (_riscrive), e per il primo, che fa da
             // voce se nessuno riscrive davvero.
-            RETURN k.n AS norma, k.a AS articolo, n.numero AS numeroAtto,
-                   n.titolo AS titoloAtto, dopo.id AS dopo, dopo.anno AS anno,
+            RETURN k.n AS norma, k.a AS articolo, dopo.id AS dopo, dopo.anno AS anno,
                    toString(dopo.data) AS data,
                    [x IN commi WHERE x.formula][..20] AS candidati, commi[0] AS primo
         """, {"chiavi": chiavi, "riscrittura": RISCRITTURA})
@@ -839,17 +956,35 @@ def _novelle(righe):
     # modello.
     per_articolo = {}
     for t in trovate:
-        voce = next(({**x, "riscrive": True} for x in t["candidati"]
-                     if _riscrive(x["testo"], t["numeroAtto"], t["titoloAtto"], t["articolo"])),
-                    {**t["primo"], "riscrive": False})
+        riscrivono = [{**x, "riscrive": True} for x in t["candidati"]
+                      if _riscrive(x["testo"], x["numeroAtto"], x["titoloAtto"], x["articoloNominato"])]
+        voce = riscrivono[0] if riscrivono else {**t["primo"], "riscrive": False}
+        # Gli altri commi dello STESSO atto che riscrivono quell'articolo.
+        # L'art. 11 della L-80/2022 ne ha tre sull'art. 44: il comma 1 cambia la
+        # convocazione, il comma 2 il n. 11) del comma 3 - toglie "con esclusione
+        # dell'approvazione del bilancio" - e il 3 aggiunge il 3-bis. Si mostrava
+        # solo il primo, e alla domanda sull'assemblea totalitaria l'agente ha
+        # scritto che nessuna modifica toccava il n. 11): il 06/10 l'ha detto
+        # tre volte di seguito, e nessuna era vera.
+        altri = [{"articolo": x["articolo"], "comma": x["comma"], "testo": x["testo"]}
+                 for x in riscrivono[1:1 + ALTRI_COMMI]]
         per_articolo.setdefault((t["norma"], t["articolo"]), []).append((
             # A parita' d'anno, l'atto piu' recente: DL-46 e DL-57 del 2021 si
             # scambiavano il terzo posto a seconda del database.
             (voce["riscrive"], t["anno"] or 0, t["data"] or "", t["dopo"]),
             {"norma": t["dopo"], "anno": t["anno"], "articolo": voce["articolo"],
-             "comma": voce["comma"], "testo": voce["testo"], "riscrive": voce["riscrive"]}))
-    mappa = {chiave: [v for _, v in sorted(voci, key=lambda x: x[0], reverse=True)[:3]]
-             for chiave, voci in per_articolo.items()}
+             "comma": voce["comma"], "testo": voce["testo"], "riscrive": voce["riscrive"],
+             "altri": altri}))
+    # Un atto una volta sola: se cita sia il coordinato sia la legge che
+    # coordina, le due voci direbbero la stessa cosa.
+    mappa = {}
+    for chiave, voci in per_articolo.items():
+        viste, scelte = set(), []
+        for _, v in sorted(voci, key=lambda x: x[0], reverse=True):
+            if v["norma"] not in viste:
+                viste.add(v["norma"])
+                scelte.append(v)
+        mappa[chiave] = scelte[:3]
     for r in righe:
         novelle = mappa.get((r.get("normaId"), str(r.get("articolo"))))
         if novelle:
@@ -863,9 +998,7 @@ def _novelle(righe):
             # solo questo campo pesava 2.369 caratteri. Il testo serve (senza,
             # il modello citava il passo scaduto pur avendo il riferimento),
             # ma non serve tutto, e non servono tutte.
-            r["citatoDaAttiSuccessivi"] = [
-                {**n, "testo": _taglia(_senza_firma(n["testo"]), 600)}
-                for n in novelle[:NOVELLE_MOSTRATE]]
+            r["citatoDaAttiSuccessivi"] = [_voce_novella(n) for n in novelle[:NOVELLE_MOSTRATE]]
     return righe
 
 
@@ -878,6 +1011,17 @@ RE_FIRMA_ATTO = re.compile(r"\s*Dat[oa] dalla Nostra Residenza\b.*$", re.S)
 
 def _senza_firma(testo):
     return RE_FIRMA_ATTO.sub("", testo or "")
+
+
+def _voce_novella(n):
+    """Una novella come la vede il modello: il comma principale e, accorciati, gli
+    altri commi dello stesso atto che riscrivono quell'articolo."""
+    voce = {k: v for k, v in n.items() if k != "altri"}
+    voce["testo"] = _taglia(_senza_firma(n["testo"]), 600)
+    if n.get("altri"):
+        voce["altriCommiCheRiscrivono"] = [
+            {**a, "testo": _taglia(_senza_firma(a["testo"]), 350)} for a in n["altri"]]
+    return voce
 
 
 def _compatta(righe):
@@ -932,13 +1076,16 @@ def _testo_aggiornato_in(righe):
             UNWIND $chiavi AS k
             MATCH (:Norma {id: k.n})-[:HA_ARTICOLO]->(:Articolo {numero: k.a})
                   -[:HA_COMMA]->(:Comma)-[r:CITA_ARTICOLO]->(b:Articolo)
-            WHERE r.origine IS NOT NULL AND b.fonteTesto IS NOT NULL
+            // Gli archi copiati fra atti gemelli non dicono dove sta il testo:
+            // dicono che il comma modifica anche il gemello.
+            WHERE r.origine IS NOT NULL AND NOT r.origine IN $gemelli
+              AND b.fonteTesto IS NOT NULL
             MATCH (m:Norma)-[:HA_ARTICOLO]->(b)
             WHERE m.id <> k.n
             WITH k, collect(DISTINCT {normaId: m.id, articolo: b.numero,
                                       testoCoordinatoAl: b.testoAggiornatoAl})[..5] AS dove
             RETURN k.n AS norma, k.a AS articolo, dove
-        """, {"chiavi": chiavi})
+        """, {"chiavi": chiavi, "gemelli": list(ORIGINI_GEMELLI)})
     except Exception:
         return righe
     mappa = {(t["norma"], t["articolo"]): t["dove"] for t in trovate}
@@ -1012,19 +1159,29 @@ def _atti_novellati(righe):
     ids = sorted({r["normaId"] for r in righe if r.get("normaId")})
     if not ids:
         return righe
+    # Un testo coordinato risponde anche delle novelle della legge che coordina
+    # (vedi RE_COORDINATO): la coppia (id, b) dice di chi si cercano.
+    basi = _basi(ids)
+    coppie = [{"id": i, "b": i} for i in ids] + [{"id": i, "b": b} for i, b in basi.items()]
     try:
         trovate = grafo().query("""
-            UNWIND $ids AS id
-            MATCH (n:Norma {id: id})-[:HA_ARTICOLO]->(a:Articolo)
-            MATCH (c:Comma)-[:CITA_ARTICOLO]->(a)
+            UNWIND $coppie AS p
+            MATCH (n:Norma {id: p.id})
+            MATCH (b:Norma {id: p.b})-[:HA_ARTICOLO]->(a:Articolo)
+            MATCH (c:Comma)-[r:CITA_ARTICOLO]->(a)
             WHERE c.testo =~ $riscrittura
             MATCH (dopo:Norma)-[:HA_ARTICOLO]->(:Articolo)-[:HA_COMMA]->(c)
-            WHERE dopo.anno > n.anno AND dopo.id <> n.id
-            WITH id, n, dopo, c, collect(a.numero) AS citati
-            RETURN id, n.numero AS numeroAtto, n.titolo AS titoloAtto,
-                   dopo.id AS dopo, dopo.anno AS anno, toString(dopo.data) AS data,
+            WHERE dopo.anno > n.anno AND dopo.id <> n.id AND dopo.id <> b.id
+            // Come in _novelle: l'arco copiato da un gemello dice quale atto e
+            // quale articolo il comma nomina davvero.
+            OPTIONAL MATCH (nominato:Norma {id: r.attoCitato})
+            WITH p, dopo, c, collect({numero: a.numero,
+                                      numeroAtto: coalesce(nominato.numero, b.numero),
+                                      titoloAtto: coalesce(nominato.titolo, b.titolo),
+                                      articoloNominato: coalesce(r.articoloCitato, a.numero)}) AS citati
+            RETURN p.id AS id, dopo.id AS dopo, dopo.anno AS anno, toString(dopo.data) AS data,
                    dopo.titolo AS titolo, c.testo AS testo, citati
-        """, {"ids": ids, "riscrittura": RISCRITTURA})
+        """, {"coppie": coppie, "riscrittura": RISCRITTURA})
     except Exception:
         return righe
     # Gli `articoli` sono quelli riscritti, non tutti quelli che il novellante
@@ -1032,8 +1189,9 @@ def _atti_novellati(righe):
     # articolo che nessuno aveva cambiato (vedi _riscrive).
     per_atto = {}
     for t in trovate:
-        riscritti = [a for a in t["citati"]
-                     if _riscrive(t["testo"], t["numeroAtto"], t["titoloAtto"], a)]
+        riscritti = list(dict.fromkeys(
+            x["numero"] for x in t["citati"]
+            if _riscrive(t["testo"], x["numeroAtto"], x["titoloAtto"], x["articoloNominato"])))
         if not riscritti:
             continue
         voce = per_atto.setdefault(t["id"], {}).setdefault(t["dopo"], {
@@ -1100,6 +1258,138 @@ def _piu_recenti(righe):
                     "comma": recente.get("comma"),
                     "testo": _taglia(recente.get("testo"), 400),
                 }
+    return righe
+
+
+# Le disposizioni posteriori sulla stessa materia che nessun arco lega
+# all'articolo. _novelle() vede chi nomina l'articolo; non vede la legge nuova
+# che detta la regola di oggi senza nominarlo. Il caso del 06/10: la L-132/2023
+# art. 37 fa esaminare dal giudice gli atti non registrati, richiama la
+# L-99/2003 senza articolo, e l'agente ha scritto per tre turni che serviva
+# registrarli, leggendo l'art. 59 della L-85/1981.
+#
+# Si cercano i commi di atti successivi vicini per significato ai commi
+# dell'articolo, e si tengono:
+#   - quelli che richiamano l'atto, la legge che coordina o un atto che ha
+#     citato l'articolo dopo (chi l'ha modificato, abrogato, derogato), dal piu'
+#     recente: e' la famiglia della disposizione. Per l'art. 59 la L-132/2023
+#     richiama la L-99/2003, che l'aveva abrogato;
+#   - fuori dalla famiglia, il solo piu' simile, e solo se lo e' molto.
+# La sola somiglianza non bastava: misurato sull'art. 59, la L-132/2023 era
+# settima fra i commi posteriori piu' vicini (0,895), sotto decreti sul
+# registro e statuti di societa' pubbliche che ripetono le stesse clausole;
+# fra quelli della famiglia era prima. Le soglie vengono dalle stesse misure:
+# coppie vere fra 0,886 e 0,971, il rumore della famiglia sotto 0,872.
+SOGLIA_POSTERIORI = 0.86
+SOGLIA_SIMILE = 0.91
+VICINI_POSTERIORI = 100
+ANCORE_POSTERIORI = 12
+
+Q_POSTERIORI = """
+UNWIND $chiavi AS k
+MATCH (n:Norma {id: k.n})-[:HA_ARTICOLO]->(a:Articolo {numero: k.a})
+OPTIONAL MATCH (:Norma {id: k.b})-[:HA_ARTICOLO]->(ab:Articolo {numero: k.a})
+CALL {
+    WITH n, a, ab
+    UNWIND [x IN [a, ab] WHERE x IS NOT NULL] AS art
+    OPTIONAL MATCH (art)<-[:CITA_ARTICOLO]-(:Comma)<-[:HA_COMMA]-(:Articolo)<-[:HA_ARTICOLO]-(m:Norma)
+    WHERE m.anno > n.anno
+    RETURN collect(DISTINCT m.id) AS citanti
+}
+WITH k, n, a, [k.n, k.b] + k.gemelli + citanti AS famiglia
+MATCH (a)-[:HA_COMMA]->(x:Comma)
+WHERE x.embedding IS NOT NULL AND (k.c IS NULL OR x.numero = k.c)
+WITH k, n, famiglia, collect(x)[..$ancore] AS ancore
+UNWIND ancore AS x
+CALL db.index.vector.queryNodes($indice, $vicini, x.embedding) YIELD node, score
+WITH k, n, famiglia, node, score WHERE score >= $soglia
+MATCH (dopo:Norma)-[:HA_ARTICOLO]->(ad:Articolo)-[:HA_COMMA]->(node)
+WHERE dopo.anno > n.anno AND NOT dopo.id IN famiglia
+WITH k, famiglia, dopo, ad, node, max(score) AS sim
+// Un comma che rinvia a un ALTRO articolo dello stesso atto e' una modifica o
+// un richiamo di quello, non la disciplina che prende il posto di questo.
+WHERE NOT EXISTS { MATCH (node)-[:CITA_ARTICOLO]->(:Articolo)<-[:HA_ARTICOLO]-(t:Norma)
+                   WHERE t.id IN [k.n, k.b] + k.gemelli }
+WITH k, dopo, ad, node, sim,
+     EXISTS { MATCH (node)-[:CITA]->(t:Norma) WHERE t.id IN famiglia } AS richiama
+WHERE richiama OR sim >= $simile
+RETURN k.i AS i, dopo.id AS norma, dopo.anno AS anno, toString(dopo.data) AS data,
+       dopo.titolo AS titolo, ad.numero AS articolo, node.numero AS comma,
+       left(node.testo, $letti) AS testo, sim, richiama
+"""
+
+
+def _posteriori(righe, per_riga=2, tetto=4, ancore=ANCORE_POSTERIORI):
+    """Annota `disposizioniPosteriori`: gli atti successivi che con ogni
+    probabilita' parlano della stessa disciplina (vedi Q_POSTERIORI).
+
+    Al piu' `per_riga` voci per risultato e `tetto` in tutto, e un atto una
+    volta sola: e' un avviso da aprire, non un secondo elenco di risultati.
+    Gli atti gia' fra i risultati non si ripetono, li si vede comunque.
+    """
+    chiavi = [{"i": i, "n": r["normaId"], "b": r["normaId"], "a": str(r["articolo"]),
+               "c": None if r.get("comma") is None else str(r["comma"])}
+              for i, r in enumerate(righe) if r.get("normaId") and r.get("articolo")]
+    if not chiavi:
+        return righe
+    basi = _basi({k["n"] for k in chiavi})
+    gemelli = _gemelli({k["n"] for k in chiavi})
+    for k in chiavi:
+        k["b"] = basi.get(k["n"], k["n"])
+        k["gemelli"] = gemelli.get(k["n"], [])
+    try:
+        trovate = grafo().query(Q_POSTERIORI, {
+            "chiavi": chiavi, "indice": INDICE_VETTORIALE, "vicini": VICINI_POSTERIORI,
+            "ancore": ancore, "soglia": SOGLIA_POSTERIORI, "simile": SOGLIA_SIMILE,
+            "letti": LETTI})
+    except Exception:
+        return righe
+    # Il testo coordinato di quest'atto non e' una disciplina posteriore: e'
+    # lo stesso atto aggiornato. Leggendo la L-47-2006 compariva il DD-46-2011.
+    coordinati = _basi({t["norma"] for t in trovate})
+    proprio = {k["i"]: {k["n"], k["b"]} for k in chiavi}
+    per_riga_trovate = {}
+    for t in trovate:
+        if coordinati.get(t["norma"]) in proprio[t["i"]]:
+            continue
+        per_riga_trovate.setdefault(t["i"], []).append(t)
+    presenti = {r.get("normaId") for r in righe}
+    mostrati = set()
+    for i, r in enumerate(righe):
+        if len(mostrati) >= tetto:
+            break
+        # Un comma per atto (il piu' vicino), e un testo una volta sola: il
+        # DD-55-2017 ripubblica il DD-127-2016, e tenerli entrambi sprecava
+        # un posto. Fra due testi uguali resta il piu' recente.
+        migliori = {}
+        for t in per_riga_trovate.get(i, []):
+            if t["norma"] in presenti or t["norma"] in mostrati:
+                continue
+            gia = migliori.get(t["norma"])
+            if gia is None or (t["richiama"], t["sim"]) > (gia["richiama"], gia["sim"]):
+                migliori[t["norma"]] = t
+        per_testo = {}
+        for t in migliori.values():
+            f = _firma(t["testo"])
+            if f not in per_testo or (t["anno"] or 0, t["data"] or "") > (
+                    per_testo[f]["anno"] or 0, per_testo[f]["data"] or ""):
+                per_testo[f] = t
+        candidati = list(per_testo.values())
+        recenti = lambda t: (t["anno"] or 0, t["data"] or "", t["norma"])
+        famiglia = sorted((t for t in candidati if t["richiama"]), key=recenti, reverse=True)
+        simili = sorted((t for t in candidati if not t["richiama"]),
+                        key=lambda t: t["sim"], reverse=True)
+        scelte = (famiglia[:max(per_riga - 1, 1)] + simili[:1] + famiglia[max(per_riga - 1, 1):])
+        scelte = sorted(scelte[:min(per_riga, tetto - len(mostrati))], key=recenti, reverse=True)
+        if scelte:
+            mostrati.update(t["norma"] for t in scelte)
+            r["disposizioniPosteriori"] = [
+                {"norma": t["norma"], "anno": t["anno"],
+                 "titolo": _taglia(t["titolo"], TITOLO_IN_ELENCO),
+                 "articolo": t["articolo"], "comma": t["comma"],
+                 "testo": _taglia(_senza_firma(t["testo"]), 400),
+                 "richiamaQuestaNorma": t["richiama"]}
+                for t in scelte]
     return righe
 
 
@@ -1349,6 +1639,14 @@ def cerca_testo(query: str, limite: int = 4, dal_anno: int | None = None,
     se' il TESTO della modifica, gia' pronto da leggere. Confrontalo con il
     passo principale ed esponi la versione vigente, dicendo cosa e' cambiato.
 
+    Il campo `disposizioniPosteriori` elenca, dal piu' recente, commi di atti
+    SUCCESSIVI vicini per contenuto a quel passo, anche quando non lo citano: la
+    legge nuova che detta la regola di oggi senza nominare la vecchia. Con
+    `richiamaQuestaNorma: true` richiamano l'atto o chi l'ha modificato, e quasi
+    sempre lo integrano o lo superano; senza, il testo e' molto simile (una
+    versione piu' recente della stessa regola, o una clausola ripetuta in uno
+    statuto). Leggi quelli che riguardano la domanda prima di dire cosa vale oggi.
+
     Il campo `ancheIn` elenca altri atti che riportano lo stesso identico testo:
     tariffari riemessi ogni anno, decreti che ne ripubblicano altri, versioni
     consolidate. Compaiono una volta sola per non sprecare i posti utili, ma
@@ -1416,8 +1714,11 @@ def cerca_testo(query: str, limite: int = 4, dal_anno: int | None = None,
     if righe:
         # Leggono atto e articolo e scrivono ciascuno un campo suo: possono
         # girare insieme. _piu_recenti confronta le righe gia' in mano, dopo.
+        # _posteriori con meno ancore che in leggi_articolo: qui conta il
+        # comma trovato, e una ricerca ha fino a dieci risultati da coprire.
         for futuro in [_QUERY.submit(f, righe) for f in
-                       (_novelle, _testo_aggiornato_in, _bersagli_abrogati, _atti_novellati)]:
+                       (_novelle, _testo_aggiornato_in, _bersagli_abrogati, _atti_novellati,
+                        lambda righe: _posteriori(righe, ancore=4))]:
             futuro.result()
         righe = _piu_recenti(righe)
 
@@ -1450,6 +1751,9 @@ def leggi_articolo(norma_id: str, numero: str, comma: str | None = None,
     atto posteriore ha un articolo con la stessa rubrica, cioe' quasi sempre la
     stessa disposizione riscritta). Se uno dei due compare, la catena non
     finisce qui: aprilo, perche' il testo che stai leggendo non e' l'ultimo.
+    `disposizioniPosteriori` elenca atti successivi vicini per contenuto anche
+    se non citano l'articolo (vedi cerca_testo): la disciplina nuova che lo
+    supera senza nominarlo sta spesso li'.
 
     Args:
         norma_id: id della norma, es. "L-87-2026"
@@ -1505,10 +1809,14 @@ def leggi_articolo(norma_id: str, numero: str, comma: str | None = None,
     if "errore" in porzione:
         return porzione
     righe[0].update(porzione)
+    riga["comma"] = comma
+    posteriori = _QUERY.submit(_posteriori, [riga], 3, 3)
     _novelle([riga])
     _bersagli_abrogati([riga])
     _testo_aggiornato_in([riga])
-    for marchio in ("citatoDaAttiSuccessivi", "passiIntrodottiOraAbrogati", "testoAggiornatoIn"):
+    posteriori.result()
+    for marchio in ("citatoDaAttiSuccessivi", "passiIntrodottiOraAbrogati", "testoAggiornatoIn",
+                    "disposizioniPosteriori"):
         if riga.get(marchio):
             righe[0][marchio] = riga[marchio]
 
@@ -1851,25 +2159,40 @@ def citazioni_da(norma_id: str) -> dict:
 
 
 @tool
-def chi_cita(norma_id: str) -> dict:
+def chi_cita(norma_id: str, dal_anno: int | None = None) -> dict:
     """Restituisce le norme dell'archivio che richiamano quella indicata.
 
-    Serve per capire l'impatto di una norma o chi ne dipende. NON serve a
-    sapere se un articolo e' stato modificato: per quello bastano i marchi di
-    leggi_articolo (citatoDaAttiSuccessivi, versionePiuRecente,
-    testoCoordinatoAl). Su un atto molto citato, come un codice, restituisce
-    rinvii di ogni genere e nessuno riguarda per forza l'articolo che ti serve.
+    Serve per capire l'impatto di una norma o chi ne dipende, e per sapere
+    CHI L'HA TOCCATA DOPO: i marchi dei risultati (citatoDaAttiSuccessivi)
+    vedono solo i rinvii a un articolo preciso, e non vedono una clausola
+    generale di abrogazione ne' una deroga che nomina l'atto senza l'articolo
+    ("la Legge 99/2003 e successive modifiche"). Su una norma di qualche anno
+    fa, per la disciplina di oggi, chiamalo con `dal_anno`: elenca gli atti
+    posteriori dal piu' recente, ciascuno con gli articoli che la richiamano.
+    Senza `dal_anno` l'elenco e' per numero di rinvii, e su un atto molto citato
+    (un codice) i primi venti sono rinvii di ogni genere: quelli recenti restano
+    fuori.
+
+    Per un testo coordinato ("Testo coordinato della Legge ...") elenca anche
+    gli atti che richiamano la legge coordinata, e per un decreto quelli che
+    richiamano la sua ratifica (e viceversa): chi modifica dopo ne nomina uno
+    solo.
 
     Args:
         norma_id: id della norma, es. "L-140-2017"
+        dal_anno: opzionale, solo gli atti di quell'anno o successivi, dal piu'
+            recente. Es. dal_anno=2012 su un testo del 2011.
     """
+    gemelli = _gemelli([norma_id]).get(norma_id, [])
     righe = grafo().query("""
-        MATCH (src:Norma)-[:HA_ARTICOLO]->(art:Articolo)-[:HA_COMMA]->(cm:Comma)-[r:CITA]->(:Norma {id: $norma_id})
+        MATCH (src:Norma)-[:HA_ARTICOLO]->(art:Articolo)-[:HA_COMMA]->(cm:Comma)-[r:CITA]->(bersaglio:Norma)
+        WHERE bersaglio.id IN $bersagli AND ($dal_anno IS NULL OR src.anno >= $dal_anno)
         WITH src, collect(DISTINCT 'art.' + art.numero) AS articoli, count(r) AS volte
-        RETURN src.id AS norma, src.titolo AS titolo, articoli[..6] AS articoli, volte,
-               src.urlDocumento AS urlDocumento
-        ORDER BY volte DESC LIMIT 20
-    """, {"norma_id": norma_id})
+        RETURN src.id AS norma, src.titolo AS titolo, src.anno AS anno,
+               articoli[..6] AS articoli, volte, src.urlDocumento AS urlDocumento
+        ORDER BY CASE WHEN $dal_anno IS NULL THEN 0 ELSE coalesce(src.anno, 0) END DESC,
+                 volte DESC LIMIT 20
+    """, {"bersagli": [norma_id] + gemelli, "dal_anno": dal_anno})
     return {"citataDa": righe, "quante": len(righe)}
 
 
